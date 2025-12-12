@@ -197,8 +197,15 @@ class AnimalType:
     WORM = "worm"
     ALIEN = "alien"
     METROID = "metroid"  # Floating brain-like creature
+    SPIDER = "spider"    # 8-legged crawlers
+    DINOSAUR = "dinosaur"  # Big bipeds and quadrupeds
+    CROC = "croc"        # Alligators/crocodiles
+    HOPPER = "hopper"    # Rabbits, frogs, kangaroos
     
-    ALL = [INSECT, BIRD, FISH, MAMMAL, REPTILE, AMPHIBIAN, JELLYFISH, WORM, ALIEN, METROID]
+    ALL = [INSECT, BIRD, FISH, MAMMAL, REPTILE, AMPHIBIAN, JELLYFISH, WORM, ALIEN, METROID, SPIDER, DINOSAUR, CROC, HOPPER]
+    
+    # Ground animals for weighted spawning
+    GROUND = [MAMMAL, REPTILE, WORM, INSECT, SPIDER, DINOSAUR, CROC, HOPPER]
 
 
 @dataclass
@@ -372,6 +379,14 @@ class AnimalDNA:
             dna = cls._create_alien(rng)
         elif animal_type == AnimalType.METROID:
             dna = cls._create_metroid(rng)
+        elif animal_type == AnimalType.SPIDER:
+            dna = cls._create_spider(rng)
+        elif animal_type == AnimalType.DINOSAUR:
+            dna = cls._create_dinosaur(rng)
+        elif animal_type == AnimalType.CROC:
+            dna = cls._create_croc(rng)
+        elif animal_type == AnimalType.HOPPER:
+            dna = cls._create_hopper(rng)
         else:
             dna = cls._create_mammal(rng)
         
@@ -533,8 +548,9 @@ class AnimalDNA:
         color = _hsv_to_rgb(hue, 0.2 + rng.random() * 0.4, 0.3 + rng.random() * 0.5)
         
         # Size category: 0=small, 1=medium, 2=large, 3=huge
-        size_category = rng.choice([0, 0, 1, 1, 1, 2, 2, 3])
-        size_scales = [0.4, 0.8, 1.5, 3.0]
+        # Weighted toward bigger animals
+        size_category = rng.choice([0, 1, 1, 2, 2, 2, 3, 3])
+        size_scales = [0.5, 1.0, 2.0, 4.0]  # Bigger overall
         size_mult = size_scales[size_category] * (0.8 + rng.random() * 0.4)
         
         dna = cls()
@@ -908,6 +924,307 @@ class AnimalDNA:
         dna.movement_speed = 0.4 + rng.random() * 0.4
         dna.animation_speed = 0.6 + rng.random() * 0.4  # Slow pulsing
         dna.group_tendency = 0.3 + rng.random() * 0.3  # Sometimes swarm
+        
+        return dna
+    
+    @classmethod
+    def _create_spider(cls, rng: np.random.Generator) -> "AnimalDNA":
+        """Create spider/arachnid DNA - 8 legs, various sizes."""
+        # Dark colors - blacks, browns, some colorful
+        if rng.random() < 0.7:
+            hue = 0.05 + rng.random() * 0.1  # Browns/blacks
+            color = _hsv_to_rgb(hue, 0.3 + rng.random() * 0.3, 0.15 + rng.random() * 0.25)
+        else:
+            hue = rng.random()  # Colorful spider
+            color = _hsv_to_rgb(hue, 0.6, 0.4)
+        
+        # Size - from tiny to tarantula-sized
+        size_mult = 0.3 + rng.random() * 1.2
+        
+        dna = cls()
+        
+        # Cephalothorax (head+body) and abdomen
+        dna.body_segments = [
+            BodySegmentGene(shape="ellipsoid", size=(0.25 * size_mult, 0.15 * size_mult, 0.2 * size_mult), color=color),
+            BodySegmentGene(shape="ellipsoid", size=(0.4 * size_mult, 0.3 * size_mult, 0.35 * size_mult), color=color),
+        ]
+        
+        # 8 long spindly legs
+        leg_length = 0.4 + rng.random() * 0.3
+        dna.limbs = [
+            LimbGene(limb_type="leg", segment_count=3,
+                    segment_lengths=[leg_length * size_mult * 0.4, leg_length * size_mult * 0.35, leg_length * size_mult * 0.25],
+                    segment_widths=[0.025 * size_mult, 0.018 * size_mult, 0.01 * size_mult],
+                    color=color, joint_range=50),
+        ]
+        dna.limb_pairs = 4  # 8 legs total
+        
+        # Multiple eyes
+        eye_count = rng.choice([4, 6, 8])
+        dna.features = [
+            FeatureGene(feature_type="eye", count=eye_count, size=0.03 * size_mult, 
+                       color=(0.1, 0.1, 0.1), position=(0.4, 0.08, 0.08)),
+        ]
+        
+        # Maybe fangs
+        if rng.random() < 0.6:
+            dna.features.append(FeatureGene(
+                feature_type="spike", count=2, size=0.08 * size_mult,
+                color=(0.2, 0.15, 0.1), position=(0.45, -0.05, 0.06)
+            ))
+        
+        dna.movement_type = MovementType.CRAWL
+        dna.ai_behavior = rng.choice([AIBehavior.WANDER, AIBehavior.FLEE])
+        dna.base_scale = size_mult
+        dna.primary_color = color
+        dna.movement_speed = 0.8 + rng.random() * 0.8
+        dna.animation_speed = 1.5 + rng.random() * 1.0
+        
+        return dna
+    
+    @classmethod
+    def _create_dinosaur(cls, rng: np.random.Generator) -> "AnimalDNA":
+        """Create dinosaur DNA - big bipeds or quadrupeds."""
+        # Greens, browns, grays
+        hue = rng.choice([0.1, 0.15, 0.25, 0.3])
+        color = _hsv_to_rgb(hue, 0.35 + rng.random() * 0.3, 0.3 + rng.random() * 0.35)
+        accent = _hsv_to_rgb((hue + 0.1) % 1, 0.5, 0.5)
+        
+        # Always big!
+        size_mult = 2.0 + rng.random() * 3.0  # 2x to 5x scale
+        
+        # Biped (T-rex style) or quadruped (brontosaurus style)
+        is_biped = rng.random() < 0.4
+        
+        dna = cls()
+        
+        if is_biped:
+            # T-rex style - big head, small arms, powerful legs
+            dna.body_segments = [
+                BodySegmentGene(shape="ellipsoid", size=(0.5 * size_mult, 0.35 * size_mult, 0.3 * size_mult), color=color),  # Head
+                BodySegmentGene(shape="ellipsoid", size=(0.9 * size_mult, 0.6 * size_mult, 0.5 * size_mult), color=color),  # Body
+                BodySegmentGene(shape="cone", size=(0.8 * size_mult, 0.3 * size_mult, 0.25 * size_mult), color=color),  # Tail
+            ]
+            
+            dna.limbs = [
+                # Tiny arms
+                LimbGene(limb_type="arm", segment_count=2,
+                        segment_lengths=[0.15 * size_mult, 0.1 * size_mult],
+                        segment_widths=[0.06 * size_mult, 0.04 * size_mult],
+                        color=color),
+                # Powerful legs
+                LimbGene(limb_type="leg", segment_count=2,
+                        segment_lengths=[0.5 * size_mult, 0.4 * size_mult],
+                        segment_widths=[0.15 * size_mult, 0.1 * size_mult],
+                        color=color, joint_range=50),
+            ]
+            dna.limb_pairs = 1
+        else:
+            # Brontosaurus style - long neck, big body, 4 legs
+            neck_length = 0.6 + rng.random() * 0.4
+            dna.body_segments = [
+                BodySegmentGene(shape="ellipsoid", size=(0.25 * size_mult, 0.2 * size_mult, 0.2 * size_mult), color=color),  # Head
+                BodySegmentGene(shape="cylinder", size=(neck_length * size_mult, 0.15 * size_mult, 0.15 * size_mult), color=color),  # Neck
+                BodySegmentGene(shape="ellipsoid", size=(1.2 * size_mult, 0.7 * size_mult, 0.6 * size_mult), color=color),  # Body
+                BodySegmentGene(shape="cone", size=(0.7 * size_mult, 0.2 * size_mult, 0.2 * size_mult), color=color),  # Tail
+            ]
+            
+            dna.limbs = [
+                LimbGene(limb_type="leg", segment_count=2,
+                        segment_lengths=[0.45 * size_mult, 0.35 * size_mult],
+                        segment_widths=[0.12 * size_mult, 0.1 * size_mult],
+                        color=color, joint_range=30),
+            ]
+            dna.limb_pairs = 2
+        
+        dna.features = [
+            FeatureGene(feature_type="eye", count=2, size=0.06 * size_mult, 
+                       color=(0.8, 0.6, 0.1), position=(0.35, 0.12, 0.12)),
+            FeatureGene(feature_type="mouth", count=1, size=0.15 * size_mult,
+                       color=(0.4, 0.2, 0.2), position=(0.45, -0.05, 0.0)),
+        ]
+        
+        # Spines/plates on back
+        if rng.random() < 0.5:
+            dna.features.append(FeatureGene(
+                feature_type="spike", count=4 + rng.integers(0, 6),
+                size=0.12 * size_mult, color=accent, position=(0.0, 0.35, 0.0)
+            ))
+        
+        dna.movement_type = MovementType.WALK
+        dna.ai_behavior = rng.choice([AIBehavior.GRAZE, AIBehavior.WANDER])
+        dna.base_scale = size_mult
+        dna.primary_color = color
+        dna.secondary_color = accent
+        dna.movement_speed = 0.4 + rng.random() * 0.4  # Slow lumbering
+        dna.animation_speed = 0.6 + rng.random() * 0.4
+        
+        return dna
+    
+    @classmethod
+    def _create_croc(cls, rng: np.random.Generator) -> "AnimalDNA":
+        """Create crocodile/alligator DNA - long body, powerful jaws."""
+        # Dark greens and browns
+        hue = 0.2 + rng.random() * 0.15
+        color = _hsv_to_rgb(hue, 0.35 + rng.random() * 0.25, 0.2 + rng.random() * 0.25)
+        belly_color = _hsv_to_rgb(0.1, 0.2, 0.5)  # Lighter belly
+        
+        # Medium to large
+        size_mult = 1.0 + rng.random() * 2.0
+        
+        # Long body with segments
+        body_length = 0.9 + rng.random() * 0.4
+        
+        dna = cls()
+        dna.body_segments = [
+            # Long snout
+            BodySegmentGene(shape="box", size=(0.4 * size_mult, 0.1 * size_mult, 0.12 * size_mult), color=color),
+            # Head
+            BodySegmentGene(shape="ellipsoid", size=(0.25 * size_mult, 0.15 * size_mult, 0.2 * size_mult), color=color),
+            # Body
+            BodySegmentGene(shape="ellipsoid", size=(body_length * size_mult, 0.2 * size_mult, 0.35 * size_mult), color=color),
+            # Tail - long and powerful
+            BodySegmentGene(shape="cone", size=(0.7 * size_mult, 0.15 * size_mult, 0.18 * size_mult), color=color),
+        ]
+        
+        # Short but strong legs
+        dna.limbs = [
+            LimbGene(limb_type="leg", segment_count=2,
+                    segment_lengths=[0.12 * size_mult, 0.1 * size_mult],
+                    segment_widths=[0.06 * size_mult, 0.05 * size_mult],
+                    color=color, joint_range=35),
+        ]
+        dna.limb_pairs = 2
+        
+        dna.features = [
+            FeatureGene(feature_type="eye", count=2, size=0.04 * size_mult,
+                       color=(0.9, 0.7, 0.1), position=(0.3, 0.1, 0.1)),
+            # Teeth visible
+            FeatureGene(feature_type="spike", count=6 + rng.integers(0, 4),
+                       size=0.03 * size_mult, color=(0.9, 0.9, 0.85), position=(0.5, -0.03, 0.05)),
+        ]
+        
+        # Scutes/ridges on back
+        dna.features.append(FeatureGene(
+            feature_type="spike", count=8 + rng.integers(0, 6),
+            size=0.04 * size_mult, color=color, position=(0.0, 0.12, 0.0)
+        ))
+        
+        dna.movement_type = MovementType.CRAWL
+        dna.ai_behavior = rng.choice([AIBehavior.GRAZE, AIBehavior.WANDER])
+        dna.base_scale = size_mult
+        dna.primary_color = color
+        dna.secondary_color = belly_color
+        dna.movement_speed = 0.3 + rng.random() * 0.4
+        dna.animation_speed = 0.8 + rng.random() * 0.4
+        
+        return dna
+    
+    @classmethod
+    def _create_hopper(cls, rng: np.random.Generator) -> "AnimalDNA":
+        """Create hopping creature DNA - rabbits, frogs, kangaroos."""
+        # Variety of colors
+        hopper_type = rng.choice(["rabbit", "frog", "kangaroo"])
+        
+        if hopper_type == "rabbit":
+            hue = 0.08 + rng.random() * 0.08
+            color = _hsv_to_rgb(hue, 0.25 + rng.random() * 0.2, 0.5 + rng.random() * 0.3)
+            size_mult = 0.5 + rng.random() * 0.5
+        elif hopper_type == "frog":
+            hue = 0.25 + rng.random() * 0.15  # Greens
+            if rng.random() < 0.3:  # Poison dart frog
+                hue = rng.random()
+                color = _hsv_to_rgb(hue, 0.8, 0.7)
+            else:
+                color = _hsv_to_rgb(hue, 0.5 + rng.random() * 0.3, 0.4 + rng.random() * 0.3)
+            size_mult = 0.3 + rng.random() * 0.5
+        else:  # kangaroo
+            hue = 0.06 + rng.random() * 0.06
+            color = _hsv_to_rgb(hue, 0.35 + rng.random() * 0.2, 0.4 + rng.random() * 0.3)
+            size_mult = 1.5 + rng.random() * 1.5  # Big!
+        
+        dna = cls()
+        
+        if hopper_type == "frog":
+            # Squat body, big eyes
+            dna.body_segments = [
+                BodySegmentGene(shape="ellipsoid", size=(0.35 * size_mult, 0.25 * size_mult, 0.35 * size_mult), color=color),
+            ]
+            dna.limbs = [
+                # Front legs (short)
+                LimbGene(limb_type="leg", segment_count=2,
+                        segment_lengths=[0.1 * size_mult, 0.08 * size_mult],
+                        segment_widths=[0.04 * size_mult, 0.03 * size_mult],
+                        color=color),
+                # Back legs (long, powerful)
+                LimbGene(limb_type="leg", segment_count=2,
+                        segment_lengths=[0.25 * size_mult, 0.2 * size_mult],
+                        segment_widths=[0.06 * size_mult, 0.04 * size_mult],
+                        color=color, joint_range=60),
+            ]
+            dna.limb_pairs = 1
+            dna.features = [
+                FeatureGene(feature_type="eye", count=2, size=0.08 * size_mult,
+                           color=(0.1, 0.1, 0.1), glow=False, position=(0.25, 0.15, 0.15)),
+            ]
+        elif hopper_type == "rabbit":
+            # Fluffy body, long ears
+            dna.body_segments = [
+                BodySegmentGene(shape="ellipsoid", size=(0.2 * size_mult, 0.15 * size_mult, 0.15 * size_mult), color=color),
+                BodySegmentGene(shape="ellipsoid", size=(0.35 * size_mult, 0.25 * size_mult, 0.25 * size_mult), color=color),
+            ]
+            dna.limbs = [
+                LimbGene(limb_type="leg", segment_count=2,
+                        segment_lengths=[0.12 * size_mult, 0.1 * size_mult],
+                        segment_widths=[0.04 * size_mult, 0.03 * size_mult],
+                        color=color, joint_range=45),
+            ]
+            dna.limb_pairs = 2
+            dna.features = [
+                FeatureGene(feature_type="eye", count=2, size=0.04 * size_mult,
+                           color=(0.1, 0.05, 0.0), position=(0.35, 0.08, 0.08)),
+                # Long ears
+                FeatureGene(feature_type="antenna", count=2, size=0.2 * size_mult,
+                           color=color, position=(0.1, 0.2, 0.06)),
+                # Fluffy tail
+                FeatureGene(feature_type="tail", count=1, size=0.08 * size_mult,
+                           color=(1.0, 1.0, 1.0), position=(-0.4, 0.1, 0.0)),
+            ]
+        else:  # kangaroo
+            # Upright stance, big back legs, tail for balance
+            dna.body_segments = [
+                BodySegmentGene(shape="ellipsoid", size=(0.25 * size_mult, 0.2 * size_mult, 0.2 * size_mult), color=color),
+                BodySegmentGene(shape="ellipsoid", size=(0.5 * size_mult, 0.6 * size_mult, 0.4 * size_mult), color=color),
+            ]
+            dna.limbs = [
+                # Small front arms
+                LimbGene(limb_type="arm", segment_count=2,
+                        segment_lengths=[0.12 * size_mult, 0.1 * size_mult],
+                        segment_widths=[0.04 * size_mult, 0.03 * size_mult],
+                        color=color),
+                # Powerful back legs
+                LimbGene(limb_type="leg", segment_count=2,
+                        segment_lengths=[0.35 * size_mult, 0.3 * size_mult],
+                        segment_widths=[0.1 * size_mult, 0.07 * size_mult],
+                        color=color, joint_range=55),
+            ]
+            dna.limb_pairs = 1
+            dna.features = [
+                FeatureGene(feature_type="eye", count=2, size=0.04 * size_mult,
+                           color=(0.1, 0.05, 0.0), position=(0.35, 0.1, 0.1)),
+                FeatureGene(feature_type="antenna", count=2, size=0.12 * size_mult,
+                           color=color, position=(0.15, 0.2, 0.07)),
+                # Big tail
+                FeatureGene(feature_type="tail", count=1, size=0.5 * size_mult,
+                           color=color, position=(-0.4, -0.1, 0.0)),
+            ]
+        
+        dna.movement_type = MovementType.HOP
+        dna.ai_behavior = rng.choice([AIBehavior.GRAZE, AIBehavior.FLEE, AIBehavior.WANDER])
+        dna.base_scale = size_mult
+        dna.primary_color = color
+        dna.movement_speed = 1.0 + rng.random() * 1.0
+        dna.animation_speed = 1.5 + rng.random() * 1.0
         
         return dna
 

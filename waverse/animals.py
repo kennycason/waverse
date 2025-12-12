@@ -57,16 +57,27 @@ class AnimalInstance:
         speed = self.dna.movement_speed * 0.5
         
         if self.dna.movement_type == MovementType.FLY:
-            # Flying - move in 3D with more active movement
-            fly_speed = speed * 2.0  # Flying is faster!
-            self.x += self.vx * fly_speed * dt
-            self.y += self.vy * fly_speed * dt * 0.5  # Less vertical movement
-            self.z += self.vz * fly_speed * dt
-            # Keep above ground with some height variation
+            # Flying - move in 3D with swooping, circling paths
+            fly_speed = speed * 2.5  # Flying is fast!
+            
+            # Add swooping/circling behavior
+            swoop = math.sin(self.anim_time * 0.8) * 0.3
+            circle = math.cos(self.anim_time * 0.5) * 0.2
+            
+            self.x += (self.vx + circle) * fly_speed * dt
+            self.y += (self.vy + swoop * 0.5) * fly_speed * dt
+            self.z += (self.vz - circle) * fly_speed * dt
+            
+            # Keep above ground with dynamic flight height
             if get_ground_height:
                 ground = get_ground_height(self.x, self.z)
-                min_height = ground + 4 + self.dna.base_scale * 2
+                # Vary flight height based on animation
+                base_height = 6 + self.dna.base_scale * 3
+                height_variation = math.sin(self.anim_time * 0.3) * 4
+                min_height = ground + base_height + height_variation
                 self.y = max(self.y, min_height)
+                # Also cap max height
+                self.y = min(self.y, ground + 50)
         elif self.dna.movement_type == MovementType.SWIM:
             # Swimming - move in water
             self.x += self.vx * speed * dt
@@ -79,8 +90,20 @@ class AnimalInstance:
             self.z += self.vz * speed * 0.3 * dt
             # Gentle bobbing
             self.y = 0.5 + math.sin(self.anim_time * 0.5) * 0.2
+        elif self.dna.movement_type == MovementType.HOP:
+            # Hopping movement - parabolic jumps
+            hop_speed = speed * 1.5
+            self.x += self.vx * hop_speed * dt
+            self.z += self.vz * hop_speed * dt
+            
+            if get_ground_height:
+                ground = get_ground_height(self.x, self.z)
+                # Create hopping arc - sin wave offset from ground
+                hop_phase = (self.anim_time * self.dna.animation_speed * 3) % (2 * math.pi)
+                hop_height = max(0, math.sin(hop_phase)) * (0.5 + self.dna.base_scale * 0.5)
+                self.y = ground + hop_height
         else:
-            # Ground movement
+            # Ground movement (walking, crawling)
             self.x += self.vx * speed * dt
             self.z += self.vz * speed * dt
             if get_ground_height:
@@ -320,9 +343,15 @@ class AnimalRenderer:
             
             # Body segment animation (breathing, undulation)
             if dna.movement_type == MovementType.CRAWL:
-                # Undulating motion for crawling
-                wave = math.sin(anim_t * 3 + i * 0.8) * 0.1
-                glTranslatef(0, wave * 0.2, wave)
+                # Strong side-to-side undulation for snakes/worms
+                wave_freq = 4.0  # Speed of wave
+                wave_amp = 0.15 * (1 + i * 0.1)  # Amplitude increases toward tail
+                phase_offset = i * 1.2  # Phase difference between segments
+                
+                side_wave = math.sin(anim_t * wave_freq + phase_offset) * wave_amp
+                # Slight vertical following ground contour
+                vert_wave = abs(math.sin(anim_t * wave_freq * 0.5 + phase_offset)) * 0.05
+                glTranslatef(0, vert_wave, side_wave)
             
             AnimalRenderer._draw_segment(seg)
             offset += seg.size[0] * 0.7
@@ -670,32 +699,47 @@ class AnimalManager:
             
             # Determine what can spawn here - favor GROUND animals heavily
             if ground_h < 2:
-                # Near/in water - skip for now (fish rendering is complex)
-                continue
-            elif ground_h < 15:
-                # Lowlands - lots of variety, more ground animals, occasional metroids
+                # Near/in water - crocs and frogs
                 animal_type = rng.choice([
-                    AnimalType.MAMMAL, AnimalType.MAMMAL, AnimalType.MAMMAL, AnimalType.MAMMAL, AnimalType.MAMMAL,
-                    AnimalType.REPTILE, AnimalType.REPTILE, AnimalType.REPTILE,
-                    AnimalType.WORM, AnimalType.WORM,  # Snakes
-                    AnimalType.INSECT, AnimalType.INSECT,
+                    AnimalType.CROC, AnimalType.CROC,
+                    AnimalType.HOPPER,  # Frogs
+                    AnimalType.WORM,    # Water snakes
+                ])
+            elif ground_h < 15:
+                # Lowlands - lots of ground variety
+                animal_type = rng.choice([
+                    # Big animals
+                    AnimalType.MAMMAL, AnimalType.MAMMAL, AnimalType.MAMMAL,
+                    AnimalType.DINOSAUR, AnimalType.DINOSAUR,
+                    AnimalType.CROC,
+                    # Medium ground animals
+                    AnimalType.REPTILE, AnimalType.REPTILE,
+                    AnimalType.HOPPER, AnimalType.HOPPER,  # Rabbits, frogs
+                    AnimalType.WORM, AnimalType.WORM,      # Snakes
+                    # Small crawlers
+                    AnimalType.SPIDER, AnimalType.SPIDER,
+                    AnimalType.INSECT,
+                    # Occasional flyers
                     AnimalType.BIRD,
                     AnimalType.METROID  # Rare floating horror
                 ])
             elif ground_h < 30:
-                # Hills - mammals, reptiles, birds
-                animal_type = rng.choice([
-                    AnimalType.MAMMAL, AnimalType.MAMMAL, AnimalType.MAMMAL, AnimalType.MAMMAL,
-                    AnimalType.REPTILE, AnimalType.REPTILE,
-                    AnimalType.WORM,  # Snakes in the hills
-                    AnimalType.BIRD, AnimalType.BIRD,
-                    AnimalType.INSECT,
-                    AnimalType.METROID  # Rare
-                ])
-            else:
-                # High ground - mostly mammals and birds, rare metroids
+                # Hills - diverse ground animals
                 animal_type = rng.choice([
                     AnimalType.MAMMAL, AnimalType.MAMMAL, AnimalType.MAMMAL,
+                    AnimalType.DINOSAUR,
+                    AnimalType.REPTILE, AnimalType.REPTILE,
+                    AnimalType.HOPPER, AnimalType.HOPPER,
+                    AnimalType.SPIDER,
+                    AnimalType.WORM,
+                    AnimalType.BIRD, AnimalType.BIRD,
+                    AnimalType.INSECT,
+                ])
+            else:
+                # High ground - hardy mammals, birds, some hoppers
+                animal_type = rng.choice([
+                    AnimalType.MAMMAL, AnimalType.MAMMAL, AnimalType.MAMMAL,
+                    AnimalType.HOPPER,  # Mountain goat-like
                     AnimalType.BIRD, AnimalType.BIRD,
                     AnimalType.METROID  # They float up high
                 ])
