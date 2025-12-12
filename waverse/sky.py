@@ -3,12 +3,22 @@ Dynamic Sky System - Day/Night cycle with moving sun and moon.
 
 The sun and moon follow orbital paths that shift over time, so sunrise/sunset
 positions change gradually like real seasons.
+
+Sky appearance is controlled by ChunkDNA which evolves very slowly across chunks:
+- Sun size, color, glow intensity
+- Moon size, color  
+- Star count, brightness, color variance
+- Fog density and tint
 """
 
 import math
 from dataclasses import dataclass
 from OpenGL.GL import *
 from OpenGL.GLU import *
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .chunk_dna import ChunkDNAManager, SkyDNA
 
 
 @dataclass
@@ -35,15 +45,22 @@ class SkySystem:
     BASE_ORBIT_TILT = 23.5  # Base tilt in degrees (like Earth)
     ORBIT_SHIFT_PERIOD = 20.0  # Days for full orbital shift cycle
     
-    def __init__(self):
+    def __init__(self, chunk_dna_manager: "ChunkDNAManager" = None):
         self.time = 0.25  # Start at dawn (0-1, 0=midnight)
         self.day_count = 0
         self.accumulated_time = 0.0
+        
+        # Chunk DNA manager for evolving sky parameters
+        self.chunk_dna_manager = chunk_dna_manager
+        self._current_sky_dna = None
+        self._current_chunk = None
         
         # Sun/moon display lists
         self.sun_list = None
         self.moon_list = None
         self.stars_list = None
+        self._sun_list_dna = None  # Track which DNA the list was built for
+        self._stars_list_dna = None
         
     def init_gl(self):
         """Create display lists for celestial bodies."""
@@ -183,6 +200,27 @@ class SkySystem:
             self.time -= 1.0
             self.day_count += 1
     
+    def update_for_chunk(self, cx: int, cz: int):
+        """Update sky DNA based on current chunk."""
+        if not self.chunk_dna_manager:
+            return
+        
+        # Only update if chunk changed
+        if (cx, cz) == self._current_chunk:
+            return
+        
+        self._current_chunk = (cx, cz)
+        chunk_dna = self.chunk_dna_manager.get_dna(cx, cz)
+        self._current_sky_dna = chunk_dna.sky
+    
+    def _get_sky_dna(self) -> "SkyDNA":
+        """Get current sky DNA or create default."""
+        if self._current_sky_dna:
+            return self._current_sky_dna
+        # Return default values if no DNA set
+        from .chunk_dna import SkyDNA
+        return SkyDNA()
+    
     def get_sun_position(self) -> tuple:
         """Get sun position in sky (x, y, z) based on time and orbital shift."""
         # Sun rises at 0.25 (dawn), peaks at 0.5 (noon), sets at 0.75 (dusk)
@@ -241,7 +279,7 @@ class SkySystem:
         return (x, y, z)
     
     def get_sky_color(self) -> tuple:
-        """Get sky background color based on time of day."""
+        """Get sky background color based on time of day and DNA tint."""
         t = self.time
         
         # Define key colors - vivid sunrise/sunset
@@ -265,18 +303,31 @@ class SkySystem:
         
         # Interpolate between key colors
         keys = sorted(colors.keys())
+        base_color = colors[0.0]
         for i in range(len(keys) - 1):
             if keys[i] <= t < keys[i + 1]:
                 t0, t1 = keys[i], keys[i + 1]
                 c0, c1 = colors[t0], colors[t1]
                 blend = (t - t0) / (t1 - t0)
-                return (
+                base_color = (
                     c0[0] + (c1[0] - c0[0]) * blend,
                     c0[1] + (c1[1] - c0[1]) * blend,
                     c0[2] + (c1[2] - c0[2]) * blend,
                 )
+                break
         
-        return colors[0.0]
+        # Apply DNA tint based on time of day
+        sky_dna = self._get_sky_dna()
+        if 0.25 <= t <= 0.75:  # Day
+            tint = sky_dna.sky_day_tint
+        else:  # Night
+            tint = sky_dna.sky_night_tint
+        
+        return (
+            max(0, min(1, base_color[0] + tint[0])),
+            max(0, min(1, base_color[1] + tint[1])),
+            max(0, min(1, base_color[2] + tint[2])),
+        )
     
     def get_light_color(self) -> tuple:
         """Get sunlight color for terrain lighting."""
@@ -307,14 +358,24 @@ class SkySystem:
             return 0.2
     
     def get_fog_color(self) -> tuple:
-        """Get fog color based on time."""
+        """Get fog color based on time and DNA."""
         sky = self.get_sky_color()
-        # Fog is slightly lighter than sky
+        sky_dna = self._get_sky_dna()
+        
+        # Apply DNA fog color shift
+        shift = sky_dna.fog_color_shift
+        
+        # Fog is slightly lighter than sky with DNA tint
         return (
-            min(1.0, sky[0] + 0.1),
-            min(1.0, sky[1] + 0.1),
-            min(1.0, sky[2] + 0.1),
+            min(1.0, sky[0] + 0.1 + shift[0]),
+            min(1.0, sky[1] + 0.1 + shift[1]),
+            min(1.0, sky[2] + 0.1 + shift[2]),
         )
+    
+    def get_fog_density(self) -> float:
+        """Get fog density multiplier from DNA."""
+        sky_dna = self._get_sky_dna()
+        return sky_dna.fog_density
     
     def is_night(self) -> bool:
         """Check if it's currently night."""
@@ -347,6 +408,8 @@ class SkySystem:
         if self.sun_list is None:
             self.init_gl()
         
+        sky_dna = self._get_sky_dna()
+        
         # Disable depth writing for sky
         glDepthMask(GL_FALSE)
         glDisable(GL_LIGHTING)
@@ -358,11 +421,16 @@ class SkySystem:
         elif self.time > 0.72:  # After sunset
             star_alpha = (self.time - 0.72) / 0.28
         
+        # Apply sky DNA to star brightness
+        star_alpha *= sky_dna.star_brightness
+        
         if star_alpha > 0.05:
             glEnable(GL_BLEND)
             glBlendFunc(GL_SRC_ALPHA, GL_ONE)  # Additive for stars
             glPushMatrix()
             glTranslatef(camera_x, camera_y, camera_z)
+            # Scale stars based on DNA
+            glScalef(sky_dna.star_count_mult, sky_dna.star_count_mult, sky_dna.star_count_mult)
             # Modulate star brightness
             glColor4f(1, 1, 1, star_alpha)
             glCallList(self.stars_list)
@@ -375,7 +443,11 @@ class SkySystem:
             if sun_y > 0:  # Only when above horizon
                 glPushMatrix()
                 glTranslatef(camera_x + sun_x, camera_y + sun_y, camera_z + sun_z)
-                glCallList(self.sun_list)
+                # Scale sun based on DNA
+                sun_scale = sky_dna.sun_size
+                glScalef(sun_scale, sun_scale, sun_scale)
+                # Apply sun colors from DNA
+                self._render_sun_with_dna(sky_dna)
                 glPopMatrix()
         
         # Render moon (only during night)
@@ -384,11 +456,37 @@ class SkySystem:
             if moon_y > 0:  # Only when above horizon
                 glPushMatrix()
                 glTranslatef(camera_x + moon_x, camera_y + moon_y, camera_z + moon_z)
+                # Scale moon based on DNA
+                moon_scale = sky_dna.moon_size
+                glScalef(moon_scale, moon_scale, moon_scale)
+                # Apply moon color from DNA
+                glColor3f(*sky_dna.moon_color)
                 glCallList(self.moon_list)
                 glPopMatrix()
         
         glDepthMask(GL_TRUE)
         glEnable(GL_LIGHTING)
+    
+    def _render_sun_with_dna(self, sky_dna: "SkyDNA"):
+        """Render sun with DNA-controlled colors."""
+        # Core - bright center
+        glColor3f(*sky_dna.sun_color)
+        self._draw_sphere(12, 20)
+        # Inner sun - glow color
+        glColor3f(*sky_dna.sun_glow_color)
+        self._draw_sphere(15, 18)
+        # Outer glow layers with intensity
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE)
+        r, g, b = sky_dna.sun_glow_color
+        intensity = sky_dna.sun_intensity
+        glColor4f(r, g * 0.8, b * 0.3, 0.4 * intensity)
+        self._draw_sphere(22, 14)
+        glColor4f(r, g * 0.6, b * 0.15, 0.25 * intensity)
+        self._draw_sphere(32, 12)
+        glColor4f(r * 0.9, g * 0.5, b * 0.1, 0.12 * intensity)
+        self._draw_sphere(45, 10)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
     
     def apply_lighting(self):
         """Apply lighting based on sun position and time."""

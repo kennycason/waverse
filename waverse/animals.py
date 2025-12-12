@@ -57,14 +57,16 @@ class AnimalInstance:
         speed = self.dna.movement_speed * 0.5
         
         if self.dna.movement_type == MovementType.FLY:
-            # Flying - move in 3D
-            self.x += self.vx * speed * dt
-            self.y += self.vy * speed * dt
-            self.z += self.vz * speed * dt
-            # Keep above ground
+            # Flying - move in 3D with more active movement
+            fly_speed = speed * 2.0  # Flying is faster!
+            self.x += self.vx * fly_speed * dt
+            self.y += self.vy * fly_speed * dt * 0.5  # Less vertical movement
+            self.z += self.vz * fly_speed * dt
+            # Keep above ground with some height variation
             if get_ground_height:
                 ground = get_ground_height(self.x, self.z)
-                self.y = max(self.y, ground + 3)
+                min_height = ground + 4 + self.dna.base_scale * 2
+                self.y = max(self.y, min_height)
         elif self.dna.movement_type == MovementType.SWIM:
             # Swimming - move in water
             self.x += self.vx * speed * dt
@@ -117,21 +119,36 @@ class AnimalInstance:
     
     def _ai_wander(self, dt: float):
         """Random wandering behavior."""
+        # Flying creatures are more active
+        is_flying = self.dna.movement_type == MovementType.FLY
+        
         if self.state_timer <= 0:
             if self.state == "idle":
                 # Start moving to new position
                 angle = np.random.random() * 2 * math.pi
-                dist = 5 + np.random.random() * 15
+                # Flying creatures travel further
+                dist = (10 + np.random.random() * 30) if is_flying else (5 + np.random.random() * 15)
                 self.target_x = self.x + math.cos(angle) * dist
                 self.target_z = self.z + math.sin(angle) * dist
                 self.state = "moving"
-                self.state_timer = 3 + np.random.random() * 5
+                # Flying creatures don't stop as often
+                self.state_timer = (5 + np.random.random() * 10) if is_flying else (3 + np.random.random() * 5)
+                
+                # Flying creatures also adjust altitude
+                if is_flying:
+                    self.vy = (np.random.random() - 0.5) * 0.5
             else:
-                # Stop and rest
+                # Stop and rest - flying creatures rest less
                 self.state = "idle"
-                self.state_timer = 1 + np.random.random() * 3
-                self.vx = 0
-                self.vz = 0
+                self.state_timer = (0.5 + np.random.random() * 1) if is_flying else (1 + np.random.random() * 3)
+                if not is_flying:
+                    self.vx = 0
+                    self.vz = 0
+                else:
+                    # Flying creatures keep drifting slightly
+                    self.vx *= 0.3
+                    self.vz *= 0.3
+                    self.vy = 0
         
         if self.state == "moving":
             # Move toward target
@@ -143,7 +160,7 @@ class AnimalInstance:
                 self.vz = dz / dist
             else:
                 self.state = "idle"
-                self.state_timer = 1
+                self.state_timer = 0.5 if is_flying else 1
     
     def _ai_graze(self, dt: float):
         """Grazing behavior - mostly stationary with occasional movement."""
@@ -173,7 +190,7 @@ class AnimalInstance:
                 self.state = "idle"
     
     def _ai_flock(self, dt: float, neighbors: List["AnimalInstance"]):
-        """Bird-like flocking behavior."""
+        """Bird-like flocking behavior - more active movement."""
         if not neighbors:
             self._ai_wander(dt)
             return
@@ -193,7 +210,7 @@ class AnimalInstance:
             dx = self.x - n.x
             dz = self.z - n.z
             dist = max(0.1, math.sqrt(dx*dx + dz*dz))
-            if dist < 2:
+            if dist < 3:  # Increased separation distance
                 sep_x += dx / dist
                 sep_z += dz / dist
         
@@ -207,20 +224,28 @@ class AnimalInstance:
         coh_x = center_x - self.x
         coh_z = center_z - self.z
         
-        # Combine forces
-        self.vx = sep_x * 0.3 + align_x * 0.4 + coh_x * 0.1
-        self.vz = sep_z * 0.3 + align_z * 0.4 + coh_z * 0.1
+        # Add some forward momentum so flock keeps moving
+        forward_bias = 0.5
         
-        # Normalize
+        # Combine forces - stronger alignment for more coordinated movement
+        self.vx = sep_x * 0.25 + align_x * 0.5 + coh_x * 0.15 + forward_bias * math.cos(self.rotation * math.pi / 180)
+        self.vz = sep_z * 0.25 + align_z * 0.5 + coh_z * 0.15 + forward_bias * math.sin(self.rotation * math.pi / 180)
+        
+        # Normalize but keep minimum speed
         speed = math.sqrt(self.vx**2 + self.vz**2)
         if speed > 0.1:
             self.vx /= speed
             self.vz /= speed
+        else:
+            # If too slow, pick a random direction
+            angle = np.random.random() * 2 * math.pi
+            self.vx = math.cos(angle)
+            self.vz = math.sin(angle)
         
-        # Flying animals also adjust Y
+        # Flying animals also adjust Y with some variation
         if self.dna.movement_type == MovementType.FLY:
             avg_y = sum(n.y for n in flock) / len(flock)
-            self.vy = (avg_y - self.y) * 0.1
+            self.vy = (avg_y - self.y) * 0.15 + (np.random.random() - 0.5) * 0.1
     
     def _ai_swarm(self, dt: float, neighbors: List["AnimalInstance"]):
         """Insect-like swarming - more chaotic than flocking."""
@@ -634,8 +659,8 @@ class AnimalManager:
         h, w = heightmap.shape
         animals = []
         
-        # A few animals per chunk (balanced for performance)
-        num_animals = rng.integers(1, 4)  # 1-3 animals
+        # More animals per chunk - performance is good!
+        num_animals = rng.integers(2, 6)  # 2-5 animals per chunk
         
         for _ in range(num_animals):
             local_x = rng.integers(5, w - 5)
@@ -643,32 +668,36 @@ class AnimalManager:
             
             ground_h = heightmap[local_z, local_x]
             
-            # Determine what can spawn here - favor GROUND animals
+            # Determine what can spawn here - favor GROUND animals heavily
             if ground_h < 2:
                 # Near/in water - skip for now (fish rendering is complex)
                 continue
             elif ground_h < 15:
-                # Lowlands - lots of variety, more snakes/reptiles
+                # Lowlands - lots of variety, more ground animals, occasional metroids
+                animal_type = rng.choice([
+                    AnimalType.MAMMAL, AnimalType.MAMMAL, AnimalType.MAMMAL, AnimalType.MAMMAL, AnimalType.MAMMAL,
+                    AnimalType.REPTILE, AnimalType.REPTILE, AnimalType.REPTILE,
+                    AnimalType.WORM, AnimalType.WORM,  # Snakes
+                    AnimalType.INSECT, AnimalType.INSECT,
+                    AnimalType.BIRD,
+                    AnimalType.METROID  # Rare floating horror
+                ])
+            elif ground_h < 30:
+                # Hills - mammals, reptiles, birds
                 animal_type = rng.choice([
                     AnimalType.MAMMAL, AnimalType.MAMMAL, AnimalType.MAMMAL, AnimalType.MAMMAL,
                     AnimalType.REPTILE, AnimalType.REPTILE,
-                    AnimalType.WORM,  # Snakes
-                    AnimalType.INSECT,
-                    AnimalType.BIRD
-                ])
-            elif ground_h < 30:
-                # Hills - mammals, birds, some reptiles
-                animal_type = rng.choice([
-                    AnimalType.MAMMAL, AnimalType.MAMMAL, AnimalType.MAMMAL,
-                    AnimalType.REPTILE,
+                    AnimalType.WORM,  # Snakes in the hills
                     AnimalType.BIRD, AnimalType.BIRD,
-                    AnimalType.INSECT
+                    AnimalType.INSECT,
+                    AnimalType.METROID  # Rare
                 ])
             else:
-                # High ground - mostly mammals and birds
+                # High ground - mostly mammals and birds, rare metroids
                 animal_type = rng.choice([
-                    AnimalType.MAMMAL, AnimalType.MAMMAL,
-                    AnimalType.BIRD
+                    AnimalType.MAMMAL, AnimalType.MAMMAL, AnimalType.MAMMAL,
+                    AnimalType.BIRD, AnimalType.BIRD,
+                    AnimalType.METROID  # They float up high
                 ])
             
             # Get template and mutate

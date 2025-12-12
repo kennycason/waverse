@@ -196,8 +196,9 @@ class AnimalType:
     JELLYFISH = "jellyfish"
     WORM = "worm"
     ALIEN = "alien"
+    METROID = "metroid"  # Floating brain-like creature
     
-    ALL = [INSECT, BIRD, FISH, MAMMAL, REPTILE, AMPHIBIAN, JELLYFISH, WORM, ALIEN]
+    ALL = [INSECT, BIRD, FISH, MAMMAL, REPTILE, AMPHIBIAN, JELLYFISH, WORM, ALIEN, METROID]
 
 
 @dataclass
@@ -369,6 +370,8 @@ class AnimalDNA:
             dna = cls._create_worm(rng)
         elif animal_type == AnimalType.ALIEN:
             dna = cls._create_alien(rng)
+        elif animal_type == AnimalType.METROID:
+            dna = cls._create_metroid(rng)
         else:
             dna = cls._create_mammal(rng)
         
@@ -813,6 +816,98 @@ class AnimalDNA:
         dna.secondary_color = secondary
         dna.movement_speed = 0.5 + rng.random() * 2.0
         dna.animation_speed = 0.5 + rng.random() * 2.0
+        
+        return dna
+    
+    @classmethod
+    def _create_metroid(cls, rng: np.random.Generator) -> "AnimalDNA":
+        """
+        Create Metroid-like creature - floating brain/jellyfish parasite.
+        
+        Translucent dome body with visible internal structures,
+        dangling tentacles/fangs, ominous glow.
+        """
+        # Creepy colors - greens, teals, translucent
+        hue = 0.4 + rng.random() * 0.2  # Green to cyan
+        body_color = _hsv_to_rgb(hue, 0.4 + rng.random() * 0.3, 0.5 + rng.random() * 0.3)
+        inner_color = _hsv_to_rgb(hue - 0.1, 0.6, 0.7)  # Inner glow
+        tentacle_color = _hsv_to_rgb(hue + 0.05, 0.5, 0.4)
+        
+        # Size - they can be small parasites or large hunters
+        size_mult = 0.5 + rng.random() * 1.5
+        
+        dna = cls()
+        
+        # Main body - dome/bell shape (like a jellyfish top)
+        dna.body_segments = [
+            # Outer membrane (translucent dome)
+            BodySegmentGene(
+                shape="ellipsoid", 
+                size=(0.5 * size_mult, 0.35 * size_mult, 0.5 * size_mult), 
+                color=(*body_color, 0.6),  # Semi-transparent
+                pattern="gradient"
+            ),
+            # Inner "brain" structure
+            BodySegmentGene(
+                shape="ellipsoid", 
+                size=(0.3 * size_mult, 0.2 * size_mult, 0.3 * size_mult), 
+                color=inner_color,
+                pattern="spotted"  # Brain-like texture
+            ),
+        ]
+        
+        # Dangling tentacles/fangs
+        num_tentacles = 3 + rng.integers(0, 4)  # 3-6 tentacles
+        tentacle_length = 0.4 + rng.random() * 0.4
+        
+        dna.limbs = [
+            LimbGene(
+                limb_type="tentacle", 
+                segment_count=4,
+                segment_lengths=[tentacle_length * size_mult * (0.9 ** i) for i in range(4)],
+                segment_widths=[0.04 * size_mult * (0.8 ** i) for i in range(4)],
+                color=tentacle_color,
+                joint_speed=0.5,
+                joint_range=40
+            ),
+        ]
+        dna.limb_pairs = num_tentacles  # Multiple dangling appendages
+        
+        # Features - multiple small eyes, maybe mandibles
+        eye_count = 2 + rng.integers(0, 4)  # 2-5 eyes
+        dna.features = [
+            # Creepy clustered eyes
+            FeatureGene(
+                feature_type="eye", 
+                count=eye_count, 
+                size=0.06 * size_mult, 
+                color=(0.9, 0.1, 0.1),  # Red eyes
+                glow=True,  # Glowing!
+                position=(0.3, 0.1, 0.1)
+            ),
+        ]
+        
+        # Maybe add fang-like protrusions
+        if rng.random() < 0.7:
+            dna.features.append(FeatureGene(
+                feature_type="spike", 
+                count=2 + rng.integers(0, 3),
+                size=0.12 * size_mult,
+                color=(0.8, 0.7, 0.6),
+                position=(0.0, -0.3, 0.0)  # Bottom, like fangs
+            ))
+        
+        # Metroids float menacingly
+        dna.movement_type = MovementType.FLOAT
+        dna.ai_behavior = rng.choice([AIBehavior.WANDER, AIBehavior.SWARM])
+        dna.base_scale = size_mult
+        dna.primary_color = body_color
+        dna.secondary_color = inner_color
+        
+        # Slow, drifting movement
+        dna.movement_speed = 0.4 + rng.random() * 0.4
+        dna.animation_speed = 0.6 + rng.random() * 0.4  # Slow pulsing
+        dna.group_tendency = 0.3 + rng.random() * 0.3  # Sometimes swarm
         
         return dna
 

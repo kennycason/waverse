@@ -12,6 +12,8 @@ import time
 import json
 import os
 
+from .chunk_dna import ChunkDNAManager, ChunkDNA, TerrainPalette
+
 try:
     from OpenGL.GL import *
     from OpenGL.GL import GLubyte
@@ -236,16 +238,25 @@ class Camera:
 class ChunkRenderer:
     """Renders chunks using display lists with LOD for distant terrain."""
     
-    def __init__(self, chunk_manager: ChunkManager):
+    def __init__(self, chunk_manager: ChunkManager, chunk_dna_manager: ChunkDNAManager = None):
         self.chunk_manager = chunk_manager
+        self.chunk_dna_manager = chunk_dna_manager
         self.display_lists = {}  # (cx, cz) -> (display_list_id, lod_level)
         self.camera_chunk = (0, 0)
+        self._current_palette = TerrainPalette()  # Default palette
     
     def create_chunk_display_list(self, cx: int, cz: int, lod_step: int = 1) -> int:
         """Create a display list for a chunk with LOD support."""
         chunk = self.chunk_manager.get_chunk(cx, cz)
         heightmap = chunk.heightmap
         h, w = heightmap.shape
+        
+        # Get chunk-specific color palette from DNA
+        if self.chunk_dna_manager:
+            chunk_dna = self.chunk_dna_manager.get_dna(cx, cz)
+            palette = chunk_dna.palette
+        else:
+            palette = self._current_palette
         
         chunk_list = glGenLists(1)
         glNewList(chunk_list, GL_COMPILE)
@@ -278,9 +289,9 @@ class ChunkRenderer:
                 y01 = h01 * HEIGHT_SCALE
                 y11 = h11 * HEIGHT_SCALE
                 
-                # Color from average height
-                avg_h = (y00 + y10 + y01 + y11) / 4
-                col = height_to_color(avg_h)
+                # Color from average height using chunk's palette
+                avg_raw_h = (h00 + h10 + h01 + h11) / 4
+                col = palette.get_color(avg_raw_h)
                 
                 # Normal calculation
                 dx = (h10 - h00 + h11 - h01) * HEIGHT_SCALE
@@ -720,10 +731,13 @@ def run_explorer(config: WorldConfig = None):
     chunk_manager.set_worker(chunk_worker)
     chunk_worker.start()
     
-    chunk_renderer = ChunkRenderer(chunk_manager)
+    # Chunk DNA for terrain colors and sky - evolves across chunks
+    chunk_dna_manager = ChunkDNAManager(config.seed)
+    
+    chunk_renderer = ChunkRenderer(chunk_manager, chunk_dna_manager)
     flora_manager = FloraManager(config.seed)
     animal_manager = AnimalManager(config.seed)
-    sky = SkySystem()
+    sky = SkySystem(chunk_dna_manager)
     water_list = create_water_plane()
     minimap = Minimap(chunk_manager)
     
@@ -841,10 +855,11 @@ def run_explorer(config: WorldConfig = None):
         if abs(camera.x - lx) > 100 or abs(camera.z - lz) > 100:
             minimap.update(camera.x, camera.z)
         
-        # Update sky/time
+        # Update sky/time - also update sky DNA based on current chunk
         sky.update(dt)
+        sky.update_for_chunk(*current_chunk)
         
-        # Set sky color and fog based on time of day
+        # Set sky color and fog based on time of day (now with DNA tint)
         sky_color = sky.get_sky_color()
         glClearColor(*sky_color, 1.0)
         sky.apply_fog()
@@ -883,6 +898,7 @@ def run_explorer(config: WorldConfig = None):
         # Cleanup distant chunks occasionally
         if frame_count % 60 == 0:
             animal_manager.cleanup_distant_chunks(current_chunk[0], current_chunk[1])
+            chunk_dna_manager.cleanup_distant(current_chunk[0], current_chunk[1])
         
         glCallList(water_list)
         
