@@ -48,53 +48,60 @@ class AnimalInstance:
                player_pos: Tuple[float, float, float] = None,
                get_ground_height=None):
         """Update animal position and AI."""
-        self.anim_time += dt * self.dna.animation_speed
+        # Normalize dt - dt is frame time in arbitrary units, convert to ~seconds
+        # At 60fps, dt is usually around 1.0 (frame count), so divide by 60
+        dt_seconds = dt / 60.0
+        
+        self.anim_time += dt_seconds * self.dna.animation_speed
         
         # Update AI behavior
-        self._update_ai(dt, neighbors, player_pos)
+        self._update_ai(dt_seconds, neighbors, player_pos)
         
-        # Apply movement
-        speed = self.dna.movement_speed * 0.5
+        # Apply movement - speed is units per second
+        speed = self.dna.movement_speed * 3.0  # Base speed multiplier
         
         if self.dna.movement_type == MovementType.FLY:
             # Flying - move in 3D with swooping, circling paths
-            fly_speed = speed * 2.5  # Flying is fast!
+            fly_speed = speed * 2.0  # Flying is fast!
             
             # Add swooping/circling behavior
-            swoop = math.sin(self.anim_time * 0.8) * 0.3
-            circle = math.cos(self.anim_time * 0.5) * 0.2
+            swoop = math.sin(self.anim_time * 2.0) * 0.4
+            circle = math.cos(self.anim_time * 1.5) * 0.3
             
-            self.x += (self.vx + circle) * fly_speed * dt
-            self.y += (self.vy + swoop * 0.5) * fly_speed * dt
-            self.z += (self.vz - circle) * fly_speed * dt
+            self.x += (self.vx + circle) * fly_speed * dt_seconds
+            self.y += (self.vy + swoop * 0.3) * fly_speed * dt_seconds
+            self.z += (self.vz - circle) * fly_speed * dt_seconds
             
             # Keep above ground with dynamic flight height
             if get_ground_height:
                 ground = get_ground_height(self.x, self.z)
-                # Vary flight height based on animation
-                base_height = 6 + self.dna.base_scale * 3
-                height_variation = math.sin(self.anim_time * 0.3) * 4
+                base_height = 8 + self.dna.base_scale * 4
+                height_variation = math.sin(self.anim_time * 0.8) * 5
                 min_height = ground + base_height + height_variation
                 self.y = max(self.y, min_height)
-                # Also cap max height
-                self.y = min(self.y, ground + 50)
+                self.y = min(self.y, ground + 60)
         elif self.dna.movement_type == MovementType.SWIM:
             # Swimming - move in water
-            self.x += self.vx * speed * dt
-            self.z += self.vz * speed * dt
-            # Keep at water level
-            self.y = 0.5  # Water surface
+            swim_speed = speed * 1.5
+            self.x += self.vx * swim_speed * dt_seconds
+            self.z += self.vz * swim_speed * dt_seconds
+            # Undulate up/down while swimming
+            self.y = 0.5 + math.sin(self.anim_time * 3) * 0.3
         elif self.dna.movement_type == MovementType.FLOAT:
-            # Floating - slow drift
-            self.x += self.vx * speed * 0.3 * dt
-            self.z += self.vz * speed * 0.3 * dt
+            # Floating - gentle drift (metroids, jellyfish)
+            float_speed = speed * 0.5
+            self.x += self.vx * float_speed * dt_seconds
+            self.z += self.vz * float_speed * dt_seconds
             # Gentle bobbing
-            self.y = 0.5 + math.sin(self.anim_time * 0.5) * 0.2
+            self.y += math.sin(self.anim_time * 1.5) * 0.02
+            if get_ground_height:
+                ground = get_ground_height(self.x, self.z)
+                self.y = max(self.y, ground + 3)
         elif self.dna.movement_type == MovementType.HOP:
             # Hopping movement - parabolic jumps
-            hop_speed = speed * 1.5
-            self.x += self.vx * hop_speed * dt
-            self.z += self.vz * hop_speed * dt
+            hop_speed = speed * 1.2
+            self.x += self.vx * hop_speed * dt_seconds
+            self.z += self.vz * hop_speed * dt_seconds
             
             if get_ground_height:
                 ground = get_ground_height(self.x, self.z)
@@ -104,8 +111,9 @@ class AnimalInstance:
                 self.y = ground + hop_height
         else:
             # Ground movement (walking, crawling)
-            self.x += self.vx * speed * dt
-            self.z += self.vz * speed * dt
+            walk_speed = speed * 1.0
+            self.x += self.vx * walk_speed * dt_seconds
+            self.z += self.vz * walk_speed * dt_seconds
             if get_ground_height:
                 self.y = get_ground_height(self.x, self.z)
         
@@ -116,7 +124,7 @@ class AnimalInstance:
             diff = target_rot - self.rotation
             while diff > 180: diff -= 360
             while diff < -180: diff += 360
-            self.rotation += diff * min(1, dt * 5)
+            self.rotation += diff * min(1, dt_seconds * 8)
     
     def _update_ai(self, dt: float, neighbors: List["AnimalInstance"], 
                    player_pos: Tuple[float, float, float]):
@@ -774,7 +782,7 @@ class AnimalManager:
     
     def update(self, dt: float, player_pos: Tuple[float, float, float], 
                get_ground_height=None):
-        """Update animals - only nearby ones get AI updates."""
+        """Update animals - nearby ones get full AI, distant ones get simple updates."""
         if not player_pos:
             return
         
@@ -784,20 +792,21 @@ class AnimalManager:
             # Distance to player
             dist_sq = (animal.x - px)**2 + (animal.z - pz)**2
             
-            # Only update AI for nearby animals (within 100 units)
-            if dist_sq > 10000:  # 100^2
-                continue
-            
-            # Simplified neighbor check - only for very close animals
-            neighbors = None
-            if dist_sq < 2500 and animal.dna.group_tendency > 0.3:  # 50^2
-                neighbors = [
-                    other for other in self.animals
-                    if other is not animal 
-                    and (animal.x - other.x)**2 + (animal.z - other.z)**2 < 400  # 20^2
-                ][:5]  # Max 5 neighbors
-            
-            animal.update(dt, neighbors, player_pos, get_ground_height)
+            # Full AI update for animals within 150 units
+            if dist_sq < 22500:  # 150^2
+                # Simplified neighbor check for flocking
+                neighbors = None
+                if dist_sq < 6400 and animal.dna.group_tendency > 0.3:  # 80^2
+                    neighbors = [
+                        other for other in self.animals
+                        if other is not animal 
+                        and (animal.x - other.x)**2 + (animal.z - other.z)**2 < 900  # 30^2
+                    ][:5]
+                
+                animal.update(dt, neighbors, player_pos, get_ground_height)
+            elif dist_sq < 90000:  # 300^2 - simple movement update
+                # Just continue current movement without AI changes
+                animal.update(dt, None, None, get_ground_height)
     
     def render(self, camera_x: float, camera_y: float, camera_z: float):
         """Render nearby animals with LOD."""

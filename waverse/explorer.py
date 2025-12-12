@@ -986,7 +986,7 @@ def run_explorer(config: WorldConfig = None):
         
         # Update animals every few frames for performance
         if frame_count % 3 == 0:  # Update AI every 3rd frame
-            animal_manager.update(dt / 60.0, cam_pos, None)  # Skip ground height for perf
+            animal_manager.update(dt, cam_pos, None)  # dt is frame count, normalized in update
         
         # Render animals
         animal_manager.render(cam_pos[0], cam_pos[1], cam_pos[2])
