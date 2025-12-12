@@ -13,6 +13,7 @@ import json
 import os
 
 from .chunk_dna import ChunkDNAManager, ChunkDNA, TerrainPalette
+from .climate import ClimateManager, WeatherRenderer
 
 try:
     from OpenGL.GL import *
@@ -565,7 +566,7 @@ def draw_crosshair(display: tuple):
     glMatrixMode(GL_MODELVIEW)
 
 
-def draw_hud(display: tuple, camera: Camera, sky: SkySystem = None):
+def draw_hud(display: tuple, camera: Camera, sky: SkySystem = None, climate: ClimateManager = None):
     """Draw HUD."""
     glMatrixMode(GL_PROJECTION)
     glPushMatrix()
@@ -582,7 +583,13 @@ def draw_hud(display: tuple, camera: Camera, sky: SkySystem = None):
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
     
     # Info box
-    box_w, box_h = 180, 90 if sky else 70
+    has_climate = climate is not None
+    box_w = 180
+    box_h = 70
+    if sky:
+        box_h += 20
+    if has_climate:
+        box_h += 40
     box_x = display[0] - box_w - 10
     box_y = 10
     
@@ -668,6 +675,77 @@ def draw_hud(display: tuple, camera: Camera, sky: SkySystem = None):
         glVertex2f(marker_x + 4, time_y + 4)
         glEnd()
     
+    # Climate/weather info
+    if climate:
+        climate_y = (bar_y + 38) if sky else (bar_y + 18)
+        biome = climate.current_biome
+        weather = climate.current_weather
+        
+        # Biome indicator bar (temperature gradient)
+        glBegin(GL_QUADS)
+        # Cold to hot gradient
+        glColor4f(0.3, 0.5, 1.0, 0.8)  # Cold blue
+        glVertex2f(box_x + 10, climate_y)
+        glColor4f(1.0, 0.5, 0.2, 0.8)  # Hot orange
+        glVertex2f(box_x + box_w - 10, climate_y)
+        glVertex2f(box_x + box_w - 10, climate_y + 6)
+        glColor4f(0.3, 0.5, 1.0, 0.8)
+        glVertex2f(box_x + 10, climate_y + 6)
+        glEnd()
+        
+        # Temperature marker
+        temp_x = box_x + 10 + biome.temperature * (box_w - 20)
+        glColor4f(1, 1, 1, 1)
+        glBegin(GL_TRIANGLES)
+        glVertex2f(temp_x, climate_y - 2)
+        glVertex2f(temp_x - 3, climate_y + 3)
+        glVertex2f(temp_x + 3, climate_y + 3)
+        glEnd()
+        
+        # Weather bar (precipitation)
+        weather_y = climate_y + 14
+        glColor4f(0.4, 0.4, 0.4, 0.8)
+        glBegin(GL_QUADS)
+        glVertex2f(box_x + 10, weather_y)
+        glVertex2f(box_x + box_w - 10, weather_y)
+        glVertex2f(box_x + box_w - 10, weather_y + 6)
+        glVertex2f(box_x + 10, weather_y + 6)
+        glEnd()
+        
+        # Precipitation fill
+        if weather.precipitation > 0.05:
+            if weather.precipitation_type == "snow":
+                glColor4f(0.9, 0.95, 1.0, 0.9)  # White for snow
+            else:
+                glColor4f(0.4, 0.6, 0.9, 0.9)  # Blue for rain
+            
+            precip_w = weather.precipitation * (box_w - 20)
+            glBegin(GL_QUADS)
+            glVertex2f(box_x + 10, weather_y)
+            glVertex2f(box_x + 10 + precip_w, weather_y)
+            glVertex2f(box_x + 10 + precip_w, weather_y + 6)
+            glVertex2f(box_x + 10, weather_y + 6)
+            glEnd()
+        
+        # Cloud cover bar
+        cloud_y = weather_y + 10
+        glColor4f(0.3, 0.3, 0.35, 0.8)
+        glBegin(GL_QUADS)
+        glVertex2f(box_x + 10, cloud_y)
+        glVertex2f(box_x + box_w - 10, cloud_y)
+        glVertex2f(box_x + box_w - 10, cloud_y + 4)
+        glVertex2f(box_x + 10, cloud_y + 4)
+        glEnd()
+        
+        cloud_w = weather.cloud_cover * (box_w - 20)
+        glColor4f(0.8, 0.8, 0.85, 0.9)
+        glBegin(GL_QUADS)
+        glVertex2f(box_x + 10, cloud_y)
+        glVertex2f(box_x + 10 + cloud_w, cloud_y)
+        glVertex2f(box_x + 10 + cloud_w, cloud_y + 4)
+        glVertex2f(box_x + 10, cloud_y + 4)
+        glEnd()
+    
     glBegin(GL_QUADS)  # Dummy begin to match the end below
     glEnd()
     
@@ -743,6 +821,10 @@ def run_explorer(config: WorldConfig = None):
     sky = SkySystem(chunk_dna_manager)
     water_level = config.water_level
     minimap = Minimap(chunk_manager)
+    
+    # Climate/weather system
+    climate_manager = ClimateManager(config.seed)
+    weather_renderer = WeatherRenderer()
     
     # Camera - try to load saved position
     camera = Camera()
@@ -862,6 +944,12 @@ def run_explorer(config: WorldConfig = None):
         sky.update(dt)
         sky.update_for_chunk(*current_chunk)
         
+        # Update climate/weather
+        climate_manager.update(dt, *current_chunk)
+        weather_renderer.update(dt, camera.x, camera.y, camera.z,
+                               climate_manager.current_weather,
+                               climate_manager.current_biome)
+        
         # Set sky color and fog based on time of day (now with DNA tint)
         sky_color = sky.get_sky_color()
         glClearColor(*sky_color, 1.0)
@@ -876,6 +964,11 @@ def run_explorer(config: WorldConfig = None):
         # Render sky (sun/moon/stars)
         cam_pos = camera.get_pos()
         sky.render(cam_pos[0], cam_pos[1], cam_pos[2])
+        
+        # Render clouds
+        weather_renderer.render_clouds(cam_pos[0], cam_pos[1], cam_pos[2],
+                                       climate_manager.current_weather.cloud_cover,
+                                       climate_manager.time)
         
         chunk_renderer.render()
         
@@ -902,12 +995,18 @@ def run_explorer(config: WorldConfig = None):
         if frame_count % 60 == 0:
             animal_manager.cleanup_distant_chunks(current_chunk[0], current_chunk[1])
             chunk_dna_manager.cleanup_distant(current_chunk[0], current_chunk[1])
+            climate_manager.cleanup_distant(current_chunk[0], current_chunk[1])
         
         # Render water plane at water level, centered on camera
         render_water(camera.x, camera.z, water_level)
         
+        # Render weather effects (rain/snow particles, lightning)
+        weather_renderer.render(cam_pos[0], cam_pos[1], cam_pos[2],
+                               climate_manager.current_weather,
+                               climate_manager.lightning_flash)
+        
         draw_crosshair(display)
-        draw_hud(display, camera, sky)
+        draw_hud(display, camera, sky, climate_manager)
         minimap.draw(display, camera.x, camera.z)
         
         pygame.display.flip()
