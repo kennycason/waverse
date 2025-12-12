@@ -762,7 +762,7 @@ def run_explorer(config: WorldConfig = None):
             chunk = chunk_manager.get_chunk(cx, cz)
             flora_manager.render_chunk_flora(
                 cx, cz, cam_pos[0], cam_pos[2],
-                chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE
+                chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE
             )
         
         glCallList(water_list)

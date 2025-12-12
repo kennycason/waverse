@@ -1,318 +1,700 @@
 """
-Alien Flora System - DNA-based procedural plants with LOD.
+Flora Rendering System - Renders plants from DNA with LOD support.
 
-Plants are generated from DNA that controls:
-- Growth patterns (branching, height, spread)
-- Colors (trunk, leaves, glow)
-- Shape (straight, curved, spiral)
+This module handles:
+- Rendering plants from PlantDNA
+- Level of Detail (LOD) for distant plants
+- Display list caching for performance
+- Multi-segment trunk rendering
 """
 
 import numpy as np
 import math
-from dataclasses import dataclass, field
-from typing import List, Tuple, Optional, Dict
+from dataclasses import dataclass
+from typing import List, Tuple, Dict
 from OpenGL.GL import *
 
-
-class PlantType:
-    """Plant type categories."""
-    GRASS = "grass"
-    FERN = "fern"
-    BUSH = "bush"
-    TREE = "tree"
-    TALL_TREE = "tall_tree"
-    ALIEN = "alien"
-
-
-@dataclass
-class FloraDNA:
-    """DNA that controls plant growth and appearance."""
-    # Type
-    plant_type: str = PlantType.TREE
-    
-    # Growth
-    height: float = 5.0          # Base height (1-20)
-    trunk_width: float = 0.3     # Trunk thickness (0.1-1.0)
-    branch_count: int = 4        # Number of main branches (0-8)
-    branch_angle: float = 0.5    # Angle of branches (0-1, 0=up, 1=horizontal)
-    branch_length: float = 0.6   # Branch length relative to height (0.2-1.0)
-    recursion: int = 2           # Branch recursion depth (0-4)
-    
-    # Shape
-    trunk_curve: float = 0.0     # Trunk curvature (-1 to 1)
-    spiral: float = 0.0          # Spiral factor (0-1)
-    droop: float = 0.0           # Branch droop (0-1)
-    frond_count: int = 0         # For ferns
-    blade_count: int = 0         # For grass
-    
-    # Colors (RGB 0-1)
-    trunk_color: Tuple[float, float, float] = (0.4, 0.25, 0.1)
-    leaf_color: Tuple[float, float, float] = (0.2, 0.6, 0.3)
-    glow_color: Tuple[float, float, float] = (0.0, 0.0, 0.0)  # (0,0,0) = no glow
-    
-    # Alien features
-    bulb_size: float = 0.0       # Bulb/fruit size (0-1)
-    tendril_count: int = 0       # Hanging tendrils (0-10)
-    crystal: bool = False        # Crystalline appearance
-    
-    @classmethod
-    def grass(cls, seed: int = None) -> "FloraDNA":
-        """Generate grass tuft."""
-        if seed is not None:
-            np.random.seed(seed)
-        
-        green = 0.3 + np.random.random() * 0.4
-        return cls(
-            plant_type=PlantType.GRASS,
-            height=0.3 + np.random.random() * 0.5,
-            blade_count=5 + np.random.randint(0, 8),
-            leaf_color=(0.2 + np.random.random() * 0.1, green, 0.1),
-            trunk_color=(0.3, green * 0.8, 0.15),
-        )
-    
-    @classmethod
-    def fern(cls, seed: int = None) -> "FloraDNA":
-        """Generate fern."""
-        if seed is not None:
-            np.random.seed(seed)
-        
-        green = 0.4 + np.random.random() * 0.3
-        return cls(
-            plant_type=PlantType.FERN,
-            height=0.8 + np.random.random() * 1.5,
-            frond_count=4 + np.random.randint(0, 6),
-            droop=0.3 + np.random.random() * 0.4,
-            leaf_color=(0.15, green, 0.2),
-            trunk_color=(0.25, green * 0.7, 0.15),
-        )
-    
-    @classmethod
-    def bush(cls, seed: int = None) -> "FloraDNA":
-        """Generate bush/shrub."""
-        if seed is not None:
-            np.random.seed(seed)
-        
-        green = 0.35 + np.random.random() * 0.35
-        return cls(
-            plant_type=PlantType.BUSH,
-            height=1.0 + np.random.random() * 2.0,
-            trunk_width=0.1 + np.random.random() * 0.2,
-            branch_count=3 + np.random.randint(0, 5),
-            branch_angle=0.4 + np.random.random() * 0.4,
-            leaf_color=(0.2, green, 0.15),
-            trunk_color=(0.35, 0.25, 0.15),
-        )
-    
-    @classmethod
-    def tree(cls, seed: int = None) -> "FloraDNA":
-        """Generate normal tree."""
-        if seed is not None:
-            np.random.seed(seed)
-        
-        green = 0.3 + np.random.random() * 0.4
-        return cls(
-            plant_type=PlantType.TREE,
-            height=4 + np.random.random() * 6,
-            trunk_width=0.2 + np.random.random() * 0.3,
-            branch_count=3 + np.random.randint(0, 4),
-            branch_angle=0.3 + np.random.random() * 0.4,
-            branch_length=0.4 + np.random.random() * 0.3,
-            recursion=1 + np.random.randint(0, 2),
-            leaf_color=(0.15 + np.random.random() * 0.1, green, 0.1),
-            trunk_color=(0.35 + np.random.random() * 0.1, 0.22, 0.12),
-        )
-    
-    @classmethod
-    def tall_tree(cls, seed: int = None) -> "FloraDNA":
-        """Generate tall/giant tree."""
-        if seed is not None:
-            np.random.seed(seed)
-        
-        green = 0.25 + np.random.random() * 0.35
-        return cls(
-            plant_type=PlantType.TALL_TREE,
-            height=12 + np.random.random() * 10,
-            trunk_width=0.5 + np.random.random() * 0.6,
-            branch_count=4 + np.random.randint(0, 4),
-            branch_angle=0.25 + np.random.random() * 0.3,
-            branch_length=0.5 + np.random.random() * 0.3,
-            recursion=2 + np.random.randint(0, 2),
-            trunk_curve=np.random.random() * 0.2 - 0.1,
-            leaf_color=(0.1, green, 0.08),
-            trunk_color=(0.3, 0.2, 0.1),
-        )
-    
-    @classmethod
-    def alien(cls, seed: int = None) -> "FloraDNA":
-        """Generate random alien plant DNA."""
-        if seed is not None:
-            np.random.seed(seed)
-        
-        # Random alien colors
-        hue = np.random.random()
-        sat = 0.5 + np.random.random() * 0.5
-        
-        # HSV to RGB for leaves
-        h = hue * 6
-        c = sat
-        x = c * (1 - abs(h % 2 - 1))
-        if h < 1: leaf = (c, x, 0)
-        elif h < 2: leaf = (x, c, 0)
-        elif h < 3: leaf = (0, c, x)
-        elif h < 4: leaf = (0, x, c)
-        elif h < 5: leaf = (x, 0, c)
-        else: leaf = (c, 0, x)
-        
-        # Trunk color - brown/gray/purple variations
-        trunk_hue = np.random.choice([0.08, 0.1, 0.75, 0.85])
-        trunk = (
-            0.2 + trunk_hue * 0.3,
-            0.15 + np.random.random() * 0.15,
-            0.1 + np.random.random() * 0.2
-        )
-        
-        # Maybe glow
-        glow = (0, 0, 0)
-        if np.random.random() < 0.3:  # 30% chance of bioluminescence
-            glow = (
-                leaf[0] * 0.5 + 0.5,
-                leaf[1] * 0.5 + 0.5,
-                leaf[2] * 0.5 + 0.5
-            )
-        
-        return cls(
-            plant_type=PlantType.ALIEN,
-            height=2 + np.random.random() * 15,
-            trunk_width=0.1 + np.random.random() * 0.5,
-            branch_count=np.random.randint(0, 8),
-            branch_angle=0.2 + np.random.random() * 0.6,
-            branch_length=0.3 + np.random.random() * 0.5,
-            recursion=np.random.randint(1, 4),
-            trunk_curve=np.random.random() * 0.6 - 0.3,
-            spiral=np.random.random() * 0.5 if np.random.random() < 0.3 else 0,
-            droop=np.random.random() * 0.5,
-            trunk_color=trunk,
-            leaf_color=leaf,
-            glow_color=glow,
-            bulb_size=np.random.random() * 0.5 if np.random.random() < 0.4 else 0,
-            tendril_count=np.random.randint(0, 6) if np.random.random() < 0.2 else 0,
-            crystal=np.random.random() < 0.1,
-        )
-    
-    @classmethod
-    def random(cls, seed: int = None) -> "FloraDNA":
-        """Generate a random plant of any type."""
-        if seed is not None:
-            np.random.seed(seed)
-        
-        # Weighted distribution: lots of grass, fewer trees, rare aliens
-        roll = np.random.random()
-        if roll < 0.35:
-            return cls.grass(seed)
-        elif roll < 0.50:
-            return cls.fern(seed)
-        elif roll < 0.65:
-            return cls.bush(seed)
-        elif roll < 0.85:
-            return cls.tree(seed)
-        elif roll < 0.93:
-            return cls.tall_tree(seed)
-        else:
-            return cls.alien(seed)
+from .dna import PlantDNA, PlantType, DNAPool, SegmentGene
 
 
 @dataclass
 class PlantInstance:
-    """A specific plant at a location."""
+    """A specific plant instance at a world location."""
     x: float
-    y: float  # Ground height
+    y: float  # Ground height (already scaled)
     z: float
-    dna: FloraDNA
+    dna: PlantDNA
     scale: float = 1.0
-    rotation: float = 0.0  # Y-axis rotation
+    rotation: float = 0.0  # Y-axis rotation in degrees
+
+
+class PlantRenderer:
+    """Renders individual plants from DNA."""
+    
+    @staticmethod
+    def draw_full(plant: PlantInstance):
+        """Draw plant at full detail using its DNA."""
+        glPushMatrix()
+        glTranslatef(plant.x, plant.y, plant.z)
+        glRotatef(plant.rotation, 0, 1, 0)
+        glScalef(plant.scale, plant.scale, plant.scale)
+        
+        dna = plant.dna
+        
+        if dna.plant_type == PlantType.GRASS:
+            PlantRenderer._draw_grass(dna)
+        elif dna.plant_type == PlantType.FERN:
+            PlantRenderer._draw_fern(dna)
+        elif dna.plant_type in (PlantType.BUSH, PlantType.SHRUB):
+            PlantRenderer._draw_bush(dna)
+        elif dna.plant_type == PlantType.MUSHROOM:
+            PlantRenderer._draw_mushroom(dna)
+        elif dna.plant_type == PlantType.CACTUS:
+            PlantRenderer._draw_cactus(dna)
+        else:
+            # Trees (TREE, TALL_TREE, PALM, ALIEN)
+            PlantRenderer._draw_tree(dna)
+        
+        glPopMatrix()
+    
+    @staticmethod
+    def draw_simple(plant: PlantInstance):
+        """Draw simplified plant for medium distance."""
+        glPushMatrix()
+        glTranslatef(plant.x, plant.y, plant.z)
+        glScalef(plant.scale, plant.scale, plant.scale)
+        
+        dna = plant.dna
+        height = dna.height_gene.value
+        
+        if dna.plant_type == PlantType.GRASS:
+            # Simple grass - crossed quads
+            glColor3f(*dna.leaf_color.rgb)
+            glBegin(GL_TRIANGLES)
+            glVertex3f(-0.08, 0, 0)
+            glVertex3f(0.08, 0, 0)
+            glVertex3f(0, height, 0)
+            glVertex3f(0, 0, -0.08)
+            glVertex3f(0, 0, 0.08)
+            glVertex3f(0, height * 0.9, 0)
+            glEnd()
+        elif dna.plant_type in (PlantType.FERN, PlantType.BUSH, PlantType.SHRUB):
+            # Simple bush - triangle
+            glColor3f(*dna.leaf_color.rgb)
+            spread = height * 0.5
+            glBegin(GL_TRIANGLES)
+            glVertex3f(0, height, 0)
+            glVertex3f(-spread, 0, -spread * 0.5)
+            glVertex3f(spread, 0, spread * 0.5)
+            glVertex3f(0, height * 0.9, 0)
+            glVertex3f(-spread * 0.5, 0, spread)
+            glVertex3f(spread * 0.5, 0, -spread)
+            glEnd()
+        elif dna.plant_type == PlantType.MUSHROOM:
+            # Simple mushroom - stem + cap
+            glColor3f(*dna.trunk_color.rgb)
+            w = dna.width_gene.value * 0.5
+            glBegin(GL_QUADS)
+            glVertex3f(-w, 0, 0)
+            glVertex3f(w, 0, 0)
+            glVertex3f(w, height * 0.7, 0)
+            glVertex3f(-w, height * 0.7, 0)
+            glEnd()
+            glColor3f(*dna.leaf_color.rgb)
+            cap = height * dna.canopy_spread
+            glBegin(GL_TRIANGLES)
+            glVertex3f(0, height, 0)
+            glVertex3f(-cap, height * 0.6, 0)
+            glVertex3f(cap, height * 0.6, 0)
+            glEnd()
+        else:
+            # Trees - trunk + layered cone canopy (looks better than flat triangle)
+            glColor3f(*dna.trunk_color.rgb)
+            w = dna.width_gene.value
+            glBegin(GL_QUADS)
+            glVertex3f(-w, 0, 0)
+            glVertex3f(w, 0, 0)
+            glVertex3f(w * 0.5, height * 0.55, 0)
+            glVertex3f(-w * 0.5, height * 0.55, 0)
+            glEnd()
+            
+            # Multi-layer cone canopy (3 overlapping cones)
+            glColor3f(*dna.leaf_color.rgb)
+            base_spread = height * dna.canopy_spread * 0.45
+            
+            # Bottom layer - widest
+            glBegin(GL_TRIANGLE_FAN)
+            glVertex3f(0, height * 0.75, 0)
+            for i in range(7):
+                angle = (i / 6) * 2 * 3.14159
+                x = math.cos(angle) * base_spread
+                z = math.sin(angle) * base_spread
+                glVertex3f(x, height * 0.35, z)
+            glEnd()
+            
+            # Middle layer
+            glBegin(GL_TRIANGLE_FAN)
+            glVertex3f(0, height * 0.95, 0)
+            for i in range(7):
+                angle = (i / 6) * 2 * 3.14159
+                x = math.cos(angle) * base_spread * 0.7
+                z = math.sin(angle) * base_spread * 0.7
+                glVertex3f(x, height * 0.55, z)
+            glEnd()
+            
+            # Top layer - narrowest
+            glBegin(GL_TRIANGLE_FAN)
+            glVertex3f(0, height * 1.1, 0)
+            for i in range(7):
+                angle = (i / 6) * 2 * 3.14159
+                x = math.cos(angle) * base_spread * 0.4
+                z = math.sin(angle) * base_spread * 0.4
+                glVertex3f(x, height * 0.75, z)
+            glEnd()
+        
+        glPopMatrix()
+    
+    @staticmethod
+    def draw_point(plant: PlantInstance):
+        """Draw plant as a single colored point for far distance."""
+        glColor3f(*plant.dna.leaf_color.rgb)
+        height = plant.dna.height_gene.value * plant.scale
+        glVertex3f(plant.x, plant.y + height * 0.5, plant.z)
+    
+    # === Detailed Drawing Methods ===
+    
+    @staticmethod
+    def _draw_grass(dna: PlantDNA):
+        """Draw grass tuft with multiple blades."""
+        glColor3f(*dna.leaf_color.rgb)
+        height = dna.height_gene.value
+        blade_count = max(5, dna.branch_count)
+        
+        glBegin(GL_TRIANGLES)
+        for i in range(blade_count):
+            angle = (i / blade_count) * 2 * math.pi + i * 0.4
+            spread = 0.12 + (i % 3) * 0.03
+            
+            bx = math.cos(angle) * spread
+            bz = math.sin(angle) * spread
+            
+            # Tip curves outward
+            tip_x = bx * 1.8
+            tip_z = bz * 1.8
+            blade_height = height * (0.6 + (i % 4) * 0.12)
+            
+            # Blade as triangle
+            glVertex3f(bx - 0.015, 0, bz)
+            glVertex3f(bx + 0.015, 0, bz)
+            glVertex3f(tip_x, blade_height, tip_z)
+        glEnd()
+    
+    @staticmethod
+    def _draw_fern(dna: PlantDNA):
+        """Draw fern with multiple fronds."""
+        height = dna.height_gene.value
+        frond_count = max(4, dna.branch_count)
+        
+        for i in range(frond_count):
+            angle = (i / frond_count) * 2 * math.pi
+            
+            glPushMatrix()
+            glRotatef(math.degrees(angle), 0, 1, 0)
+            glRotatef(25 + dna.droop * 35, 1, 0, 0)
+            
+            # Frond stem
+            glColor3f(*dna.trunk_color.rgb)
+            frond_len = height * 0.85
+            
+            glBegin(GL_LINES)
+            glVertex3f(0, 0.05, 0)
+            glVertex3f(0, 0.05, frond_len)
+            glEnd()
+            
+            # Leaflets along frond
+            glColor3f(*dna.leaf_color.rgb)
+            glBegin(GL_TRIANGLES)
+            leaflets = 8
+            for j in range(leaflets):
+                t = (j + 1) / (leaflets + 1)
+                z = frond_len * t
+                size = 0.18 * (1 - t * 0.4) * dna.leaf_size
+                
+                # Left leaflet
+                glVertex3f(0, 0.05, z)
+                glVertex3f(-size, 0.05 + size * 0.25, z + size * 0.4)
+                glVertex3f(0, 0.05, z + size * 0.6)
+                
+                # Right leaflet
+                glVertex3f(0, 0.05, z)
+                glVertex3f(size, 0.05 + size * 0.25, z + size * 0.4)
+                glVertex3f(0, 0.05, z + size * 0.6)
+            glEnd()
+            
+            glPopMatrix()
+    
+    @staticmethod
+    def _draw_bush(dna: PlantDNA):
+        """Draw bush with multiple stems and dome canopy."""
+        height = dna.height_gene.value
+        
+        # Multiple stems
+        glColor3f(*dna.trunk_color.rgb)
+        stem_count = max(3, dna.branch_count)
+        
+        for i in range(stem_count):
+            angle = (i / stem_count) * 2 * math.pi
+            spread = 0.15 + dna.asymmetry * 0.1
+            
+            bx = math.cos(angle) * spread
+            bz = math.sin(angle) * spread
+            stem_height = height * (0.5 + (i % 3) * 0.15)
+            
+            glBegin(GL_LINES)
+            glVertex3f(bx, 0, bz)
+            glVertex3f(bx * 1.3, stem_height, bz * 1.3)
+            glEnd()
+        
+        # Leafy dome
+        glColor3f(*dna.leaf_color.rgb)
+        radius = height * dna.canopy_spread * 0.6
+        
+        glBegin(GL_TRIANGLE_FAN)
+        glVertex3f(0, height, 0)
+        segments = 12
+        for i in range(segments + 1):
+            angle = (i / segments) * 2 * math.pi
+            x = math.cos(angle) * radius
+            z = math.sin(angle) * radius
+            glVertex3f(x, height * 0.25, z)
+        glEnd()
+        
+        # Flowers if present
+        if dna.has_flowers and dna.flower_size > 0:
+            glColor3f(*dna.flower_color.rgb)
+            for i in range(3):
+                angle = i * 2.1
+                fx = math.cos(angle) * radius * 0.7
+                fz = math.sin(angle) * radius * 0.7
+                fy = height * 0.6
+                
+                size = dna.flower_size * 0.3
+                glBegin(GL_TRIANGLES)
+                glVertex3f(fx, fy + size, fz)
+                glVertex3f(fx - size, fy, fz)
+                glVertex3f(fx + size, fy, fz)
+                glEnd()
+    
+    @staticmethod
+    def _draw_mushroom(dna: PlantDNA):
+        """Draw mushroom with stem and cap."""
+        height = dna.height_gene.value
+        width = dna.width_gene.value
+        
+        # Stem
+        glColor3f(*dna.trunk_color.rgb)
+        segments = 8
+        
+        glBegin(GL_QUAD_STRIP)
+        for i in range(segments + 1):
+            angle = (i / segments) * 2 * math.pi
+            x = math.cos(angle) * width * 0.4
+            z = math.sin(angle) * width * 0.4
+            
+            glVertex3f(x, 0, z)
+            glVertex3f(x * 0.8, height * 0.7, z * 0.8)
+        glEnd()
+        
+        # Cap
+        glColor3f(*dna.leaf_color.rgb)
+        cap_radius = height * dna.canopy_spread * 0.8
+        
+        glBegin(GL_TRIANGLE_FAN)
+        glVertex3f(0, height, 0)
+        for i in range(segments + 1):
+            angle = (i / segments) * 2 * math.pi
+            x = math.cos(angle) * cap_radius
+            z = math.sin(angle) * cap_radius
+            glVertex3f(x, height * 0.65, z)
+        glEnd()
+        
+        # Glow effect
+        if dna.has_glow:
+            glColor4f(*dna.glow_color.rgb, dna.glow_intensity * 0.5)
+            glBegin(GL_TRIANGLE_FAN)
+            glVertex3f(0, height * 0.75, 0)
+            for i in range(segments + 1):
+                angle = (i / segments) * 2 * math.pi
+                x = math.cos(angle) * cap_radius * 0.7
+                z = math.sin(angle) * cap_radius * 0.7
+                glVertex3f(x, height * 0.68, z)
+            glEnd()
+    
+    @staticmethod
+    def _draw_cactus(dna: PlantDNA):
+        """Draw cactus with optional arms."""
+        height = dna.height_gene.value
+        width = dna.width_gene.value
+        
+        glColor3f(*dna.trunk_color.rgb)
+        
+        # Main body
+        segments = 8
+        glBegin(GL_QUAD_STRIP)
+        for i in range(segments + 1):
+            angle = (i / segments) * 2 * math.pi
+            x = math.cos(angle) * width * 0.5
+            z = math.sin(angle) * width * 0.5
+            
+            glVertex3f(x, 0, z)
+            glVertex3f(x * 0.9, height, z * 0.9)
+        glEnd()
+        
+        # Top cap
+        glBegin(GL_TRIANGLE_FAN)
+        glVertex3f(0, height + width * 0.3, 0)
+        for i in range(segments + 1):
+            angle = (i / segments) * 2 * math.pi
+            x = math.cos(angle) * width * 0.45
+            z = math.sin(angle) * width * 0.45
+            glVertex3f(x, height, z)
+        glEnd()
+        
+        # Arms
+        for i in range(dna.branch_count):
+            arm_angle = (i / max(1, dna.branch_count)) * 2 * math.pi + 0.5
+            arm_height = height * (0.4 + i * 0.15)
+            
+            glPushMatrix()
+            glTranslatef(0, arm_height, 0)
+            glRotatef(math.degrees(arm_angle), 0, 1, 0)
+            glRotatef(70, 0, 0, 1)
+            
+            arm_len = height * 0.4
+            arm_w = width * 0.3
+            
+            glBegin(GL_QUAD_STRIP)
+            for j in range(segments + 1):
+                a = (j / segments) * 2 * math.pi
+                x = math.cos(a) * arm_w * 0.5
+                z = math.sin(a) * arm_w * 0.5
+                glVertex3f(x, 0, z)
+                glVertex3f(x * 0.8, arm_len, z * 0.8)
+            glEnd()
+            
+            glPopMatrix()
+        
+        # Flower on top
+        if dna.has_flowers:
+            glColor3f(*dna.flower_color.rgb)
+            flower_y = height + width * 0.3
+            size = dna.flower_size * 0.4
+            
+            glBegin(GL_TRIANGLE_FAN)
+            glVertex3f(0, flower_y + size * 0.5, 0)
+            for i in range(7):
+                angle = (i / 6) * 2 * math.pi
+                x = math.cos(angle) * size
+                z = math.sin(angle) * size
+                glVertex3f(x, flower_y, z)
+            glEnd()
+    
+    @staticmethod
+    def _draw_tree(dna: PlantDNA):
+        """Draw tree with multi-segment trunk, branches, and canopy."""
+        # Draw multi-segment trunk
+        glColor3f(*dna.trunk_color.rgb)
+        
+        current_y = 0
+        current_width = dna.width_gene.value
+        total_height = dna.height_gene.value
+        
+        for seg in dna.trunk_segments:
+            seg_height = seg.length * total_height / len(dna.trunk_segments)
+            PlantRenderer._draw_trunk_segment(
+                current_y, seg_height, current_width,
+                seg.taper, seg.curve, seg.twist
+            )
+            current_y += seg_height
+            current_width *= seg.taper
+        
+        # Draw branches
+        if dna.branch_count > 0:
+            branch_start_y = total_height * dna.branch_height
+            PlantRenderer._draw_branches(dna, branch_start_y)
+        
+        # Draw canopy
+        glColor3f(*dna.leaf_color.rgb)
+        PlantRenderer._draw_canopy(dna, total_height)
+        
+        # Draw flowers if present
+        if dna.has_flowers and dna.flower_size > 0:
+            PlantRenderer._draw_flowers(dna, total_height)
+        
+        # Draw glow if present
+        if dna.has_glow and dna.glow_intensity > 0:
+            PlantRenderer._draw_glow(dna, total_height)
+    
+    @staticmethod
+    def _draw_trunk_segment(start_y: float, height: float, width: float,
+                            taper: float, curve: float, twist: float):
+        """Draw a single trunk segment with optional curve and twist."""
+        segments = 6
+        rings = 4
+        
+        glBegin(GL_QUAD_STRIP)
+        for ring in range(rings + 1):
+            t = ring / rings
+            y = start_y + t * height
+            
+            # Apply curve
+            offset_x = curve * math.sin(t * math.pi) * height * 0.15
+            
+            # Current width (with taper)
+            w = width * (1 - t * (1 - taper))
+            
+            # Twist angle
+            twist_angle = twist * t * math.pi
+            
+            for seg in range(segments + 1):
+                angle = (seg / segments) * 2 * math.pi + twist_angle
+                x = math.cos(angle) * w + offset_x
+                z = math.sin(angle) * w
+                
+                if ring < rings:
+                    glVertex3f(x, y, z)
+                else:
+                    glVertex3f(x, y, z)
+        glEnd()
+    
+    @staticmethod
+    def _draw_branches(dna: PlantDNA, start_height: float):
+        """Draw branches from DNA specification."""
+        for i in range(dna.branch_count):
+            angle = (i / dna.branch_count) * 360 * dna.branch_spread
+            angle += dna.asymmetry * 30 * math.sin(i * 2.5)
+            
+            glPushMatrix()
+            glTranslatef(0, start_height + i * 0.3, 0)
+            glRotatef(angle, 0, 1, 0)
+            glRotatef(dna.branch_angle * 75 + dna.droop * 20, 1, 0, 0)
+            
+            # Draw branch segments
+            branch_len = dna.height_gene.value * 0.25
+            branch_w = dna.width_gene.value * 0.25
+            
+            glColor3f(*dna.trunk_color.rgb)
+            for seg in dna.branch_segments:
+                seg_len = seg.length * branch_len
+                glBegin(GL_QUADS)
+                glVertex3f(-branch_w, 0, 0)
+                glVertex3f(branch_w, 0, 0)
+                glVertex3f(branch_w * seg.taper, seg_len, 0)
+                glVertex3f(-branch_w * seg.taper, seg_len, 0)
+                glEnd()
+                branch_w *= seg.taper
+            
+            glPopMatrix()
+    
+    @staticmethod
+    def _draw_canopy(dna: PlantDNA, height: float):
+        """Draw tree canopy based on shape."""
+        spread = height * dna.canopy_spread * 0.5
+        canopy_base = height * 0.5
+        
+        if dna.canopy_shape == "cone":
+            # Cone shape
+            glBegin(GL_TRIANGLE_FAN)
+            glVertex3f(0, height * 1.1, 0)
+            segments = 12
+            for i in range(segments + 1):
+                angle = (i / segments) * 2 * math.pi
+                x = math.cos(angle) * spread
+                z = math.sin(angle) * spread
+                glVertex3f(x, canopy_base, z)
+            glEnd()
+            
+        elif dna.canopy_shape == "umbrella":
+            # Flat umbrella shape
+            segments = 12
+            glBegin(GL_TRIANGLE_FAN)
+            glVertex3f(0, height * 0.95, 0)
+            for i in range(segments + 1):
+                angle = (i / segments) * 2 * math.pi
+                x = math.cos(angle) * spread * 1.2
+                z = math.sin(angle) * spread * 1.2
+                glVertex3f(x, height * 0.85 - dna.droop * spread * 0.3, z)
+            glEnd()
+            
+        elif dna.canopy_shape == "weeping":
+            # Weeping willow style
+            segments = 16
+            for layer in range(3):
+                layer_y = height * (0.9 - layer * 0.15)
+                layer_spread = spread * (0.6 + layer * 0.25)
+                droop_amount = dna.droop * layer * 0.2
+                
+                glBegin(GL_TRIANGLE_FAN)
+                glVertex3f(0, layer_y, 0)
+                for i in range(segments + 1):
+                    angle = (i / segments) * 2 * math.pi
+                    x = math.cos(angle) * layer_spread
+                    z = math.sin(angle) * layer_spread
+                    y = layer_y - droop_amount - abs(math.sin(angle * 3)) * 0.2
+                    glVertex3f(x, y, z)
+                glEnd()
+                
+        elif dna.canopy_shape == "columnar":
+            # Tall narrow shape
+            segments = 8
+            layers = 4
+            for layer in range(layers):
+                layer_y = canopy_base + (height - canopy_base) * layer / layers
+                next_y = canopy_base + (height - canopy_base) * (layer + 1) / layers
+                layer_spread = spread * 0.4 * (1 - layer * 0.15)
+                
+                glBegin(GL_QUAD_STRIP)
+                for i in range(segments + 1):
+                    angle = (i / segments) * 2 * math.pi
+                    x = math.cos(angle) * layer_spread
+                    z = math.sin(angle) * layer_spread
+                    glVertex3f(x, layer_y, z)
+                    glVertex3f(x * 0.9, next_y, z * 0.9)
+                glEnd()
+                
+        else:  # "dome" (default)
+            # Layered dome
+            layers = 3
+            for layer in range(layers):
+                layer_y = height * (0.55 + layer * 0.12)
+                layer_spread = spread * (1 - layer * 0.15)
+                
+                glBegin(GL_TRIANGLE_FAN)
+                glVertex3f(0, layer_y + height * 0.15, 0)
+                segments = 10
+                for i in range(segments + 1):
+                    angle = (i / segments) * 2 * math.pi
+                    x = math.cos(angle) * layer_spread
+                    z = math.sin(angle) * layer_spread
+                    y = layer_y - dna.droop * layer_spread * 0.2
+                    glVertex3f(x, y, z)
+                glEnd()
+    
+    @staticmethod
+    def _draw_flowers(dna: PlantDNA, height: float):
+        """Draw flowers on the plant."""
+        glColor3f(*dna.flower_color.rgb)
+        
+        spread = height * dna.canopy_spread * 0.4
+        size = dna.flower_size * 0.25
+        
+        positions = [
+            (0, height * 0.85, 0),
+            (spread * 0.6, height * 0.7, spread * 0.3),
+            (-spread * 0.5, height * 0.75, -spread * 0.4),
+            (spread * 0.3, height * 0.65, -spread * 0.5),
+        ]
+        
+        for px, py, pz in positions:
+            glBegin(GL_TRIANGLE_FAN)
+            glVertex3f(px, py + size * 0.5, pz)
+            petals = 6
+            for i in range(petals + 1):
+                angle = (i / petals) * 2 * math.pi
+                fx = px + math.cos(angle) * size
+                fz = pz + math.sin(angle) * size
+                glVertex3f(fx, py, fz)
+            glEnd()
+    
+    @staticmethod
+    def _draw_glow(dna: PlantDNA, height: float):
+        """Draw bioluminescent glow effect."""
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE)
+        
+        glColor4f(*dna.glow_color.rgb, dna.glow_intensity * 0.4)
+        
+        spread = height * dna.canopy_spread * 0.5
+        
+        # Glow sphere
+        segments = 8
+        glBegin(GL_TRIANGLE_FAN)
+        glVertex3f(0, height * 0.7, 0)
+        for i in range(segments + 1):
+            angle = (i / segments) * 2 * math.pi
+            x = math.cos(angle) * spread * 0.8
+            z = math.sin(angle) * spread * 0.8
+            glVertex3f(x, height * 0.5, z)
+        glEnd()
+        
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
 
 
 class FloraManager:
-    """Manages plant generation and rendering with LOD."""
+    """Manages plant generation and rendering with LOD and DNA pooling."""
     
     # LOD distances (in world units)
-    LOD_FULL = 50      # Full 3D geometry
-    LOD_SIMPLE = 150   # Simplified geometry
-    LOD_BILLBOARD = 400  # Just colored points/simple shapes
+    LOD_FULL = 120     # Full 3D geometry
+    LOD_SIMPLE = 300   # Simplified geometry
+    LOD_BILLBOARD = 600  # Just colored points
     
     def __init__(self, world_seed: int = 42):
         self.world_seed = world_seed
+        self.dna_pool = DNAPool(world_seed)
         self.chunk_plants: Dict[Tuple[int, int], List[PlantInstance]] = {}
-        self.display_lists: Dict[Tuple[int, int], Tuple[int, int, int]] = {}  # chunk -> (full, simple, point) lists
-        
-        # Pre-generate some DNA templates for variety
-        self.dna_templates = [FloraDNA.random(world_seed + i) for i in range(20)]
+        self.display_lists: Dict[Tuple[int, int], Tuple[int, int, int]] = {}
     
-    def get_plants_for_chunk(self, cx: int, cz: int, heightmap, chunk_world_x: float, 
-                             chunk_world_z: float, tile_scale: float) -> List[PlantInstance]:
-        """Generate or retrieve plants for a chunk."""
+    def get_plants_for_chunk(self, cx: int, cz: int, heightmap, 
+                             chunk_world_x: float, chunk_world_z: float,
+                             tile_scale: float, height_scale: float) -> List[PlantInstance]:
+        """Generate or retrieve plants for a chunk using DNA from the pool."""
         key = (cx, cz)
         if key in self.chunk_plants:
             return self.chunk_plants[key]
         
-        # Deterministic seed for this chunk (ensure positive and in valid range)
-        chunk_seed = abs(hash((self.world_seed, cx, cz))) % (2**31)
-        np.random.seed(chunk_seed)
+        # Get DNA species for this chunk (with neighbor crossover)
+        chunk_dna_list = self.dna_pool.get_dna_for_chunk(cx, cz)
+        
+        # Deterministic RNG for plant placement
+        chunk_seed = abs(hash((self.world_seed, cx, cz, "plants"))) % (2**31)
+        rng = np.random.default_rng(chunk_seed)
         
         plants = []
         h, w = heightmap.shape
         
-        # More plants! Mix of grass, ferns, bushes, trees
-        num_plants = np.random.randint(15, 35)
+        # Place plants using chunk's DNA species
+        num_plants = rng.integers(20, 45)
         
         for _ in range(num_plants):
-            # Random position in chunk
-            local_x = np.random.randint(2, w - 2)
-            local_z = np.random.randint(2, h - 2)
+            local_x = rng.integers(2, w - 2)
+            local_z = rng.integers(2, h - 2)
             
-            # Get ground height
             ground_h = heightmap[local_z, local_x]
             
-            # Only place on land (above water) and not too steep
-            if ground_h < 1:  # Below water
+            # Placement constraints
+            if ground_h < 1:  # Underwater
                 continue
-            if ground_h > 40:  # Too high (mountain)
+            if ground_h > 45:  # Too high
                 continue
             
             # World position
             world_x = chunk_world_x + local_x * tile_scale
             world_z = chunk_world_z + local_z * tile_scale
             
-            # Generate plant DNA based on height/biome
-            plant_seed = chunk_seed + local_x * 100 + local_z
-            if ground_h < 5:  # Near water - more ferns
-                if np.random.random() < 0.4:
-                    dna = FloraDNA.fern(plant_seed)
-                else:
-                    dna = FloraDNA.random(plant_seed)
-            elif ground_h < 15:  # Low land - all types
-                dna = FloraDNA.random(plant_seed)
-            elif ground_h < 30:  # Hills - more trees, less grass
-                roll = np.random.random()
-                if roll < 0.5:
-                    dna = FloraDNA.tree(plant_seed)
-                elif roll < 0.7:
-                    dna = FloraDNA.tall_tree(plant_seed)
-                else:
-                    dna = FloraDNA.bush(plant_seed)
-            else:  # Higher - sparse, hardy plants
-                if np.random.random() < 0.7:
-                    dna = FloraDNA.bush(plant_seed)
-                else:
-                    dna = FloraDNA.grass(plant_seed)
+            # Pick a species from this chunk's DNA pool
+            dna = rng.choice(chunk_dna_list)
+            
+            # Apply slight per-plant mutation for variety
+            if rng.random() < 0.3:
+                dna = dna.mutate(rng, strength=0.15)
             
             # Random variation
-            scale = 0.5 + np.random.random() * 1.0
-            rotation = np.random.random() * 360
+            scale = 0.5 + rng.random() * 1.0
+            rotation = rng.random() * 360
             
             plants.append(PlantInstance(
                 x=world_x,
-                y=ground_h * 3.5,  # HEIGHT_SCALE
+                y=ground_h * height_scale,
                 z=world_z,
                 dna=dna,
                 scale=scale,
@@ -322,350 +704,66 @@ class FloraManager:
         self.chunk_plants[key] = plants
         return plants
     
-    def create_plant_display_lists(self, cx: int, cz: int, plants: List[PlantInstance]) -> Tuple[int, int, int]:
+    def create_display_lists(self, cx: int, cz: int, 
+                             plants: List[PlantInstance]) -> Tuple[int, int, int]:
         """Create display lists for full, simple, and point LODs."""
         key = (cx, cz)
         if key in self.display_lists:
             return self.display_lists[key]
         
-        # Full detail list
+        # Full detail
         full_list = glGenLists(1)
         glNewList(full_list, GL_COMPILE)
         for plant in plants:
-            self._draw_plant_full(plant)
+            PlantRenderer.draw_full(plant)
         glEndList()
         
-        # Simple detail list
+        # Simple detail
         simple_list = glGenLists(1)
         glNewList(simple_list, GL_COMPILE)
         for plant in plants:
-            self._draw_plant_simple(plant)
+            PlantRenderer.draw_simple(plant)
         glEndList()
         
-        # Point/billboard list
+        # Point sprites
         point_list = glGenLists(1)
         glNewList(point_list, GL_COMPILE)
         glPointSize(4)
         glBegin(GL_POINTS)
         for plant in plants:
-            glColor3f(*plant.dna.leaf_color)
-            glVertex3f(plant.x, plant.y + plant.dna.height * plant.scale * 0.5, plant.z)
+            PlantRenderer.draw_point(plant)
         glEnd()
         glEndList()
         
         self.display_lists[key] = (full_list, simple_list, point_list)
-        return (full_list, simple_list, point_list)
-    
-    def _draw_plant_full(self, plant: PlantInstance):
-        """Draw full detail plant based on type."""
-        glPushMatrix()
-        glTranslatef(plant.x, plant.y, plant.z)
-        glRotatef(plant.rotation, 0, 1, 0)
-        glScalef(plant.scale, plant.scale, plant.scale)
-        
-        dna = plant.dna
-        
-        if dna.plant_type == PlantType.GRASS:
-            self._draw_grass(dna)
-        elif dna.plant_type == PlantType.FERN:
-            self._draw_fern(dna)
-        elif dna.plant_type == PlantType.BUSH:
-            self._draw_bush(dna)
-        else:
-            # Tree types (TREE, TALL_TREE, ALIEN)
-            # Draw trunk
-            glColor3f(*dna.trunk_color)
-            self._draw_trunk(dna.height, dna.trunk_width, dna.trunk_curve, dna.spiral)
-            
-            # Draw branches
-            if dna.branch_count > 0:
-                self._draw_branches(dna, dna.height * 0.6, dna.recursion)
-            
-            # Draw canopy/leaves
-            glColor3f(*dna.leaf_color)
-            self._draw_canopy(dna)
-            
-            # Draw bulbs if present (alien plants)
-            if dna.bulb_size > 0:
-                self._draw_bulbs(dna)
-        
-        glPopMatrix()
-    
-    def _draw_grass(self, dna: FloraDNA):
-        """Draw grass tuft."""
-        glColor3f(*dna.leaf_color)
-        height = dna.height
-        
-        glBegin(GL_TRIANGLES)
-        for i in range(dna.blade_count):
-            angle = (i / dna.blade_count) * 2 * math.pi + i * 0.3
-            spread = 0.15
-            
-            # Base positions
-            bx = math.cos(angle) * spread
-            bz = math.sin(angle) * spread
-            
-            # Tip with slight curve outward
-            tip_spread = spread * 1.5
-            tx = math.cos(angle) * tip_spread
-            tz = math.sin(angle) * tip_spread
-            
-            # Triangle blade
-            glVertex3f(bx - 0.02, 0, bz)
-            glVertex3f(bx + 0.02, 0, bz)
-            glVertex3f(tx, height * (0.7 + (i % 3) * 0.15), tz)
-        glEnd()
-    
-    def _draw_fern(self, dna: FloraDNA):
-        """Draw fern with fronds."""
-        height = dna.height
-        
-        for i in range(dna.frond_count):
-            angle = (i / dna.frond_count) * 2 * math.pi
-            
-            glPushMatrix()
-            glRotatef(math.degrees(angle), 0, 1, 0)
-            glRotatef(20 + dna.droop * 40, 1, 0, 0)
-            
-            # Draw frond stem
-            glColor3f(*dna.trunk_color)
-            frond_len = height * 0.8
-            
-            glBegin(GL_LINES)
-            glVertex3f(0, 0.1, 0)
-            glVertex3f(0, 0.1, frond_len)
-            glEnd()
-            
-            # Draw leaflets along frond
-            glColor3f(*dna.leaf_color)
-            glBegin(GL_TRIANGLES)
-            leaflets = 6
-            for j in range(leaflets):
-                t = (j + 1) / (leaflets + 1)
-                z = frond_len * t
-                size = 0.15 * (1 - t * 0.5)  # Smaller toward tip
-                
-                # Left leaflet
-                glVertex3f(0, 0.1, z)
-                glVertex3f(-size, 0.1 + size * 0.3, z + size * 0.5)
-                glVertex3f(0, 0.1, z + size)
-                
-                # Right leaflet
-                glVertex3f(0, 0.1, z)
-                glVertex3f(size, 0.1 + size * 0.3, z + size * 0.5)
-                glVertex3f(0, 0.1, z + size)
-            glEnd()
-            
-            glPopMatrix()
-    
-    def _draw_bush(self, dna: FloraDNA):
-        """Draw bush/shrub."""
-        # Multiple small stems
-        glColor3f(*dna.trunk_color)
-        for i in range(dna.branch_count):
-            angle = (i / dna.branch_count) * 2 * math.pi
-            spread = 0.2
-            
-            bx = math.cos(angle) * spread
-            bz = math.sin(angle) * spread
-            
-            glBegin(GL_LINES)
-            glVertex3f(bx, 0, bz)
-            glVertex3f(bx * 1.5, dna.height * 0.7, bz * 1.5)
-            glEnd()
-        
-        # Leafy dome
-        glColor3f(*dna.leaf_color)
-        radius = dna.height * 0.5
-        
-        # Draw as overlapping cones
-        glBegin(GL_TRIANGLE_FAN)
-        glVertex3f(0, dna.height, 0)
-        segments = 10
-        for i in range(segments + 1):
-            angle = (i / segments) * 2 * math.pi
-            x = math.cos(angle) * radius
-            z = math.sin(angle) * radius
-            glVertex3f(x, dna.height * 0.3, z)
-        glEnd()
-    
-    def _draw_plant_simple(self, plant: PlantInstance):
-        """Draw simplified plant based on type."""
-        glPushMatrix()
-        glTranslatef(plant.x, plant.y, plant.z)
-        glScalef(plant.scale, plant.scale, plant.scale)
-        
-        dna = plant.dna
-        height = dna.height
-        
-        if dna.plant_type == PlantType.GRASS:
-            # Simple grass - just a few lines
-            glColor3f(*dna.leaf_color)
-            glBegin(GL_LINES)
-            glVertex3f(-0.05, 0, 0)
-            glVertex3f(0, height, 0)
-            glVertex3f(0.05, 0, 0)
-            glVertex3f(0.02, height * 0.9, 0)
-            glEnd()
-        elif dna.plant_type in (PlantType.FERN, PlantType.BUSH):
-            # Simple bush/fern - triangle
-            glColor3f(*dna.leaf_color)
-            spread = height * 0.4
-            glBegin(GL_TRIANGLES)
-            glVertex3f(0, height, 0)
-            glVertex3f(-spread, 0, -spread * 0.5)
-            glVertex3f(spread, 0, spread * 0.5)
-            glEnd()
-        else:
-            # Trees - trunk + canopy triangle
-            glColor3f(*dna.trunk_color)
-            w = dna.trunk_width
-            glBegin(GL_QUADS)
-            glVertex3f(-w, 0, 0)
-            glVertex3f(w, 0, 0)
-            glVertex3f(w * 0.5, height * 0.6, 0)
-            glVertex3f(-w * 0.5, height * 0.6, 0)
-            glEnd()
-            
-            glColor3f(*dna.leaf_color)
-            spread = height * 0.4
-            glBegin(GL_TRIANGLES)
-            glVertex3f(0, height, 0)
-            glVertex3f(-spread, height * 0.4, -spread)
-            glVertex3f(spread, height * 0.4, spread)
-            glEnd()
-        
-        glPopMatrix()
-    
-    def _draw_trunk(self, height: float, width: float, curve: float, spiral: float):
-        """Draw plant trunk with optional curve/spiral."""
-        segments = 8
-        seg_height = height * 0.7 / segments
-        
-        glBegin(GL_QUAD_STRIP)
-        for i in range(segments + 1):
-            t = i / segments
-            y = t * height * 0.7
-            
-            # Curve offset
-            offset_x = curve * math.sin(t * math.pi) * height * 0.2
-            offset_z = spiral * t * 2 * math.pi
-            
-            # Taper
-            w = width * (1 - t * 0.6)
-            
-            # Two vertices for strip
-            angle1 = offset_z
-            angle2 = offset_z + math.pi
-            
-            glVertex3f(offset_x + math.cos(angle1) * w, y, math.sin(angle1) * w)
-            glVertex3f(offset_x + math.cos(angle2) * w, y, math.sin(angle2) * w)
-        glEnd()
-    
-    def _draw_branches(self, dna: FloraDNA, start_height: float, depth: int):
-        """Draw recursive branches."""
-        if depth <= 0 or dna.branch_count == 0:
-            return
-        
-        for i in range(dna.branch_count):
-            angle = (i / dna.branch_count) * 360
-            
-            glPushMatrix()
-            glTranslatef(0, start_height, 0)
-            glRotatef(angle, 0, 1, 0)
-            glRotatef(dna.branch_angle * 90, 1, 0, 0)
-            
-            # Draw branch segment
-            length = dna.branch_length * dna.height * 0.3
-            w = dna.trunk_width * 0.4
-            
-            glBegin(GL_QUADS)
-            glVertex3f(-w, 0, 0)
-            glVertex3f(w, 0, 0)
-            glVertex3f(w * 0.5, length, 0)
-            glVertex3f(-w * 0.5, length, 0)
-            glEnd()
-            
-            glPopMatrix()
-    
-    def _draw_canopy(self, dna: FloraDNA):
-        """Draw leaf canopy."""
-        height = dna.height
-        spread = height * 0.35 * (1 + dna.branch_length)
-        
-        # Draw as layered cones
-        layers = 3
-        for layer in range(layers):
-            layer_y = height * (0.5 + layer * 0.15)
-            layer_spread = spread * (1 - layer * 0.2)
-            
-            glBegin(GL_TRIANGLE_FAN)
-            glVertex3f(0, layer_y + height * 0.2, 0)  # Top
-            
-            segments = 8
-            for i in range(segments + 1):
-                angle = (i / segments) * 2 * math.pi
-                x = math.cos(angle) * layer_spread
-                z = math.sin(angle) * layer_spread
-                y = layer_y - dna.droop * layer_spread * 0.3
-                glVertex3f(x, y, z)
-            glEnd()
-    
-    def _draw_bulbs(self, dna: FloraDNA):
-        """Draw fruit/bulb decorations."""
-        size = dna.bulb_size * 0.5
-        height = dna.height
-        
-        # Glow color if present
-        if dna.glow_color != (0, 0, 0):
-            glColor3f(*dna.glow_color)
-        else:
-            glColor3f(dna.leaf_color[0] * 1.3, dna.leaf_color[1] * 0.8, dna.leaf_color[2] * 1.2)
-        
-        # Simple spheres as quads
-        positions = [
-            (0, height * 0.8, 0),
-            (height * 0.2, height * 0.6, height * 0.1),
-            (-height * 0.15, height * 0.65, -height * 0.15),
-        ]
-        
-        for px, py, pz in positions:
-            glBegin(GL_QUADS)
-            glVertex3f(px - size, py - size, pz)
-            glVertex3f(px + size, py - size, pz)
-            glVertex3f(px + size, py + size, pz)
-            glVertex3f(px - size, py + size, pz)
-            glEnd()
+        return self.display_lists[key]
     
     def render_chunk_flora(self, cx: int, cz: int, camera_x: float, camera_z: float,
                            heightmap, chunk_world_x: float, chunk_world_z: float,
-                           tile_scale: float):
+                           tile_scale: float, height_scale: float = 3.5):
         """Render plants for a chunk with appropriate LOD."""
-        # Get or generate plants
-        plants = self.get_plants_for_chunk(cx, cz, heightmap, chunk_world_x, chunk_world_z, tile_scale)
+        plants = self.get_plants_for_chunk(
+            cx, cz, heightmap, chunk_world_x, chunk_world_z, tile_scale, height_scale
+        )
         
         if not plants:
             return
         
-        # Get or create display lists
-        full_list, simple_list, point_list = self.create_plant_display_lists(cx, cz, plants)
+        full_list, simple_list, point_list = self.create_display_lists(cx, cz, plants)
         
-        # Calculate distance to chunk center
+        # Distance to chunk center
         chunk_center_x = chunk_world_x + 16 * tile_scale
         chunk_center_z = chunk_world_z + 16 * tile_scale
         dist = math.sqrt((camera_x - chunk_center_x)**2 + (camera_z - chunk_center_z)**2)
         
-        # Disable lighting for simpler plants
         glDisable(GL_LIGHTING)
         
-        # Choose LOD based on distance
         if dist < self.LOD_FULL:
             glCallList(full_list)
         elif dist < self.LOD_SIMPLE:
             glCallList(simple_list)
         elif dist < self.LOD_BILLBOARD:
             glCallList(point_list)
-        # Beyond LOD_BILLBOARD: don't render
         
         glEnable(GL_LIGHTING)
     
@@ -673,11 +771,12 @@ class FloraManager:
         """Remove cached data for a chunk."""
         key = (cx, cz)
         if key in self.display_lists:
-            full_list, simple_list, point_list = self.display_lists[key]
-            glDeleteLists(full_list, 1)
-            glDeleteLists(simple_list, 1)
-            glDeleteLists(point_list, 1)
+            for dl in self.display_lists[key]:
+                glDeleteLists(dl, 1)
             del self.display_lists[key]
         if key in self.chunk_plants:
             del self.chunk_plants[key]
-
+    
+    def update_camera_position(self, camera_cx: int, camera_cz: int):
+        """Called when camera moves to potentially crossover DNA from neighbors."""
+        self.dna_pool.cleanup_distant_chunks(camera_cx, camera_cz, max_distance=25)

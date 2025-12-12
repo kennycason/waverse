@@ -1,448 +1,675 @@
 """
-WaveDNA - The genetic code of a Waverse world.
+DNA System for Procedural Generation.
 
-Everything in the world is deterministically generated from this DNA structure.
-The DNA is JSON-serializable for saving/loading/sharing worlds.
+This module provides a genetic system for plants, creatures, and other
+procedurally generated entities. DNA can be:
+- Randomly generated
+- Mutated (small random changes)
+- Crossed over (combined from two parents)
+- Serialized to/from JSON
+
+The DNA uses a gene-based system where each gene controls a specific trait.
 """
 
 from dataclasses import dataclass, field, asdict
-from typing import List, Optional, Tuple, Dict, Any, Literal
+from typing import List, Tuple, Dict, Any, Optional
+import numpy as np
 import json
-import hashlib
+import copy
 
 
-# Wave function types
-WaveType = Literal["sin", "cos", "triangle", "sawtooth", "square", "perlin", "simplex", "ridged"]
-
-# Falloff function types for localized features  
-FalloffType = Literal["linear", "gaussian", "cosine", "smooth", "sharp"]
-
-
-@dataclass
-class Wave:
-    """
-    A single wave component in the Fourier-style terrain generation.
-    
-    Waves can be 2D (affect height based on x,z) or 3D (affect density in volume).
-    """
-    # Frequency in x and z directions (lower = larger features)
-    freq_x: float = 0.01
-    freq_z: float = 0.01
-    
-    # Optional frequency in y for 3D waves (caves/overhangs)
-    freq_y: Optional[float] = None
-    
-    # Amplitude (height contribution)
-    amplitude: float = 10.0
-    
-    # Phase offset (shifts the wave pattern)
-    phase: float = 0.0
-    
-    # Direction angle in radians (rotates the wave pattern)
-    direction: float = 0.0
-    
-    # Wave function type
-    wave_type: WaveType = "sin"
-    
-    # Optional: harmonic number for Fourier series
-    harmonic: int = 1
-    
-    def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
-    
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Wave":
-        return cls(**data)
+# Type aliases for clarity
+Color = Tuple[float, float, float]
+Range = Tuple[float, float]
 
 
 @dataclass
-class WaveLayer:
-    """
-    A layer of waves that are summed together.
+class Gene:
+    """A single gene with a value, valid range, and mutation rate."""
+    value: float
+    min_val: float = 0.0
+    max_val: float = 1.0
+    mutation_rate: float = 0.1  # How much this gene can mutate (0-1)
     
-    Layers can have different purposes:
-    - "continental": Very low frequency, large landmasses
-    - "regional": Medium frequency, hills and valleys  
-    - "detail": High frequency, small bumps and texture
-    - "cave": 3D waves for cave generation
-    """
-    name: str
-    waves: List[Wave] = field(default_factory=list)
+    def mutate(self, rng: np.random.Generator, strength: float = 1.0) -> "Gene":
+        """Return a mutated copy of this gene."""
+        mutation = rng.normal(0, self.mutation_rate * strength)
+        new_value = np.clip(self.value + mutation, self.min_val, self.max_val)
+        return Gene(new_value, self.min_val, self.max_val, self.mutation_rate)
     
-    # Blend mode with other layers
-    blend_mode: Literal["add", "multiply", "max", "min", "average"] = "add"
+    def crossover(self, other: "Gene", rng: np.random.Generator) -> "Gene":
+        """Combine with another gene (blend or pick one)."""
+        if rng.random() < 0.5:
+            # Blend
+            blend = rng.random()
+            new_value = self.value * blend + other.value * (1 - blend)
+        else:
+            # Pick one
+            new_value = self.value if rng.random() < 0.5 else other.value
+        return Gene(new_value, self.min_val, self.max_val, self.mutation_rate)
+
+
+@dataclass
+class ColorGene:
+    """A gene that represents an RGB color."""
+    r: float = 0.5
+    g: float = 0.5
+    b: float = 0.5
+    mutation_rate: float = 0.15
     
-    # Overall layer weight
-    weight: float = 1.0
+    @property
+    def rgb(self) -> Color:
+        return (self.r, self.g, self.b)
     
-    # Optional: only apply below/above certain heights
-    height_min: Optional[float] = None
-    height_max: Optional[float] = None
-    
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "name": self.name,
-            "waves": [w.to_dict() for w in self.waves],
-            "blend_mode": self.blend_mode,
-            "weight": self.weight,
-            "height_min": self.height_min,
-            "height_max": self.height_max,
-        }
-    
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "WaveLayer":
-        waves = [Wave.from_dict(w) for w in data.get("waves", [])]
-        return cls(
-            name=data["name"],
-            waves=waves,
-            blend_mode=data.get("blend_mode", "add"),
-            weight=data.get("weight", 1.0),
-            height_min=data.get("height_min"),
-            height_max=data.get("height_max"),
+    def mutate(self, rng: np.random.Generator, strength: float = 1.0) -> "ColorGene":
+        """Return a mutated copy."""
+        def mutate_channel(val):
+            mutation = rng.normal(0, self.mutation_rate * strength)
+            return float(np.clip(val + mutation, 0, 1))
+        
+        return ColorGene(
+            mutate_channel(self.r),
+            mutate_channel(self.g),
+            mutate_channel(self.b),
+            self.mutation_rate
         )
-
-
-@dataclass
-class Feature:
-    """
-    A localized feature with a center point and radius.
     
-    Features have their own wave patterns that blend with the global terrain
-    based on distance from center and falloff function.
-    """
-    # Feature type identifier
-    feature_type: str = "mountain"
-    
-    # Center position in world coordinates
-    center_x: float = 0.0
-    center_z: float = 0.0
-    
-    # Radius of influence
-    radius: float = 100.0
-    
-    # Falloff type (how influence decreases with distance)
-    falloff: FalloffType = "gaussian"
-    
-    # Waves that define this feature's shape
-    waves: List[Wave] = field(default_factory=list)
-    
-    # Height offset (raises/lowers the feature)
-    height_offset: float = 0.0
-    
-    # Optional: vertical extent for 3D features
-    y_min: Optional[float] = None
-    y_max: Optional[float] = None
-    
-    # Optional: seed for deterministic variation within feature
-    local_seed: Optional[int] = None
-    
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "feature_type": self.feature_type,
-            "center_x": self.center_x,
-            "center_z": self.center_z,
-            "radius": self.radius,
-            "falloff": self.falloff,
-            "waves": [w.to_dict() for w in self.waves],
-            "height_offset": self.height_offset,
-            "y_min": self.y_min,
-            "y_max": self.y_max,
-            "local_seed": self.local_seed,
-        }
+    def crossover(self, other: "ColorGene", rng: np.random.Generator) -> "ColorGene":
+        """Combine with another color gene."""
+        blend = rng.random()
+        return ColorGene(
+            self.r * blend + other.r * (1 - blend),
+            self.g * blend + other.g * (1 - blend),
+            self.b * blend + other.b * (1 - blend),
+            self.mutation_rate
+        )
     
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Feature":
-        waves = [Wave.from_dict(w) for w in data.get("waves", [])]
-        return cls(
-            feature_type=data.get("feature_type", "mountain"),
-            center_x=data.get("center_x", 0.0),
-            center_z=data.get("center_z", 0.0),
-            radius=data.get("radius", 100.0),
-            falloff=data.get("falloff", "gaussian"),
-            waves=waves,
-            height_offset=data.get("height_offset", 0.0),
-            y_min=data.get("y_min"),
-            y_max=data.get("y_max"),
-            local_seed=data.get("local_seed"),
-        )
+    def from_hsv(cls, h: float, s: float, v: float) -> "ColorGene":
+        """Create from HSV values (0-1 range)."""
+        # HSV to RGB conversion
+        h = h * 6.0
+        i = int(h)
+        f = h - i
+        p = v * (1 - s)
+        q = v * (1 - s * f)
+        t = v * (1 - s * (1 - f))
+        
+        if i == 0: r, g, b = v, t, p
+        elif i == 1: r, g, b = q, v, p
+        elif i == 2: r, g, b = p, v, t
+        elif i == 3: r, g, b = p, q, v
+        elif i == 4: r, g, b = t, p, v
+        else: r, g, b = v, p, q
+        
+        return cls(r, g, b)
 
 
 @dataclass 
-class CaveLayer:
-    """
-    Defines cave/tunnel generation using 3D wave carving.
+class SegmentGene:
+    """A gene describing a plant segment (trunk section, branch, etc.)."""
+    length: float = 1.0       # Segment length (0.1 - 5.0)
+    width: float = 0.2        # Segment width (0.05 - 1.0)
+    taper: float = 0.8        # Width reduction toward end (0.3 - 1.0)
+    curve: float = 0.0        # Curvature (-1 to 1)
+    twist: float = 0.0        # Twist/spiral (0 to 1)
     
-    Caves are generated by creating regions where density < 0 (air).
-    """
-    name: str = "caves"
-    
-    # 3D waves that carve out caves
-    waves: List[Wave] = field(default_factory=list)
-    
-    # Threshold: values below this become air
-    threshold: float = 0.0
-    
-    # Depth range where caves can appear
-    y_min: float = -50.0
-    y_max: float = 20.0
-    
-    # Cave density (probability of cave existing)
-    density: float = 0.3
-    
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "name": self.name,
-            "waves": [w.to_dict() for w in self.waves],
-            "threshold": self.threshold,
-            "y_min": self.y_min,
-            "y_max": self.y_max,
-            "density": self.density,
-        }
-    
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "CaveLayer":
-        waves = [Wave.from_dict(w) for w in data.get("waves", [])]
-        return cls(
-            name=data.get("name", "caves"),
-            waves=waves,
-            threshold=data.get("threshold", 0.0),
-            y_min=data.get("y_min", -50.0),
-            y_max=data.get("y_max", 20.0),
-            density=data.get("density", 0.3),
+    def mutate(self, rng: np.random.Generator, strength: float = 1.0) -> "SegmentGene":
+        """Return mutated copy."""
+        rate = 0.1 * strength
+        return SegmentGene(
+            float(np.clip(self.length + rng.normal(0, rate), 0.1, 5.0)),
+            float(np.clip(self.width + rng.normal(0, rate * 0.5), 0.05, 1.0)),
+            float(np.clip(self.taper + rng.normal(0, rate * 0.3), 0.3, 1.0)),
+            float(np.clip(self.curve + rng.normal(0, rate * 0.5), -1, 1)),
+            float(np.clip(self.twist + rng.normal(0, rate * 0.3), 0, 1)),
         )
+    
+    def crossover(self, other: "SegmentGene", rng: np.random.Generator) -> "SegmentGene":
+        """Combine with another segment gene."""
+        blend = rng.random()
+        return SegmentGene(
+            self.length * blend + other.length * (1 - blend),
+            self.width * blend + other.width * (1 - blend),
+            self.taper * blend + other.taper * (1 - blend),
+            self.curve * blend + other.curve * (1 - blend),
+            self.twist * blend + other.twist * (1 - blend),
+        )
+
+
+class PlantType:
+    """Plant type categories."""
+    GRASS = "grass"
+    FERN = "fern"
+    BUSH = "bush"
+    SHRUB = "shrub"
+    TREE = "tree"
+    TALL_TREE = "tall_tree"
+    PALM = "palm"
+    CACTUS = "cactus"
+    MUSHROOM = "mushroom"
+    ALIEN = "alien"
+    
+    ALL_TYPES = [GRASS, FERN, BUSH, SHRUB, TREE, TALL_TREE, PALM, CACTUS, MUSHROOM, ALIEN]
 
 
 @dataclass
-class WaveDNA:
+class PlantDNA:
     """
-    The complete DNA of a Waverse world.
+    Complete DNA for a plant, controlling all aspects of growth and appearance.
     
-    This is the master structure that defines everything about terrain generation.
-    It's JSON-serializable for saving, loading, and sharing worlds.
+    The DNA is hierarchical:
+    - Base traits (type, overall size)
+    - Trunk/stem segments (multi-jointed growth)
+    - Branch patterns
+    - Leaf/canopy traits
+    - Special features (flowers, fruits, glow)
+    - Colors
     """
-    # Version for compatibility
-    version: str = "1.0"
+    # Identity
+    plant_type: str = PlantType.TREE
+    species_id: int = 0  # For tracking lineage
+    generation: int = 0  # Mutation generation
     
-    # World seed for deterministic generation
-    seed: int = 42
+    # Base traits
+    height_gene: Gene = field(default_factory=lambda: Gene(5.0, 0.2, 25.0, 0.2))
+    width_gene: Gene = field(default_factory=lambda: Gene(0.3, 0.05, 1.5, 0.15))
     
-    # World name (optional)
-    name: str = "Untitled World"
+    # Multi-segment trunk (allows for jointed/curved growth)
+    trunk_segments: List[SegmentGene] = field(default_factory=lambda: [
+        SegmentGene(1.0, 0.3, 0.85, 0.0, 0.0)
+    ])
     
-    # Base water level (y coordinate)
-    water_level: float = 0.0
+    # Branching
+    branch_count: int = 4
+    branch_angle: float = 0.4      # 0 = up, 1 = horizontal
+    branch_spread: float = 1.0     # How evenly spread around trunk
+    branch_height: float = 0.6     # Where branches start (0-1 of height)
+    branch_segments: List[SegmentGene] = field(default_factory=lambda: [
+        SegmentGene(0.5, 0.1, 0.7, 0.1, 0.0)
+    ])
+    sub_branch_chance: float = 0.3  # Chance of sub-branches
     
-    # Bedrock level (minimum terrain depth)
-    bedrock_level: float = -100.0
+    # Leaves/Canopy
+    leaf_density: float = 0.7      # 0 = sparse, 1 = dense
+    leaf_size: float = 0.5         # Relative leaf size
+    leaf_shape: str = "round"      # round, pointed, frond, needle, blade
+    canopy_shape: str = "dome"     # dome, cone, umbrella, weeping, columnar
+    canopy_spread: float = 0.5     # How wide the canopy spreads
     
-    # Sky level (maximum terrain height)  
-    sky_level: float = 200.0
+    # Special features
+    has_flowers: bool = False
+    flower_size: float = 0.0
+    has_fruit: bool = False
+    fruit_size: float = 0.0
+    has_glow: bool = False
+    glow_intensity: float = 0.0
+    has_thorns: bool = False
     
-    # Global wave layers (applied everywhere)
-    layers: List[WaveLayer] = field(default_factory=list)
+    # Colors
+    trunk_color: ColorGene = field(default_factory=lambda: ColorGene(0.35, 0.25, 0.15))
+    leaf_color: ColorGene = field(default_factory=lambda: ColorGene(0.2, 0.55, 0.2))
+    flower_color: ColorGene = field(default_factory=lambda: ColorGene(0.9, 0.3, 0.5))
+    glow_color: ColorGene = field(default_factory=lambda: ColorGene(0.5, 0.8, 0.5))
     
-    # Localized features (mountains, craters, etc.)
-    features: List[Feature] = field(default_factory=list)
+    # Variation genes (for procedural detail)
+    asymmetry: float = 0.1         # How asymmetric the growth is
+    droop: float = 0.0             # How much branches droop
+    wind_sway: float = 0.3         # Animation responsiveness (future)
     
-    # Cave generation layers
-    cave_layers: List[CaveLayer] = field(default_factory=list)
+    def mutate(self, rng: np.random.Generator = None, strength: float = 0.5) -> "PlantDNA":
+        """
+        Create a mutated copy of this DNA.
+        
+        Args:
+            rng: Random generator (creates one if None)
+            strength: Mutation strength (0 = no change, 1 = strong mutation)
+        
+        Returns:
+            New PlantDNA with mutations applied
+        """
+        if rng is None:
+            rng = np.random.default_rng()
+        
+        # Deep copy first
+        new_dna = copy.deepcopy(self)
+        new_dna.generation += 1
+        
+        # Mutate genes
+        new_dna.height_gene = self.height_gene.mutate(rng, strength)
+        new_dna.width_gene = self.width_gene.mutate(rng, strength)
+        
+        # Mutate segments
+        new_dna.trunk_segments = [s.mutate(rng, strength) for s in self.trunk_segments]
+        new_dna.branch_segments = [s.mutate(rng, strength) for s in self.branch_segments]
+        
+        # Maybe add/remove a trunk segment
+        if rng.random() < 0.1 * strength:
+            if len(new_dna.trunk_segments) < 5 and rng.random() < 0.5:
+                # Add segment
+                new_dna.trunk_segments.append(SegmentGene(
+                    0.5 + rng.random(), 0.15, 0.8, rng.random() * 0.3 - 0.15, 0
+                ))
+            elif len(new_dna.trunk_segments) > 1:
+                # Remove segment
+                new_dna.trunk_segments.pop()
+        
+        # Mutate scalar values
+        rate = 0.1 * strength
+        new_dna.branch_count = max(0, min(12, self.branch_count + int(rng.normal(0, 1))))
+        new_dna.branch_angle = float(np.clip(self.branch_angle + rng.normal(0, rate), 0, 1))
+        new_dna.branch_spread = float(np.clip(self.branch_spread + rng.normal(0, rate), 0.2, 1.5))
+        new_dna.branch_height = float(np.clip(self.branch_height + rng.normal(0, rate), 0.2, 0.9))
+        new_dna.sub_branch_chance = float(np.clip(self.sub_branch_chance + rng.normal(0, rate), 0, 0.8))
+        
+        new_dna.leaf_density = float(np.clip(self.leaf_density + rng.normal(0, rate), 0.1, 1))
+        new_dna.leaf_size = float(np.clip(self.leaf_size + rng.normal(0, rate), 0.1, 1.5))
+        new_dna.canopy_spread = float(np.clip(self.canopy_spread + rng.normal(0, rate), 0.2, 1.5))
+        
+        new_dna.asymmetry = float(np.clip(self.asymmetry + rng.normal(0, rate * 0.5), 0, 0.5))
+        new_dna.droop = float(np.clip(self.droop + rng.normal(0, rate), 0, 1))
+        
+        # Mutate colors
+        new_dna.trunk_color = self.trunk_color.mutate(rng, strength)
+        new_dna.leaf_color = self.leaf_color.mutate(rng, strength)
+        new_dna.flower_color = self.flower_color.mutate(rng, strength)
+        new_dna.glow_color = self.glow_color.mutate(rng, strength)
+        
+        # Small chance to gain/lose features
+        if rng.random() < 0.05 * strength:
+            new_dna.has_flowers = not self.has_flowers
+            if new_dna.has_flowers:
+                new_dna.flower_size = 0.1 + rng.random() * 0.4
+        if rng.random() < 0.03 * strength:
+            new_dna.has_glow = not self.has_glow
+            if new_dna.has_glow:
+                new_dna.glow_intensity = 0.3 + rng.random() * 0.5
+        
+        return new_dna
     
-    # Chunk size in world units
-    chunk_size: int = 64
-    
-    # Tile size within chunks (grid resolution)
-    tile_size: float = 1.0
-    
-    def __post_init__(self):
-        """Generate world hash from DNA content."""
-        self._hash = None
+    def crossover(self, other: "PlantDNA", rng: np.random.Generator = None) -> "PlantDNA":
+        """
+        Create offspring DNA by combining two parent DNAs.
+        
+        Args:
+            other: The other parent DNA
+            rng: Random generator
+        
+        Returns:
+            New PlantDNA combining traits from both parents
+        """
+        if rng is None:
+            rng = np.random.default_rng()
+        
+        # Start with copy of self
+        child = copy.deepcopy(self)
+        child.generation = max(self.generation, other.generation) + 1
+        
+        # Crossover genes
+        child.height_gene = self.height_gene.crossover(other.height_gene, rng)
+        child.width_gene = self.width_gene.crossover(other.width_gene, rng)
+        
+        # For segments, blend or pick
+        if rng.random() < 0.5:
+            child.trunk_segments = [
+                s1.crossover(s2, rng) 
+                for s1, s2 in zip(self.trunk_segments, other.trunk_segments)
+            ] if len(self.trunk_segments) == len(other.trunk_segments) else (
+                self.trunk_segments if rng.random() < 0.5 else other.trunk_segments
+            )
+        else:
+            child.trunk_segments = other.trunk_segments
+        
+        # Crossover scalars (pick or blend)
+        def cross_scalar(a, b):
+            if rng.random() < 0.5:
+                return a * rng.random() + b * (1 - rng.random())
+            return a if rng.random() < 0.5 else b
+        
+        def cross_int(a, b):
+            return a if rng.random() < 0.5 else b
+        
+        child.branch_count = cross_int(self.branch_count, other.branch_count)
+        child.branch_angle = cross_scalar(self.branch_angle, other.branch_angle)
+        child.branch_spread = cross_scalar(self.branch_spread, other.branch_spread)
+        child.branch_height = cross_scalar(self.branch_height, other.branch_height)
+        child.leaf_density = cross_scalar(self.leaf_density, other.leaf_density)
+        child.leaf_size = cross_scalar(self.leaf_size, other.leaf_size)
+        child.canopy_spread = cross_scalar(self.canopy_spread, other.canopy_spread)
+        child.asymmetry = cross_scalar(self.asymmetry, other.asymmetry)
+        child.droop = cross_scalar(self.droop, other.droop)
+        
+        # Crossover shapes (pick one)
+        child.leaf_shape = self.leaf_shape if rng.random() < 0.5 else other.leaf_shape
+        child.canopy_shape = self.canopy_shape if rng.random() < 0.5 else other.canopy_shape
+        
+        # Crossover colors
+        child.trunk_color = self.trunk_color.crossover(other.trunk_color, rng)
+        child.leaf_color = self.leaf_color.crossover(other.leaf_color, rng)
+        child.flower_color = self.flower_color.crossover(other.flower_color, rng)
+        
+        # Inherit features from either parent
+        child.has_flowers = self.has_flowers or other.has_flowers if rng.random() < 0.5 else (
+            self.has_flowers and other.has_flowers)
+        child.has_glow = self.has_glow if rng.random() < 0.5 else other.has_glow
+        
+        return child
     
     @property
-    def world_hash(self) -> str:
-        """Generate a unique hash for this world DNA."""
-        if self._hash is None:
-            content = json.dumps(self.to_dict(), sort_keys=True)
-            self._hash = hashlib.sha256(content.encode()).hexdigest()[:16]
-        return self._hash
+    def total_height(self) -> float:
+        """Calculate total plant height from segments."""
+        return sum(s.length for s in self.trunk_segments) * self.height_gene.value
     
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to JSON-serializable dictionary."""
+        """Serialize DNA to dictionary for JSON storage."""
         return {
-            "version": self.version,
-            "seed": self.seed,
-            "name": self.name,
-            "water_level": self.water_level,
-            "bedrock_level": self.bedrock_level,
-            "sky_level": self.sky_level,
-            "layers": [layer.to_dict() for layer in self.layers],
-            "features": [feat.to_dict() for feat in self.features],
-            "cave_layers": [cave.to_dict() for cave in self.cave_layers],
-            "chunk_size": self.chunk_size,
-            "tile_size": self.tile_size,
+            "plant_type": self.plant_type,
+            "species_id": int(self.species_id) if self.species_id else 0,
+            "generation": self.generation,
+            "height": float(self.height_gene.value),
+            "width": float(self.width_gene.value),
+            "trunk_segments": [
+                {"length": float(s.length), "width": float(s.width), "taper": float(s.taper), 
+                 "curve": float(s.curve), "twist": float(s.twist)}
+                for s in self.trunk_segments
+            ],
+            "branch_count": int(self.branch_count),
+            "branch_angle": float(self.branch_angle),
+            "leaf_density": float(self.leaf_density),
+            "trunk_color": [float(c) for c in self.trunk_color.rgb],
+            "leaf_color": [float(c) for c in self.leaf_color.rgb],
+            "has_flowers": bool(self.has_flowers),
+            "has_glow": bool(self.has_glow),
         }
     
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "WaveDNA":
-        """Create WaveDNA from dictionary."""
-        layers = [WaveLayer.from_dict(l) for l in data.get("layers", [])]
-        features = [Feature.from_dict(f) for f in data.get("features", [])]
-        cave_layers = [CaveLayer.from_dict(c) for c in data.get("cave_layers", [])]
-        
-        dna = cls(
-            version=data.get("version", "1.0"),
-            seed=data.get("seed", 42),
-            name=data.get("name", "Untitled World"),
-            water_level=data.get("water_level", 0.0),
-            bedrock_level=data.get("bedrock_level", -100.0),
-            sky_level=data.get("sky_level", 200.0),
-            layers=layers,
-            features=features,
-            cave_layers=cave_layers,
-            chunk_size=data.get("chunk_size", 64),
-            tile_size=data.get("tile_size", 1.0),
-        )
-        return dna
-    
-    def to_json(self, indent: int = 2) -> str:
+    def to_json(self) -> str:
         """Serialize to JSON string."""
-        return json.dumps(self.to_dict(), indent=indent)
+        return json.dumps(self.to_dict(), indent=2)
     
     @classmethod
-    def from_json(cls, json_str: str) -> "WaveDNA":
-        """Deserialize from JSON string."""
-        return cls.from_dict(json.loads(json_str))
-    
-    def save(self, filepath: str):
-        """Save DNA to a JSON file."""
-        with open(filepath, 'w') as f:
-            f.write(self.to_json())
-    
-    @classmethod
-    def load(cls, filepath: str) -> "WaveDNA":
-        """Load DNA from a JSON file."""
-        with open(filepath, 'r') as f:
-            return cls.from_json(f.read())
-    
-    @classmethod
-    def create_default(cls) -> "WaveDNA":
-        """Create a default world with interesting terrain."""
-        return cls(
-            name="Default Waverse World",
-            seed=42,
-            water_level=0.0,
-            layers=[
-                # Continental scale - huge rolling landmasses
-                WaveLayer(
-                    name="continental",
-                    waves=[
-                        Wave(freq_x=0.002, freq_z=0.002, amplitude=40, phase=0.0, wave_type="sin"),
-                        Wave(freq_x=0.003, freq_z=0.001, amplitude=25, phase=1.5, wave_type="sin"),
-                        Wave(freq_x=0.001, freq_z=0.004, amplitude=30, phase=0.8, wave_type="cos"),
-                    ],
-                    weight=1.0,
-                ),
-                # Regional scale - hills and valleys
-                WaveLayer(
-                    name="regional", 
-                    waves=[
-                        Wave(freq_x=0.01, freq_z=0.01, amplitude=15, phase=0.0, wave_type="sin"),
-                        Wave(freq_x=0.015, freq_z=0.008, amplitude=10, phase=2.1, wave_type="sin"),
-                        Wave(freq_x=0.008, freq_z=0.02, amplitude=12, phase=0.5, wave_type="perlin"),
-                    ],
-                    weight=1.0,
-                ),
-                # Detail scale - small bumps and texture
-                WaveLayer(
-                    name="detail",
-                    waves=[
-                        Wave(freq_x=0.05, freq_z=0.05, amplitude=3, phase=0.0, wave_type="perlin"),
-                        Wave(freq_x=0.1, freq_z=0.1, amplitude=1.5, phase=1.0, wave_type="simplex"),
-                        Wave(freq_x=0.08, freq_z=0.06, amplitude=2, phase=0.3, wave_type="ridged"),
-                    ],
-                    weight=1.0,
-                ),
-            ],
-            features=[
-                # A big mountain
-                Feature(
-                    feature_type="mountain",
-                    center_x=200,
-                    center_z=200,
-                    radius=150,
-                    falloff="gaussian",
-                    waves=[
-                        Wave(freq_x=0.02, freq_z=0.02, amplitude=50, wave_type="cos"),
-                    ],
-                    height_offset=30,
-                ),
-                # A crater/valley
-                Feature(
-                    feature_type="crater",
-                    center_x=-150,
-                    center_z=100,
-                    radius=80,
-                    falloff="cosine",
-                    waves=[
-                        Wave(freq_x=0.03, freq_z=0.03, amplitude=-30, wave_type="cos"),
-                    ],
-                    height_offset=-15,
-                ),
-            ],
-            cave_layers=[
-                CaveLayer(
-                    name="primary_caves",
-                    waves=[
-                        Wave(freq_x=0.05, freq_z=0.05, freq_y=0.08, amplitude=1.0, wave_type="perlin"),
-                        Wave(freq_x=0.1, freq_z=0.08, freq_y=0.1, amplitude=0.5, wave_type="simplex"),
-                    ],
-                    threshold=0.3,
-                    y_min=-60,
-                    y_max=10,
-                    density=0.25,
-                ),
-            ],
-        )
-    
-    @classmethod
-    def create_psychedelic(cls) -> "WaveDNA":
-        """Create a wild, trippy world with extreme wave patterns."""
-        return cls(
-            name="Psychedelic Realm",
-            seed=420,
-            water_level=-5.0,
-            layers=[
-                # Crazy continental with mixed wave types
-                WaveLayer(
-                    name="continental_chaos",
-                    waves=[
-                        Wave(freq_x=0.003, freq_z=0.002, amplitude=50, wave_type="sin"),
-                        Wave(freq_x=0.002, freq_z=0.005, amplitude=40, wave_type="triangle"),
-                        Wave(freq_x=0.004, freq_z=0.003, amplitude=35, wave_type="ridged", phase=1.2),
-                    ],
-                ),
-                # Interference patterns
-                WaveLayer(
-                    name="interference",
-                    waves=[
-                        Wave(freq_x=0.02, freq_z=0.02, amplitude=20, wave_type="sin", direction=0.0),
-                        Wave(freq_x=0.02, freq_z=0.02, amplitude=20, wave_type="sin", direction=0.5),
-                        Wave(freq_x=0.02, freq_z=0.02, amplitude=20, wave_type="sin", direction=1.0),
-                    ],
-                ),
-                # High frequency ripples
-                WaveLayer(
-                    name="ripples",
-                    waves=[
-                        Wave(freq_x=0.15, freq_z=0.15, amplitude=5, wave_type="sin"),
-                        Wave(freq_x=0.12, freq_z=0.18, amplitude=4, wave_type="cos", phase=0.7),
-                    ],
-                ),
-            ],
-        )
+    def create_random(cls, plant_type: str = None, seed: int = None) -> "PlantDNA":
+        """
+        Create a random plant DNA of a given type.
+        
+        Args:
+            plant_type: Type of plant (uses random if None)
+            seed: Random seed for reproducibility
+        
+        Returns:
+            New random PlantDNA
+        """
+        rng = np.random.default_rng(seed)
+        
+        if plant_type is None:
+            # Weighted random type
+            weights = [0.25, 0.12, 0.12, 0.08, 0.18, 0.08, 0.05, 0.04, 0.03, 0.05]
+            plant_type = rng.choice(PlantType.ALL_TYPES, p=weights)
+        
+        dna = cls(plant_type=plant_type, species_id=seed or rng.integers(0, 100000))
+        
+        # Configure based on type
+        if plant_type == PlantType.GRASS:
+            dna.height_gene = Gene(0.2 + rng.random() * 0.5, 0.1, 1.0, 0.1)
+            dna.width_gene = Gene(0.02, 0.01, 0.05, 0.05)
+            dna.trunk_segments = []
+            dna.branch_count = 5 + rng.integers(0, 10)
+            dna.leaf_shape = "blade"
+            dna.canopy_shape = "columnar"
+            dna.leaf_color = ColorGene(0.2 + rng.random() * 0.1, 0.4 + rng.random() * 0.3, 0.15)
+            
+        elif plant_type == PlantType.FERN:
+            dna.height_gene = Gene(0.6 + rng.random() * 1.5, 0.3, 2.5, 0.15)
+            dna.width_gene = Gene(0.05, 0.02, 0.1, 0.05)
+            dna.trunk_segments = [SegmentGene(0.1, 0.05, 0.9, 0.1, 0)]
+            dna.branch_count = 4 + rng.integers(0, 8)
+            dna.branch_angle = 0.6 + rng.random() * 0.3
+            dna.leaf_shape = "frond"
+            dna.droop = 0.3 + rng.random() * 0.4
+            dna.leaf_color = ColorGene(0.15, 0.45 + rng.random() * 0.25, 0.2)
+            
+        elif plant_type in (PlantType.BUSH, PlantType.SHRUB):
+            dna.height_gene = Gene(0.8 + rng.random() * 2.0, 0.5, 3.5, 0.2)
+            dna.width_gene = Gene(0.1 + rng.random() * 0.15, 0.05, 0.3, 0.1)
+            dna.trunk_segments = [
+                SegmentGene(0.3, 0.15, 0.8, rng.random() * 0.2 - 0.1, 0)
+                for _ in range(1 + rng.integers(0, 2))
+            ]
+            dna.branch_count = 5 + rng.integers(0, 8)
+            dna.branch_angle = 0.4 + rng.random() * 0.4
+            dna.branch_height = 0.1 + rng.random() * 0.3
+            dna.canopy_shape = "dome"
+            dna.leaf_density = 0.7 + rng.random() * 0.3
+            dna.leaf_color = ColorGene(0.2 + rng.random() * 0.1, 0.4 + rng.random() * 0.3, 0.15)
+            dna.has_flowers = rng.random() < 0.3
+            if dna.has_flowers:
+                dna.flower_size = 0.1 + rng.random() * 0.2
+                dna.flower_color = ColorGene.from_hsv(rng.random(), 0.6 + rng.random() * 0.4, 0.8)
+            
+        elif plant_type == PlantType.TREE:
+            dna.height_gene = Gene(4 + rng.random() * 8, 2, 15, 0.25)
+            dna.width_gene = Gene(0.2 + rng.random() * 0.3, 0.1, 0.6, 0.15)
+            dna.trunk_segments = [
+                SegmentGene(
+                    0.6 + rng.random() * 0.6,
+                    0.3 - i * 0.08,
+                    0.85,
+                    rng.random() * 0.15 - 0.075,
+                    0
+                )
+                for i in range(2 + rng.integers(0, 2))
+            ]
+            dna.branch_count = 4 + rng.integers(0, 5)
+            dna.branch_angle = 0.3 + rng.random() * 0.35
+            dna.branch_height = 0.5 + rng.random() * 0.3
+            dna.canopy_shape = rng.choice(["dome", "cone", "umbrella"])
+            dna.canopy_spread = 0.4 + rng.random() * 0.4
+            dna.trunk_color = ColorGene(0.3 + rng.random() * 0.15, 0.2 + rng.random() * 0.1, 0.1)
+            dna.leaf_color = ColorGene(0.15 + rng.random() * 0.1, 0.35 + rng.random() * 0.35, 0.1)
+            
+        elif plant_type == PlantType.TALL_TREE:
+            dna.height_gene = Gene(12 + rng.random() * 12, 8, 30, 0.3)
+            dna.width_gene = Gene(0.4 + rng.random() * 0.5, 0.2, 1.0, 0.2)
+            dna.trunk_segments = [
+                SegmentGene(
+                    0.8 + rng.random() * 0.5,
+                    0.5 - i * 0.1,
+                    0.9,
+                    rng.random() * 0.1 - 0.05,
+                    0
+                )
+                for i in range(3 + rng.integers(0, 3))
+            ]
+            dna.branch_count = 5 + rng.integers(0, 6)
+            dna.branch_angle = 0.25 + rng.random() * 0.3
+            dna.branch_height = 0.6 + rng.random() * 0.2
+            dna.sub_branch_chance = 0.4 + rng.random() * 0.3
+            dna.canopy_shape = rng.choice(["dome", "cone"])
+            dna.canopy_spread = 0.5 + rng.random() * 0.5
+            dna.trunk_color = ColorGene(0.25 + rng.random() * 0.15, 0.18, 0.08)
+            dna.leaf_color = ColorGene(0.1, 0.3 + rng.random() * 0.25, 0.08)
+            
+        elif plant_type == PlantType.PALM:
+            dna.height_gene = Gene(6 + rng.random() * 10, 4, 18, 0.25)
+            dna.width_gene = Gene(0.25 + rng.random() * 0.2, 0.15, 0.5, 0.1)
+            dna.trunk_segments = [
+                SegmentGene(1.2 + rng.random() * 0.5, 0.3, 0.95, rng.random() * 0.3 - 0.15, 0)
+                for _ in range(2 + rng.integers(0, 2))
+            ]
+            dna.branch_count = 6 + rng.integers(0, 8)
+            dna.branch_angle = 0.5 + rng.random() * 0.4
+            dna.branch_height = 0.95  # Branches only at top
+            dna.leaf_shape = "frond"
+            dna.canopy_shape = "umbrella"
+            dna.droop = 0.4 + rng.random() * 0.3
+            dna.trunk_color = ColorGene(0.4, 0.35, 0.25)
+            dna.leaf_color = ColorGene(0.2, 0.5 + rng.random() * 0.2, 0.15)
+            
+        elif plant_type == PlantType.CACTUS:
+            dna.height_gene = Gene(1 + rng.random() * 4, 0.5, 6, 0.2)
+            dna.width_gene = Gene(0.3 + rng.random() * 0.4, 0.2, 0.8, 0.15)
+            dna.trunk_segments = [
+                SegmentGene(1.0 + rng.random() * 0.5, 0.5, 0.95, 0, 0)
+            ]
+            dna.branch_count = rng.integers(0, 4)
+            dna.branch_angle = 0.1 + rng.random() * 0.2
+            dna.leaf_density = 0  # No leaves
+            dna.has_thorns = True
+            dna.trunk_color = ColorGene(0.2, 0.45 + rng.random() * 0.2, 0.15)
+            dna.has_flowers = rng.random() < 0.3
+            if dna.has_flowers:
+                dna.flower_color = ColorGene.from_hsv(rng.random(), 0.8, 0.9)
+                dna.flower_size = 0.15 + rng.random() * 0.2
+            
+        elif plant_type == PlantType.MUSHROOM:
+            dna.height_gene = Gene(0.3 + rng.random() * 1.5, 0.1, 2.5, 0.2)
+            dna.width_gene = Gene(0.1 + rng.random() * 0.2, 0.05, 0.4, 0.1)
+            dna.trunk_segments = [SegmentGene(0.8, 0.2, 1.1, 0, 0)]  # Taper outward
+            dna.branch_count = 0
+            dna.canopy_shape = "dome"
+            dna.canopy_spread = 0.8 + rng.random() * 0.6
+            dna.trunk_color = ColorGene(0.85, 0.8, 0.7)
+            dna.leaf_color = ColorGene.from_hsv(rng.random(), 0.5 + rng.random() * 0.4, 0.6 + rng.random() * 0.3)
+            dna.has_glow = rng.random() < 0.4
+            if dna.has_glow:
+                dna.glow_intensity = 0.3 + rng.random() * 0.5
+                dna.glow_color = ColorGene(
+                    dna.leaf_color.r * 0.5 + 0.5,
+                    dna.leaf_color.g * 0.5 + 0.5,
+                    dna.leaf_color.b * 0.5 + 0.5
+                )
+            
+        elif plant_type == PlantType.ALIEN:
+            # Truly random/weird
+            dna.height_gene = Gene(1 + rng.random() * 15, 0.5, 20, 0.35)
+            dna.width_gene = Gene(0.1 + rng.random() * 0.5, 0.05, 1.0, 0.25)
+            dna.trunk_segments = [
+                SegmentGene(
+                    0.3 + rng.random() * 1.0,
+                    0.1 + rng.random() * 0.4,
+                    0.5 + rng.random() * 0.5,
+                    rng.random() * 0.8 - 0.4,
+                    rng.random() * 0.5
+                )
+                for _ in range(1 + rng.integers(0, 5))
+            ]
+            dna.branch_count = rng.integers(0, 10)
+            dna.branch_angle = rng.random()
+            dna.leaf_shape = rng.choice(["round", "pointed", "frond", "needle", "blade"])
+            dna.canopy_shape = rng.choice(["dome", "cone", "umbrella", "weeping", "columnar"])
+            dna.asymmetry = 0.2 + rng.random() * 0.3
+            
+            # Alien colors
+            dna.trunk_color = ColorGene.from_hsv(rng.random(), 0.3 + rng.random() * 0.5, 0.3 + rng.random() * 0.4)
+            dna.leaf_color = ColorGene.from_hsv(rng.random(), 0.5 + rng.random() * 0.5, 0.5 + rng.random() * 0.5)
+            
+            # High chance of special features
+            dna.has_flowers = rng.random() < 0.5
+            dna.has_glow = rng.random() < 0.4
+            dna.has_fruit = rng.random() < 0.3
+            
+            if dna.has_flowers:
+                dna.flower_color = ColorGene.from_hsv(rng.random(), 0.7, 0.9)
+                dna.flower_size = 0.1 + rng.random() * 0.4
+            if dna.has_glow:
+                dna.glow_intensity = 0.4 + rng.random() * 0.6
+                dna.glow_color = ColorGene(
+                    0.5 + rng.random() * 0.5,
+                    0.5 + rng.random() * 0.5,
+                    0.5 + rng.random() * 0.5
+                )
+            if dna.has_fruit:
+                dna.fruit_size = 0.1 + rng.random() * 0.3
+        
+        return dna
 
 
-# Convenience function
-def create_wave_dna(**kwargs) -> WaveDNA:
-    """Quick factory for creating WaveDNA with custom parameters."""
-    return WaveDNA(**kwargs)
-
+class DNAPool:
+    """
+    Manages a population of DNA for a region, handling mutation and crossover
+    as the player moves through the world.
+    """
+    
+    def __init__(self, seed: int = 42):
+        self.seed = seed
+        self.rng = np.random.default_rng(seed)
+        self.chunk_dna: Dict[Tuple[int, int], List[PlantDNA]] = {}
+        
+        # Template DNA for each biome (base species)
+        self.templates = self._generate_templates()
+    
+    def _generate_templates(self) -> Dict[str, List[PlantDNA]]:
+        """Generate base template DNA for each plant type."""
+        templates = {}
+        for i, plant_type in enumerate(PlantType.ALL_TYPES):
+            templates[plant_type] = [
+                PlantDNA.create_random(plant_type, self.seed + i * 100 + j)
+                for j in range(3)  # 3 variations per type
+            ]
+        return templates
+    
+    def get_dna_for_chunk(self, cx: int, cz: int) -> List[PlantDNA]:
+        """
+        Get or generate DNA for plants in a chunk.
+        Uses neighboring chunk DNA for crossover to create gradual variation.
+        """
+        key = (cx, cz)
+        if key in self.chunk_dna:
+            return self.chunk_dna[key]
+        
+        # Deterministic RNG for this chunk
+        chunk_seed = abs(hash((self.seed, cx, cz))) % (2**31)
+        chunk_rng = np.random.default_rng(chunk_seed)
+        
+        # Get neighbor DNA for crossover (if available)
+        neighbors = []
+        for dx, dz in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            neighbor_key = (cx + dx, cz + dz)
+            if neighbor_key in self.chunk_dna:
+                neighbors.extend(self.chunk_dna[neighbor_key])
+        
+        # Generate DNA for this chunk
+        num_species = 3 + chunk_rng.integers(0, 5)
+        chunk_dna = []
+        
+        for i in range(num_species):
+            # Pick a plant type based on position (pseudo-biome)
+            biome_factor = np.sin(cx * 0.1) * np.cos(cz * 0.1)
+            if biome_factor > 0.3:
+                plant_type = chunk_rng.choice([PlantType.TREE, PlantType.TALL_TREE, PlantType.BUSH])
+            elif biome_factor < -0.3:
+                plant_type = chunk_rng.choice([PlantType.GRASS, PlantType.FERN, PlantType.CACTUS])
+            else:
+                plant_type = chunk_rng.choice(PlantType.ALL_TYPES)
+            
+            # Get base template
+            base_templates = self.templates.get(plant_type, self.templates[PlantType.TREE])
+            base = chunk_rng.choice(base_templates)
+            
+            # If we have neighbors, crossover with them
+            if neighbors and chunk_rng.random() < 0.6:
+                # Find similar neighbor
+                similar = [n for n in neighbors if n.plant_type == base.plant_type]
+                if similar:
+                    parent2 = chunk_rng.choice(similar)
+                    offspring = base.crossover(parent2, chunk_rng)
+                    # Also mutate slightly
+                    offspring = offspring.mutate(chunk_rng, strength=0.3)
+                    chunk_dna.append(offspring)
+                    continue
+            
+            # Otherwise just mutate the template
+            mutated = base.mutate(chunk_rng, strength=0.4)
+            chunk_dna.append(mutated)
+        
+        self.chunk_dna[key] = chunk_dna
+        return chunk_dna
+    
+    def cleanup_distant_chunks(self, center_cx: int, center_cz: int, max_distance: int = 30):
+        """Remove DNA for chunks that are too far away to save memory."""
+        to_remove = []
+        for (cx, cz) in self.chunk_dna:
+            if abs(cx - center_cx) > max_distance or abs(cz - center_cz) > max_distance:
+                to_remove.append((cx, cz))
+        
+        for key in to_remove:
+            del self.chunk_dna[key]
