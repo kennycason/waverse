@@ -180,23 +180,27 @@ class WorldConfig:
             name="Default World",
             seed=42,
             waves=[
-                # Base - flat with gentle variation
-                WaveConfig("sin", freq=0.0008, amp=5, phase=0),
-                WaveConfig("cos", freq=0.0012, amp=4, phase=0.3, direction=0.4),
+                # CONTINENTAL SCALE - very low frequency for huge landmasses
+                # These create variation over 1000s of tiles
+                WaveConfig("sin", freq=0.0001, amp=8, phase=0),  # ~6000 tile wavelength
+                WaveConfig("cos", freq=0.00015, amp=6, phase=0.5, direction=0.7),
+                WaveConfig("perlin", freq=0.0002, amp=10, octaves=2),  # Continental noise
                 
-                # Very gentle rolling plains
-                WaveConfig("perlin", freq=0.003, amp=4, octaves=2),
+                # REGIONAL SCALE - large features like mountain ranges, basins
+                WaveConfig("sin", freq=0.0005, amp=5, phase=0.2),
+                WaveConfig("cos", freq=0.0007, amp=4, phase=0.3, direction=0.4),
+                WaveConfig("perlin", freq=0.001, amp=6, octaves=2),
                 
-                # Sparse hills - low frequency means far apart
-                WaveConfig("sin2d", freq=0.004, freq_z=0.003, amp=6),
-                WaveConfig("perlin", freq=0.008, amp=5, octaves=2),
+                # LOCAL SCALE - individual hills, valleys
+                WaveConfig("sin2d", freq=0.002, freq_z=0.0015, amp=4),
+                WaveConfig("perlin", freq=0.004, amp=4, octaves=2),
                 
-                # Occasional mountains - very sparse
-                WaveConfig("ridged", freq=0.006, amp=18, octaves=3),
+                # MOUNTAIN RIDGES - sparse, dramatic
+                WaveConfig("ridged", freq=0.003, amp=15, octaves=3),
                 
-                # Subtle ground texture
-                WaveConfig("perlin", freq=0.03, amp=1.5, octaves=2),
-                WaveConfig("perlin", freq=0.08, amp=0.5, octaves=1),
+                # DETAIL - small bumps and texture
+                WaveConfig("perlin", freq=0.015, amp=1.5, octaves=2),
+                WaveConfig("perlin", freq=0.04, amp=0.5, octaves=1),
             ]
         )
     

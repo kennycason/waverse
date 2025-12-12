@@ -9,6 +9,8 @@ from pygame.locals import *
 import numpy as np
 import math
 import time
+import json
+import os
 
 try:
     from OpenGL.GL import *
@@ -43,6 +45,44 @@ LOD_FULL_DISTANCE = 5      # Full detail within this range
 LOD_HALF_DISTANCE = 10     # Half detail within this range  
 LOD_QUARTER_DISTANCE = 15  # Quarter detail within this range
 # Beyond that = 1/8th detail
+
+
+SAVE_FILE = os.path.expanduser("~/.waverse.json")
+
+
+def save_position(camera, seed: int):
+    """Save current position to config file."""
+    data = {
+        "seed": seed,
+        "x": camera.x,
+        "y": camera.y,
+        "z": camera.z,
+        "yaw": camera.yaw,
+        "pitch": camera.pitch,
+        "flying": camera.flying,
+        "speed_level": camera.speed_level,
+    }
+    try:
+        with open(SAVE_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+        print(f"  Position saved to {SAVE_FILE}")
+    except Exception as e:
+        print(f"  Error saving: {e}")
+
+
+def load_position(seed: int) -> dict:
+    """Load saved position if it exists and matches seed."""
+    try:
+        if os.path.exists(SAVE_FILE):
+            with open(SAVE_FILE, "r") as f:
+                data = json.load(f)
+            if data.get("seed") == seed:
+                return data
+            else:
+                print(f"  Save file is for different seed ({data.get('seed')}), starting fresh")
+    except Exception as e:
+        print(f"  Could not load save: {e}")
+    return None
 
 
 def height_to_color(h: float) -> tuple:
@@ -687,13 +727,25 @@ def run_explorer(config: WorldConfig = None):
     water_list = create_water_plane()
     minimap = Minimap(chunk_manager)
     
-    # Camera
+    # Camera - try to load saved position
     camera = Camera()
-    camera.y = chunk_manager.get_height_at(0, 0) * HEIGHT_SCALE + 30
+    saved = load_position(config.seed)
+    if saved:
+        camera.x = saved.get("x", 0)
+        camera.y = saved.get("y", 40)
+        camera.z = saved.get("z", 0)
+        camera.yaw = saved.get("yaw", 0)
+        camera.pitch = saved.get("pitch", -20)
+        camera.flying = saved.get("flying", True)
+        camera.speed_level = saved.get("speed_level", 2)
+        print(f"  Loaded position: ({camera.x:.0f}, {camera.y:.0f}, {camera.z:.0f})")
+    else:
+        camera.y = chunk_manager.get_height_at(0, 0) * HEIGHT_SCALE + 30
     
-    # Pre-load ALL visible chunks at startup
+    # Pre-load chunks around camera position
+    start_chunk = camera.get_chunk_pos()
     print("  Loading terrain (this may take a moment on first run)...")
-    chunk_renderer.update_chunks((0, 0), force_all=True)
+    chunk_renderer.update_chunks(start_chunk, force_all=True)
     total_chunks = len(chunk_renderer.display_lists)
     print(f"  Loaded {total_chunks} chunks!")
     
@@ -706,6 +758,7 @@ def run_explorer(config: WorldConfig = None):
     print("  MOVEMENT: WASD/Arrows | H/Space=Up F/Shift=Down")
     print("  CAMERA: IJKL or Right-Click+Mouse")
     print("  SPEED: 1=Slow 2 3=Normal 4 5=Fast")
+    print("  SAVE: S (saves position to ~/.waverse.json)")
     print("  EXIT: ESC")
     print("=" * 60 + "\n")
     
@@ -741,6 +794,8 @@ def run_explorer(config: WorldConfig = None):
                 elif event.key == pygame.K_5:
                     camera.set_speed(4)
                     print("  Speed: 5 (Fast)")
+                elif event.key == pygame.K_s:
+                    save_position(camera, config.seed)
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 3:
                     mouse_look = True

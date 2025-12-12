@@ -643,20 +643,33 @@ class AnimalManager:
             
             ground_h = heightmap[local_z, local_x]
             
-            # Determine what can spawn here (relaxed conditions)
+            # Determine what can spawn here - favor GROUND animals
             if ground_h < 2:
                 # Near/in water - skip for now (fish rendering is complex)
                 continue
-            elif ground_h < 35:
-                # Most land - common animals
+            elif ground_h < 15:
+                # Lowlands - lots of variety, more snakes/reptiles
+                animal_type = rng.choice([
+                    AnimalType.MAMMAL, AnimalType.MAMMAL, AnimalType.MAMMAL, AnimalType.MAMMAL,
+                    AnimalType.REPTILE, AnimalType.REPTILE,
+                    AnimalType.WORM,  # Snakes
+                    AnimalType.INSECT,
+                    AnimalType.BIRD
+                ])
+            elif ground_h < 30:
+                # Hills - mammals, birds, some reptiles
                 animal_type = rng.choice([
                     AnimalType.MAMMAL, AnimalType.MAMMAL, AnimalType.MAMMAL,
-                    AnimalType.INSECT, AnimalType.BIRD, AnimalType.BIRD,
-                    AnimalType.REPTILE
+                    AnimalType.REPTILE,
+                    AnimalType.BIRD, AnimalType.BIRD,
+                    AnimalType.INSECT
                 ])
             else:
-                # High ground - birds, hardy mammals
-                animal_type = rng.choice([AnimalType.BIRD, AnimalType.MAMMAL])
+                # High ground - mostly mammals and birds
+                animal_type = rng.choice([
+                    AnimalType.MAMMAL, AnimalType.MAMMAL,
+                    AnimalType.BIRD
+                ])
             
             # Get template and mutate
             templates = self.species_templates.get(animal_type, self.species_templates[AnimalType.MAMMAL])

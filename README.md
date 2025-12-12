@@ -1,202 +1,91 @@
-# Waverse 🌊
+# Waverse
 
-**Infinite Wave-Based World Generator**
+An infinite procedural world built from stacked wave functions. Terrain, plants, and creatures are all generated from DNA-like structures that mutate and crossover as you explore.
 
-A procedural world generation system using stacked wave functions (Fourier-style) with DNA-based deterministic generation. Build crazy terrains from waves on waves, with support for caves, tunnels, and more.
+![Waverse World](screenshots/screenshot01.png)
 
-## Features
+## What is this?
 
-- **Wave-Based Terrain**: Stack sine, cosine, triangle, perlin, and other wave functions to create complex terrain patterns
-- **DNA System**: JSON-serializable world definitions for saving, loading, and sharing worlds
-- **Infinite World**: Chunk-based generation with automatic loading/unloading
-- **Beyond Heightmaps**: Vertical segment system supports caves, overhangs, and tunnels
-- **Segment Merging**: Automatic optimization to reduce draw calls for flat areas
-- **Digging**: Modify terrain in real-time
+Waverse generates terrain by stacking sine waves, perlin noise, and other wave functions on top of each other. Think of it like a Fourier transform for landscapes. The result is an infinite world you can walk or fly through in real-time.
 
-## Quick Start
+Plants and animals have their own DNA that controls their shape, color, and behavior. When new chunks of the world are generated, they inherit and mutate DNA from neighboring chunks. This creates gradual variation as you travel - forests slowly shift in character, creatures change form.
+
+![Day and Night](screenshots/screenshot02.png)
+
+## Key Features
+
+**Terrain Generation**
+- Waves stacked on waves: sin, cos, perlin, ridged noise
+- Continuous infinite world via chunk system
+- Background worker pre-generates chunks ahead of you
+
+**Flora DNA**
+- 15 plant types: grass, flowers, ferns, bushes, trees, pines, palms, willows, cacti, mushrooms, coral, crystals, alien forms
+- Multi-segment trunks, branches, canopies
+- Neighboring chunks crossover DNA to create gradual biome transitions
+
+**Fauna DNA**
+- 9 animal types: insects, birds, fish, mammals, reptiles, amphibians, jellyfish, worms, alien creatures
+- Articulated bodies with animated joints
+- Simple AI: wander, graze, flock, swarm, flee
+
+**Day/Night Cycle**
+- Sun and moon follow shifting orbital paths
+- Sky colors transition through dawn, day, dusk, night
+- Stars visible at night
+
+![Flora Variety](screenshots/screenshot03.png)
+
+## Running It
 
 ```bash
-# Install dependencies
 pip install -r requirements.txt
-
-# Run with default world
 python main.py
-
-# Run with psychedelic preset
-python main.py --psychedelic
-
-# 2D preview (no OpenGL needed)
-python main.py --preview
-
-# Custom seed
-python main.py --seed 12345
-
-# Load custom DNA
-python main.py --dna my_world.json
-
-# Save generated DNA
-python main.py --save-dna my_world.json
 ```
 
-## Controls (3D Explorer)
+To clear cached chunks and regenerate:
+```bash
+python main.py --clear-cache
+```
+
+## Controls
 
 | Key | Action |
 |-----|--------|
 | WASD / Arrows | Move |
 | H / Space | Fly up |
-| F / Shift | Fly down |
-| Right-Click + Mouse | Look around |
-| IJKL | Keyboard look |
-| Left-Click | Dig |
-| Alt (hold) | Speed boost |
+| F / Shift | Fly down / Land |
+| IJKL | Look around |
+| Right-click + Mouse | Mouse look |
+| 1-5 | Movement speed (1=slow, 5=fast) |
+| S | Save position |
 | ESC | Exit |
 
-## DNA Structure
+## How DNA Crossover Works
 
-The world is defined by a JSON DNA structure:
+Each chunk has a pool of plant and animal DNA templates. When a new chunk generates:
 
-```json
-{
-  "name": "My World",
-  "seed": 42,
-  "water_level": 0.0,
-  "chunk_size": 32,
-  "tile_size": 1.0,
-  "layers": [
-    {
-      "name": "continental",
-      "waves": [
-        {"freq_x": 0.002, "freq_z": 0.002, "amplitude": 40, "wave_type": "sin"}
-      ]
-    }
-  ],
-  "features": [
-    {
-      "feature_type": "mountain",
-      "center_x": 100,
-      "center_z": 100,
-      "radius": 80,
-      "falloff": "gaussian",
-      "height_offset": 30
-    }
-  ]
-}
-```
+1. It looks at what DNA exists in neighboring chunks
+2. It picks parents from those neighbors
+3. It creates offspring via crossover (blending traits) and mutation (random changes)
+4. The offspring become the species for the new chunk
 
-### Wave Types
+This means if you walk in one direction, you'll see gradual shifts in the flora and fauna. Walk far enough and the world looks completely different.
 
-| Type | Description |
-|------|-------------|
-| `sin` | Classic sine wave |
-| `cos` | Classic cosine wave |
-| `triangle` | Linear ramps up and down |
-| `sawtooth` | Linear ramp with sharp drop |
-| `square` | Binary high/low |
-| `perlin` | Organic noise (requires `noise` library) |
-| `simplex` | Faster variant of perlin |
-| `ridged` | Sharp ridges, great for mountains |
-
-### Falloff Types (for localized features)
-
-| Type | Description |
-|------|-------------|
-| `linear` | Linear decay from center |
-| `gaussian` | Smooth bell curve |
-| `cosine` | Smooth S-curve |
-| `smooth` | Very smooth at edges |
-| `sharp` | Maintains strength until near edge |
-
-## Architecture
+## Project Structure
 
 ```
 waverse/
-├── dna.py        # WaveDNA, WaveLayer, Wave, Feature classes
-├── waves.py      # Wave function implementations
-├── terrain.py    # TerrainColumn, TerrainTile, segment merging
-├── chunk.py      # Chunk, ChunkManager for infinite world
-├── mesh.py       # Mesh generation from terrain
-└── renderer.py   # OpenGL rendering
+  dna.py          - Plant DNA with genes for growth, color, features
+  animal_dna.py   - Animal DNA with body segments, limbs, AI behavior
+  flora.py        - Plant rendering with LOD
+  animals.py      - Animal rendering and AI updates
+  world.py        - Terrain generation from wave configs
+  chunk_worker.py - Background thread for pre-generating chunks
+  explorer.py     - OpenGL renderer and game loop
+  sky.py          - Day/night cycle, sun, moon, stars
 ```
-
-### Key Concepts
-
-1. **WaveDNA**: The complete genetic code of a world. Deterministic - same DNA = same world.
-
-2. **WaveLayer**: A group of waves summed together. Layers can be:
-   - Continental (low frequency, large features)
-   - Regional (medium frequency, hills/valleys)
-   - Detail (high frequency, texture)
-
-3. **Feature**: A localized modification with center, radius, and falloff.
-
-4. **TerrainColumn**: Vertical stack of segments at one (x, z) position. Supports caves via multiple segments.
-
-5. **Chunk**: A fixed-size region of tiles. Generated on demand, cached, unloaded when far.
-
-6. **Segment Merging**: Adjacent tiles with similar heights are merged into larger quads for rendering efficiency.
-
-## Examples
-
-### Create a Mountain World
-
-```python
-from waverse.dna import WaveDNA, WaveLayer, Wave, Feature
-
-dna = WaveDNA(
-    name="Mountain World",
-    seed=999,
-    layers=[
-        WaveLayer(
-            name="base",
-            waves=[
-                Wave(freq_x=0.005, freq_z=0.005, amplitude=30, wave_type="perlin"),
-            ]
-        ),
-    ],
-    features=[
-        Feature(
-            feature_type="peak",
-            center_x=0, center_z=0,
-            radius=200,
-            falloff="gaussian",
-            waves=[Wave(freq_x=0.01, freq_z=0.01, amplitude=80, wave_type="ridged")],
-            height_offset=50,
-        ),
-    ],
-)
-
-dna.save("mountain_world.json")
-```
-
-### Generate Terrain Programmatically
-
-```python
-from waverse.dna import WaveDNA
-from waverse.waves import evaluate_waves, generate_height_grid
-import numpy as np
-
-dna = WaveDNA.create_default()
-
-# Get height at a single point
-height = evaluate_waves(dna, 100.0, 50.0)[0]
-print(f"Height at (100, 50): {height}")
-
-# Generate a grid
-heights = generate_height_grid(dna, x_start=-100, z_start=-100, 
-                                width=200, height=200, scale=1.0)
-print(f"Grid shape: {heights.shape}")
-```
-
-## Roadmap
-
-- [ ] Cave generation with 3D wave carving
-- [ ] Biome system based on height/moisture
-- [ ] Fractal vegetation and creatures
-- [ ] River carving algorithms
-- [ ] Multiplayer chunk synchronization
-- [ ] GPU-accelerated wave evaluation
 
 ## License
 
 MIT
-
