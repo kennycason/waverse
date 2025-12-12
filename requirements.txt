@@ -1,0 +1,16 @@
+# Waverse - Infinite Wave-Based World Generator
+# Core dependencies
+numpy>=1.24.0
+pygame>=2.5.0
+PyOpenGL>=3.1.7
+PyOpenGL-accelerate>=3.1.7
+
+# Noise functions for organic terrain
+noise>=1.2.2
+
+# Fast spatial operations
+scipy>=1.11.0
+
+# Optional: for saving/loading worlds
+orjson>=3.9.0
+

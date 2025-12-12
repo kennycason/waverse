@@ -1,0 +1,211 @@
+{
+  "version": "1.0",
+  "seed": 42,
+  "name": "Waverse Demo World",
+  "water_level": 0.0,
+  "bedrock_level": -100.0,
+  "sky_level": 200.0,
+  "layers": [
+    {
+      "name": "continental",
+      "waves": [
+        {
+          "freq_x": 0.002,
+          "freq_z": 0.002,
+          "freq_y": null,
+          "amplitude": 45,
+          "phase": 0.0,
+          "direction": 0.0,
+          "wave_type": "sin",
+          "harmonic": 1
+        },
+        {
+          "freq_x": 0.003,
+          "freq_z": 0.0015,
+          "freq_y": null,
+          "amplitude": 30,
+          "phase": 1.2,
+          "direction": 0.0,
+          "wave_type": "sin",
+          "harmonic": 1
+        },
+        {
+          "freq_x": 0.0015,
+          "freq_z": 0.003,
+          "freq_y": null,
+          "amplitude": 25,
+          "phase": 0.7,
+          "direction": 0.0,
+          "wave_type": "cos",
+          "harmonic": 1
+        }
+      ],
+      "blend_mode": "add",
+      "weight": 1.0,
+      "height_min": null,
+      "height_max": null
+    },
+    {
+      "name": "regional",
+      "waves": [
+        {
+          "freq_x": 0.01,
+          "freq_z": 0.01,
+          "freq_y": null,
+          "amplitude": 12,
+          "phase": 0.0,
+          "direction": 0.0,
+          "wave_type": "sin",
+          "harmonic": 1
+        },
+        {
+          "freq_x": 0.015,
+          "freq_z": 0.008,
+          "freq_y": null,
+          "amplitude": 8,
+          "phase": 1.8,
+          "direction": 0.0,
+          "wave_type": "sin",
+          "harmonic": 1
+        },
+        {
+          "freq_x": 0.007,
+          "freq_z": 0.012,
+          "freq_y": null,
+          "amplitude": 10,
+          "phase": 0.4,
+          "direction": 0.0,
+          "wave_type": "perlin",
+          "harmonic": 1
+        }
+      ],
+      "blend_mode": "add",
+      "weight": 1.0,
+      "height_min": null,
+      "height_max": null
+    },
+    {
+      "name": "detail",
+      "waves": [
+        {
+          "freq_x": 0.04,
+          "freq_z": 0.04,
+          "freq_y": null,
+          "amplitude": 4,
+          "phase": 0.0,
+          "direction": 0.0,
+          "wave_type": "perlin",
+          "harmonic": 1
+        },
+        {
+          "freq_x": 0.08,
+          "freq_z": 0.06,
+          "freq_y": null,
+          "amplitude": 2,
+          "phase": 0.5,
+          "direction": 0.0,
+          "wave_type": "ridged",
+          "harmonic": 1
+        },
+        {
+          "freq_x": 0.1,
+          "freq_z": 0.1,
+          "freq_y": null,
+          "amplitude": 1,
+          "phase": 1.0,
+          "direction": 0.0,
+          "wave_type": "simplex",
+          "harmonic": 1
+        }
+      ],
+      "blend_mode": "add",
+      "weight": 1.0,
+      "height_min": null,
+      "height_max": null
+    }
+  ],
+  "features": [
+    {
+      "feature_type": "mountain",
+      "center_x": 150,
+      "center_z": 150,
+      "radius": 120,
+      "falloff": "gaussian",
+      "waves": [
+        {
+          "freq_x": 0.015,
+          "freq_z": 0.015,
+          "freq_y": null,
+          "amplitude": 40,
+          "phase": 0.0,
+          "direction": 0.0,
+          "wave_type": "cos",
+          "harmonic": 1
+        }
+      ],
+      "height_offset": 35,
+      "y_min": null,
+      "y_max": null,
+      "local_seed": null
+    },
+    {
+      "feature_type": "crater",
+      "center_x": -100,
+      "center_z": 80,
+      "radius": 60,
+      "falloff": "cosine",
+      "waves": [
+        {
+          "freq_x": 0.02,
+          "freq_z": 0.02,
+          "freq_y": null,
+          "amplitude": -25,
+          "phase": 0.0,
+          "direction": 0.0,
+          "wave_type": "cos",
+          "harmonic": 1
+        }
+      ],
+      "height_offset": -10,
+      "y_min": null,
+      "y_max": null,
+      "local_seed": null
+    },
+    {
+      "feature_type": "hills",
+      "center_x": 50,
+      "center_z": -80,
+      "radius": 80,
+      "falloff": "smooth",
+      "waves": [
+        {
+          "freq_x": 0.03,
+          "freq_z": 0.03,
+          "freq_y": null,
+          "amplitude": 15,
+          "phase": 0.0,
+          "direction": 0.0,
+          "wave_type": "sin",
+          "harmonic": 1
+        },
+        {
+          "freq_x": 0.06,
+          "freq_z": 0.06,
+          "freq_y": null,
+          "amplitude": 8,
+          "phase": 0.5,
+          "direction": 0.0,
+          "wave_type": "cos",
+          "harmonic": 1
+        }
+      ],
+      "height_offset": 0.0,
+      "y_min": null,
+      "y_max": null,
+      "local_seed": null
+    }
+  ],
+  "cave_layers": [],
+  "chunk_size": 32,
+  "tile_size": 1.0
+}
