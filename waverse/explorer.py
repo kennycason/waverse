@@ -22,16 +22,21 @@ except ImportError:
 from .world import WorldConfig, ChunkManager, CHUNK_SIZE, TILE_SCALE, get_height
 from .flora import FloraManager
 from .sky import SkySystem
+from .animals import AnimalManager
+from .chunk_worker import ChunkWorker
 
 
 # Configuration - open world style
 HEIGHT_SCALE = 3.5
 TERRAIN_SCALE = TILE_SCALE
-MOVE_SPEED = 2.5
+BASE_MOVE_SPEED = 0.8  # Base movement speed (adjustable with 1-5 keys)
 MOUSE_SENSITIVITY = 0.06
 CHUNK_RENDER_DISTANCE = 20  # Massive view distance!
-PLAYER_HEIGHT = 3.0
-WALK_SMOOTH_SPEED = 0.15
+PLAYER_HEIGHT = 3.5  # Eye height above ground (higher to avoid seeing through terrain)
+WALK_SMOOTH_SPEED = 0.4  # Faster terrain following
+
+# Speed levels (1-5 keys)
+SPEED_LEVELS = [0.3, 0.6, 1.0, 2.0, 4.0]  # Slow to fast
 
 # LOD settings - aggressive LOD for huge view distance
 LOD_FULL_DISTANCE = 5      # Full detail within this range
@@ -81,7 +86,7 @@ def height_to_color(h: float) -> tuple:
 
 
 class Camera:
-    """Camera from reference code."""
+    """Camera with walking and flying modes."""
     
     def __init__(self):
         self.x = 0
@@ -91,6 +96,7 @@ class Camera:
         self.pitch = -20
         self.flying = True
         self.target_y = 40
+        self.speed_level = 2  # Default speed (1.0x)
     
     def rotate(self, dx, dy):
         self.yaw += dx * MOUSE_SENSITIVITY
@@ -107,6 +113,9 @@ class Camera:
         return chunk_manager.get_height_at(self.x, self.z) * HEIGHT_SCALE
     
     def move(self, forward, right, up, chunk_manager: ChunkManager):
+        # Get current speed based on level
+        speed = BASE_MOVE_SPEED * SPEED_LEVELS[self.speed_level]
+        
         yaw_rad = math.radians(self.yaw)
         pitch_rad = math.radians(self.pitch)
         
@@ -115,6 +124,7 @@ class Camera:
             forward_y = math.sin(pitch_rad)
             forward_z = -math.cos(yaw_rad) * math.cos(pitch_rad)
         else:
+            # Walking: move along ground plane only
             forward_x = -math.sin(yaw_rad)
             forward_y = 0
             forward_z = -math.cos(yaw_rad)
@@ -122,30 +132,44 @@ class Camera:
         right_x = math.cos(yaw_rad)
         right_z = -math.sin(yaw_rad)
         
-        self.x += (forward * forward_x + right * right_x) * MOVE_SPEED
-        self.z += (forward * forward_z + right * right_z) * MOVE_SPEED
+        self.x += (forward * forward_x + right * right_x) * speed
+        self.z += (forward * forward_z + right * right_z) * speed
         
         terrain_h = self.get_terrain_height(chunk_manager)
-        min_height = terrain_h + PLAYER_HEIGHT
+        ground_height = terrain_h + PLAYER_HEIGHT
         
         if self.flying:
-            self.y += forward * forward_y * MOVE_SPEED
-            self.y += up * MOVE_SPEED
+            self.y += forward * forward_y * speed
+            self.y += up * speed
             
-            if up < 0 and self.y <= min_height:
-                self.y = min_height
+            # Land when pressing down and at ground level
+            if up < 0 and self.y <= ground_height + 0.5:
+                self.y = ground_height
                 self.flying = False
-                self.target_y = min_height
+                self.target_y = ground_height
             
-            if self.y < min_height:
-                self.y = min_height
+            # Don't go below ground
+            if self.y < ground_height:
+                self.y = ground_height
         else:
-            self.target_y = min_height
-            self.y += (self.target_y - self.y) * WALK_SMOOTH_SPEED
+            # Walking mode: follow terrain smoothly
+            self.target_y = ground_height
+            diff = self.target_y - self.y
             
+            # Fast catch-up if far from terrain, smooth otherwise
+            if abs(diff) > 2:
+                self.y += diff * 0.5  # Fast snap
+            else:
+                self.y += diff * WALK_SMOOTH_SPEED  # Smooth follow
+            
+            # Jump/fly when pressing up
             if up > 0:
                 self.flying = True
-                self.y += up * MOVE_SPEED
+                self.y += speed
+    
+    def set_speed(self, level: int):
+        """Set speed level (0-4, corresponds to keys 1-5)."""
+        self.speed_level = max(0, min(4, level))
     
     def apply(self):
         glRotatef(-self.pitch, 1, 0, 0)
@@ -650,10 +674,15 @@ def run_explorer(config: WorldConfig = None):
     gluPerspective(75, display[0]/display[1], 0.5, 2000)  # Wide FOV, horizon-level clip plane
     glMatrixMode(GL_MODELVIEW)
     
-    # Create world
+    # Create world with background chunk worker
     chunk_manager = ChunkManager(config)
+    chunk_worker = ChunkWorker(config, preload_radius=30)
+    chunk_manager.set_worker(chunk_worker)
+    chunk_worker.start()
+    
     chunk_renderer = ChunkRenderer(chunk_manager)
     flora_manager = FloraManager(config.seed)
+    animal_manager = AnimalManager(config.seed)
     sky = SkySystem()
     water_list = create_water_plane()
     minimap = Minimap(chunk_manager)
@@ -674,8 +703,9 @@ def run_explorer(config: WorldConfig = None):
     print("\n" + "=" * 60)
     print(f"  WAVERSE - {config.name}")
     print("=" * 60)
-    print("  MOVEMENT: WASD/Arrows | H=Up F=Down")
+    print("  MOVEMENT: WASD/Arrows | H/Space=Up F/Shift=Down")
     print("  CAMERA: IJKL or Right-Click+Mouse")
+    print("  SPEED: 1=Slow 2 3=Normal 4 5=Fast")
     print("  EXIT: ESC")
     print("=" * 60 + "\n")
     
@@ -683,8 +713,10 @@ def run_explorer(config: WorldConfig = None):
     running = True
     mouse_look = False
     last_chunk = None
+    frame_count = 0
     
     while running:
+        frame_count += 1
         dt = clock.tick(60) / 16.67
         
         for event in pygame.event.get():
@@ -693,6 +725,22 @@ def run_explorer(config: WorldConfig = None):
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     running = False
+                # Speed controls: 1-5 keys
+                elif event.key == pygame.K_1:
+                    camera.set_speed(0)
+                    print("  Speed: 1 (Slow)")
+                elif event.key == pygame.K_2:
+                    camera.set_speed(1)
+                    print("  Speed: 2")
+                elif event.key == pygame.K_3:
+                    camera.set_speed(2)
+                    print("  Speed: 3 (Normal)")
+                elif event.key == pygame.K_4:
+                    camera.set_speed(3)
+                    print("  Speed: 4")
+                elif event.key == pygame.K_5:
+                    camera.set_speed(4)
+                    print("  Speed: 5 (Fast)")
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 3:
                     mouse_look = True
@@ -730,6 +778,7 @@ def run_explorer(config: WorldConfig = None):
         # Update chunks (stream in new ones as we move)
         current_chunk = camera.get_chunk_pos()
         chunk_renderer.update_chunks(current_chunk)
+        chunk_worker.update_player_position(current_chunk[0], current_chunk[1])
         last_chunk = current_chunk
         
         # Update minimap occasionally
@@ -764,6 +813,21 @@ def run_explorer(config: WorldConfig = None):
                 cx, cz, cam_pos[0], cam_pos[2],
                 chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE
             )
+            # Spawn animals for this chunk if not already done
+            animal_manager.spawn_animals_for_chunk(
+                cx, cz, chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE
+            )
+        
+        # Update animals every few frames for performance
+        if frame_count % 3 == 0:  # Update AI every 3rd frame
+            animal_manager.update(dt / 60.0, cam_pos, None)  # Skip ground height for perf
+        
+        # Render animals
+        animal_manager.render(cam_pos[0], cam_pos[1], cam_pos[2])
+        
+        # Cleanup distant chunks occasionally
+        if frame_count % 60 == 0:
+            animal_manager.cleanup_distant_chunks(current_chunk[0], current_chunk[1])
         
         glCallList(water_list)
         
@@ -774,6 +838,7 @@ def run_explorer(config: WorldConfig = None):
         pygame.display.flip()
     
     # Cleanup
+    chunk_worker.stop()
     chunk_renderer.stop()
     pygame.quit()
 

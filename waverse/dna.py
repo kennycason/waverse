@@ -140,17 +140,22 @@ class SegmentGene:
 class PlantType:
     """Plant type categories."""
     GRASS = "grass"
+    FLOWER = "flower"
     FERN = "fern"
     BUSH = "bush"
     SHRUB = "shrub"
     TREE = "tree"
     TALL_TREE = "tall_tree"
+    PINE = "pine"
     PALM = "palm"
+    WILLOW = "willow"
     CACTUS = "cactus"
     MUSHROOM = "mushroom"
+    CORAL = "coral"
+    CRYSTAL = "crystal"
     ALIEN = "alien"
     
-    ALL_TYPES = [GRASS, FERN, BUSH, SHRUB, TREE, TALL_TREE, PALM, CACTUS, MUSHROOM, ALIEN]
+    ALL_TYPES = [GRASS, FLOWER, FERN, BUSH, SHRUB, TREE, TALL_TREE, PINE, PALM, WILLOW, CACTUS, MUSHROOM, CORAL, CRYSTAL, ALIEN]
 
 
 @dataclass
@@ -536,6 +541,84 @@ class PlantDNA:
                     dna.leaf_color.r * 0.5 + 0.5,
                     dna.leaf_color.g * 0.5 + 0.5,
                     dna.leaf_color.b * 0.5 + 0.5
+                )
+            
+        elif plant_type == PlantType.FLOWER:
+            # Colorful flowers
+            dna.height_gene = Gene(0.3 + rng.random() * 0.6, 0.1, 1.2, 0.15)
+            dna.width_gene = Gene(0.02, 0.01, 0.05, 0.05)
+            dna.trunk_segments = [SegmentGene(0.8, 0.03, 0.9, rng.random() * 0.3, 0)]
+            dna.branch_count = 0
+            dna.has_flowers = True
+            dna.flower_size = 0.15 + rng.random() * 0.25
+            dna.flower_color = ColorGene.from_hsv(rng.random(), 0.7 + rng.random() * 0.3, 0.8 + rng.random() * 0.2)
+            dna.trunk_color = ColorGene(0.2, 0.4 + rng.random() * 0.2, 0.15)
+            dna.leaf_color = ColorGene(0.2, 0.5, 0.2)
+            dna.canopy_shape = "dome"
+            
+        elif plant_type == PlantType.PINE:
+            # Coniferous pine tree
+            dna.height_gene = Gene(6 + rng.random() * 12, 4, 20, 0.25)
+            dna.width_gene = Gene(0.3 + rng.random() * 0.3, 0.15, 0.7, 0.15)
+            dna.trunk_segments = [
+                SegmentGene(1.0, 0.35, 0.92, 0, 0),
+                SegmentGene(0.8, 0.25, 0.9, 0, 0),
+            ]
+            dna.branch_count = 6 + rng.integers(0, 5)
+            dna.branch_angle = 0.35 + rng.random() * 0.2
+            dna.branch_height = 0.3 + rng.random() * 0.2
+            dna.canopy_shape = "cone"
+            dna.canopy_spread = 0.35 + rng.random() * 0.2
+            dna.trunk_color = ColorGene(0.35, 0.22, 0.12)
+            dna.leaf_color = ColorGene(0.08 + rng.random() * 0.08, 0.25 + rng.random() * 0.15, 0.08)
+            
+        elif plant_type == PlantType.WILLOW:
+            # Weeping willow style
+            dna.height_gene = Gene(8 + rng.random() * 8, 5, 18, 0.25)
+            dna.width_gene = Gene(0.4 + rng.random() * 0.3, 0.2, 0.8, 0.15)
+            dna.trunk_segments = [
+                SegmentGene(0.7, 0.4, 0.85, rng.random() * 0.2 - 0.1, 0),
+                SegmentGene(0.5, 0.3, 0.85, rng.random() * 0.15, 0),
+            ]
+            dna.branch_count = 8 + rng.integers(0, 6)
+            dna.branch_angle = 0.5 + rng.random() * 0.3
+            dna.droop = 0.6 + rng.random() * 0.3
+            dna.canopy_shape = "weeping"
+            dna.canopy_spread = 0.6 + rng.random() * 0.3
+            dna.trunk_color = ColorGene(0.3, 0.25, 0.15)
+            dna.leaf_color = ColorGene(0.25, 0.5 + rng.random() * 0.2, 0.2)
+            
+        elif plant_type == PlantType.CORAL:
+            # Coral-like branching structure
+            dna.height_gene = Gene(0.5 + rng.random() * 1.5, 0.3, 2.5, 0.2)
+            dna.width_gene = Gene(0.08 + rng.random() * 0.15, 0.05, 0.3, 0.1)
+            dna.trunk_segments = [SegmentGene(0.4, 0.15, 0.7, rng.random() * 0.4, 0)]
+            dna.branch_count = 5 + rng.integers(0, 8)
+            dna.branch_angle = 0.3 + rng.random() * 0.4
+            dna.sub_branch_chance = 0.6 + rng.random() * 0.3
+            dna.leaf_density = 0
+            dna.trunk_color = ColorGene.from_hsv(rng.random(), 0.5 + rng.random() * 0.4, 0.6 + rng.random() * 0.3)
+            dna.leaf_color = dna.trunk_color  # Same color throughout
+            
+        elif plant_type == PlantType.CRYSTAL:
+            # Crystalline/geometric growth
+            dna.height_gene = Gene(0.8 + rng.random() * 2.5, 0.4, 4.0, 0.25)
+            dna.width_gene = Gene(0.15 + rng.random() * 0.25, 0.08, 0.5, 0.15)
+            dna.trunk_segments = [SegmentGene(1.0, 0.25, 0.6, 0, 0)]  # Sharp taper
+            dna.branch_count = 3 + rng.integers(0, 5)
+            dna.branch_angle = 0.2 + rng.random() * 0.3
+            dna.asymmetry = 0.3 + rng.random() * 0.2
+            dna.leaf_density = 0
+            hue = rng.choice([0.5, 0.55, 0.75, 0.85, 0.95])  # Blues, purples, pinks
+            dna.trunk_color = ColorGene.from_hsv(hue, 0.3 + rng.random() * 0.3, 0.7 + rng.random() * 0.3)
+            dna.leaf_color = dna.trunk_color
+            dna.has_glow = rng.random() < 0.5
+            if dna.has_glow:
+                dna.glow_intensity = 0.4 + rng.random() * 0.4
+                dna.glow_color = ColorGene(
+                    min(1, dna.trunk_color.r + 0.3),
+                    min(1, dna.trunk_color.g + 0.3),
+                    min(1, dna.trunk_color.b + 0.3)
                 )
             
         elif plant_type == PlantType.ALIEN:

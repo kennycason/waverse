@@ -410,10 +410,15 @@ def generate_chunk(config: WorldConfig, cx: int, cz: int, use_cache: bool = True
 class ChunkManager:
     """Manages chunk loading/caching."""
     
-    def __init__(self, config: WorldConfig, cache_size: int = 64):
+    def __init__(self, config: WorldConfig, cache_size: int = 128):
         self.config = config
         self.cache_size = cache_size
         self.chunks: Dict[Tuple[int, int], Chunk] = {}
+        self.worker = None  # Optional background worker
+    
+    def set_worker(self, worker):
+        """Set the background chunk worker."""
+        self.worker = worker
     
     def world_to_chunk_coords(self, world_x: float, world_z: float) -> Tuple[int, int]:
         """Convert world position to chunk coordinates."""
@@ -423,15 +428,31 @@ class ChunkManager:
         return (cx, cz)
     
     def get_chunk(self, cx: int, cz: int) -> Chunk:
-        """Get or generate a chunk."""
+        """Get or generate a chunk, using worker if available."""
         key = (cx, cz)
-        if key not in self.chunks:
-            self.chunks[key] = generate_chunk(self.config, cx, cz)
-            
-            # Evict old chunks if cache full
-            while len(self.chunks) > self.cache_size:
-                oldest = next(iter(self.chunks))
-                del self.chunks[oldest]
+        
+        # Check local cache first
+        if key in self.chunks:
+            return self.chunks[key]
+        
+        # Try to get from worker (pre-generated)
+        if self.worker:
+            chunk = self.worker.get_chunk(cx, cz)
+            if chunk:
+                self.chunks[key] = chunk
+                # Evict old chunks if cache full
+                while len(self.chunks) > self.cache_size:
+                    oldest = next(iter(self.chunks))
+                    del self.chunks[oldest]
+                return chunk
+        
+        # Generate synchronously as fallback
+        self.chunks[key] = generate_chunk(self.config, cx, cz)
+        
+        # Evict old chunks if cache full
+        while len(self.chunks) > self.cache_size:
+            oldest = next(iter(self.chunks))
+            del self.chunks[oldest]
         
         return self.chunks[key]
     

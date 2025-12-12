@@ -39,3 +39,6 @@ data/
 *.log
 logs/
 
+# Chunk cache (generated terrain data)
+.chunk_cache/
+
