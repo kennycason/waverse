@@ -2,7 +2,9 @@
 
 An infinite procedural world built from stacked wave functions. Terrain, plants, and creatures are all generated from DNA-like structures that mutate and crossover as you explore.
 
-![Waverse World](screenshots/screenshot01.png)
+**[Watch the demo on YouTube](https://www.youtube.com/watch?v=tkcycnBBNF4)**
+
+![Waverse World](screenshots/screenshot04.png)
 
 ## What is this?
 
@@ -10,14 +12,18 @@ Waverse generates terrain by stacking sine waves, perlin noise, and other wave f
 
 Plants and animals have their own DNA that controls their shape, color, and behavior. When new chunks of the world are generated, they inherit and mutate DNA from neighboring chunks. This creates gradual variation as you travel - forests slowly shift in character, creatures change form.
 
-![Day and Night](screenshots/screenshot02.png)
+Even the sky evolves: sun size, moon glow, star density, and sky tints are all genetic and shift very slowly as you explore.
+
+![Creatures and Flora](screenshots/screenshot05.png)
 
 ## Key Features
 
 **Terrain Generation**
 - Waves stacked on waves: sin, cos, perlin, ridged noise
+- Continental-scale variation with lower frequency base waves
 - Continuous infinite world via chunk system
 - Background worker pre-generates chunks ahead of you
+- Terrain colors evolve per-chunk via DNA
 
 **Flora DNA**
 - 15 plant types: grass, flowers, ferns, bushes, trees, pines, palms, willows, cacti, mushrooms, coral, crystals, alien forms
@@ -25,16 +31,16 @@ Plants and animals have their own DNA that controls their shape, color, and beha
 - Neighboring chunks crossover DNA to create gradual biome transitions
 
 **Fauna DNA**
-- 9 animal types: insects, birds, fish, mammals, reptiles, amphibians, jellyfish, worms, alien creatures
+- 10 animal types: insects, birds, fish, mammals, reptiles, amphibians, jellyfish, worms, metroids, alien creatures
+- Size variance from small critters to large beasts
 - Articulated bodies with animated joints
 - Simple AI: wander, graze, flock, swarm, flee
 
-**Day/Night Cycle**
-- Sun and moon follow shifting orbital paths
-- Sky colors transition through dawn, day, dusk, night
-- Stars visible at night
-
-![Flora Variety](screenshots/screenshot03.png)
+**Sky DNA**
+- Sun and moon sizes/colors evolve across chunks
+- Star count and brightness shift gradually
+- Sky tints change over long distances
+- Day/night cycle with shifting orbital paths
 
 ## Running It
 
@@ -63,14 +69,14 @@ python main.py --clear-cache
 
 ## How DNA Crossover Works
 
-Each chunk has a pool of plant and animal DNA templates. When a new chunk generates:
+Each chunk has pools of DNA templates for terrain colors, plants, animals, and sky. When a new chunk generates:
 
 1. It looks at what DNA exists in neighboring chunks
 2. It picks parents from those neighbors
 3. It creates offspring via crossover (blending traits) and mutation (random changes)
-4. The offspring become the species for the new chunk
+4. The offspring become the parameters for the new chunk
 
-This means if you walk in one direction, you'll see gradual shifts in the flora and fauna. Walk far enough and the world looks completely different.
+Terrain colors mutate slowly (15% chance per chunk). Sky parameters mutate very slowly (5% chance). This means if you walk in one direction, you'll see gradual shifts in everything - flora, fauna, colors, even the sun. Walk far enough and the world looks completely different.
 
 ## Project Structure
 
@@ -78,6 +84,7 @@ This means if you walk in one direction, you'll see gradual shifts in the flora 
 waverse/
   dna.py          - Plant DNA with genes for growth, color, features
   animal_dna.py   - Animal DNA with body segments, limbs, AI behavior
+  chunk_dna.py    - Terrain color and sky DNA that evolves per-chunk
   flora.py        - Plant rendering with LOD
   animals.py      - Animal rendering and AI updates
   world.py        - Terrain generation from wave configs

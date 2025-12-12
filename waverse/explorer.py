@@ -498,28 +498,31 @@ class Minimap:
         glMatrixMode(GL_MODELVIEW)
 
 
-def create_water_plane() -> int:
-    """Create water plane display list."""
-    water_list = glGenLists(1)
-    glNewList(water_list, GL_COMPILE)
+def render_water(camera_x: float, camera_z: float, water_level: float = 0.0):
+    """Render water plane centered on camera at water level height."""
+    size = 2000  # Large enough to cover visible area
     
-    size = 2000
+    # Scale water level
+    water_y = water_level * HEIGHT_SCALE
+    
     glEnable(GL_BLEND)
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
-    glNormal3f(0, 1, 0)
-    glColor4f(0.1, 0.35, 0.6, 0.7)
+    glDisable(GL_LIGHTING)
     
+    glNormal3f(0, 1, 0)
+    glColor4f(0.08, 0.30, 0.55, 0.75)  # Deep blue, translucent
+    
+    # Center water on camera position
     glBegin(GL_QUADS)
-    glVertex3f(-size, 0, -size)
-    glVertex3f(size, 0, -size)
-    glVertex3f(size, 0, size)
-    glVertex3f(-size, 0, size)
+    glVertex3f(camera_x - size, water_y, camera_z - size)
+    glVertex3f(camera_x + size, water_y, camera_z - size)
+    glVertex3f(camera_x + size, water_y, camera_z + size)
+    glVertex3f(camera_x - size, water_y, camera_z + size)
     glEnd()
     
+    # Add subtle underwater tint when below water
+    glEnable(GL_LIGHTING)
     glDisable(GL_BLEND)
-    glEndList()
-    
-    return water_list
 
 
 def draw_crosshair(display: tuple):
@@ -738,7 +741,7 @@ def run_explorer(config: WorldConfig = None):
     flora_manager = FloraManager(config.seed)
     animal_manager = AnimalManager(config.seed)
     sky = SkySystem(chunk_dna_manager)
-    water_list = create_water_plane()
+    water_level = config.water_level
     minimap = Minimap(chunk_manager)
     
     # Camera - try to load saved position
@@ -900,7 +903,8 @@ def run_explorer(config: WorldConfig = None):
             animal_manager.cleanup_distant_chunks(current_chunk[0], current_chunk[1])
             chunk_dna_manager.cleanup_distant(current_chunk[0], current_chunk[1])
         
-        glCallList(water_list)
+        # Render water plane at water level, centered on camera
+        render_water(camera.x, camera.z, water_level)
         
         draw_crosshair(display)
         draw_hud(display, camera, sky)
