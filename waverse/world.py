@@ -144,6 +144,118 @@ def wave_voronoi(x: np.ndarray, z: np.ndarray, freq: float, amp: float,
     return (1.0 - dist * 1.4) * amp
 
 
+def wave_cliff(x: np.ndarray, z: np.ndarray, freq: float, amp: float,
+               direction: float = 0, sharpness: float = 8.0, seed: int = 0) -> np.ndarray:
+    """Sharp cliff/step terrain - creates sudden elevation changes."""
+    # Directional wave with sharp sigmoid transition
+    cos_d, sin_d = np.cos(direction), np.sin(direction)
+    t = (x * cos_d + z * sin_d) * freq
+    
+    # Add some noise to break up the perfectly straight line
+    noise_offset = _smooth_noise(x * freq * 2, z * freq * 2, seed) * 0.3
+    t = t + noise_offset
+    
+    # Sigmoid for sharp transition (tanh gives smooth step)
+    stepped = np.tanh(np.sin(t * 2 * np.pi) * sharpness)
+    return stepped * amp
+
+
+def wave_plateau(x: np.ndarray, z: np.ndarray, freq: float, amp: float,
+                 seed: int = 0, flatness: float = 0.6) -> np.ndarray:
+    """Flat-topped plateaus with steep edges."""
+    # Use noise to define plateau regions
+    noise_val = _smooth_noise(x * freq, z * freq, seed)
+    
+    # Create flat tops by clamping high values
+    plateau = np.where(noise_val > flatness, 1.0,
+                       np.where(noise_val < -flatness, -1.0,
+                               noise_val / flatness))
+    
+    # Sharpen the edges with a power function
+    plateau = np.sign(plateau) * np.abs(plateau) ** 0.5
+    return plateau * amp
+
+
+def wave_canyon(x: np.ndarray, z: np.ndarray, freq: float, amp: float,
+                direction: float = 0, width: float = 0.15, seed: int = 0) -> np.ndarray:
+    """Linear canyon/trench - cuts deep into terrain."""
+    cos_d, sin_d = np.cos(direction), np.sin(direction)
+    
+    # Position along canyon direction (determines where canyons are)
+    t = (x * cos_d + z * sin_d) * freq
+    
+    # Perpendicular distance (determines canyon walls)
+    perp = (-x * sin_d + z * cos_d) * freq * 3
+    
+    # Canyon positions (using sine to create multiple canyons)
+    canyon_dist = np.abs(np.sin(t * 2 * np.pi))
+    
+    # Add noise to make canyons wind
+    wind = _smooth_noise(x * freq * 0.5, z * freq * 0.5, seed) * 0.2
+    canyon_dist = np.abs(np.sin((t + wind) * 2 * np.pi))
+    
+    # Create canyon profile (deep in center, steep walls)
+    in_canyon = canyon_dist < width
+    depth = np.where(in_canyon, 
+                     -1.0 * (1.0 - canyon_dist / width) ** 2,  # Parabolic floor
+                     0.0)
+    return depth * amp
+
+
+def wave_crater(x: np.ndarray, z: np.ndarray, freq: float, amp: float,
+                seed: int = 0) -> np.ndarray:
+    """Crater/lake basin pattern - circular depressions."""
+    # Use Voronoi-like cells for crater positions
+    cell_x = np.floor(x * freq)
+    cell_z = np.floor(z * freq)
+    frac_x = (x * freq) - cell_x
+    frac_z = (z * freq) - cell_z
+    
+    # Randomize center within cell
+    rng_hash = (cell_x * 374761393 + cell_z * 668265263 + seed).astype(np.int64)
+    cx_offset = ((rng_hash >> 8) & 0xFF) / 255.0 - 0.5
+    cz_offset = ((rng_hash >> 16) & 0xFF) / 255.0 - 0.5
+    
+    # Distance to crater center
+    dx = frac_x - 0.5 - cx_offset * 0.3
+    dz = frac_z - 0.5 - cz_offset * 0.3
+    dist = np.sqrt(dx**2 + dz**2)
+    
+    # Crater profile: raised rim, depressed center
+    crater_size = 0.3 + ((rng_hash & 0xFF) / 255.0) * 0.2
+    in_crater = dist < crater_size
+    
+    profile = np.where(in_crater,
+                       np.where(dist < crater_size * 0.7,
+                               -1.0 + (dist / (crater_size * 0.7)) * 0.3,  # Floor
+                               0.3 * (1.0 - (dist - crater_size * 0.7) / (crater_size * 0.3))),  # Rim
+                       0.0)
+    return profile * amp
+
+
+def wave_mountain_range(x: np.ndarray, z: np.ndarray, freq: float, amp: float,
+                        direction: float = 0, seed: int = 0) -> np.ndarray:
+    """Sharp mountain range along a direction."""
+    cos_d, sin_d = np.cos(direction), np.sin(direction)
+    
+    # Distance from range center line
+    perp = np.abs(-x * sin_d + z * cos_d) * freq * 2
+    
+    # Position along range (for peak variation)
+    along = (x * cos_d + z * sin_d) * freq
+    
+    # Height along range (ridged noise for peaks)
+    peak_noise = 1.0 - np.abs(_smooth_noise(along * 3, z * freq * 0.1, seed))
+    peak_noise = peak_noise ** 2  # Sharpen peaks
+    
+    # Mountain profile (high in center, falls off to sides)
+    range_width = 0.4 + _smooth_noise(along, along * 0.5, seed + 1000) * 0.15
+    height = np.maximum(0, 1.0 - perp / range_width)
+    height = height ** 1.5  # Steeper sides
+    
+    return height * peak_noise * amp
+
+
 # =============================================================================
 # Simple DNA - Just a list of wave configs
 # =============================================================================
@@ -151,7 +263,9 @@ def wave_voronoi(x: np.ndarray, z: np.ndarray, freq: float, amp: float,
 @dataclass
 class WaveConfig:
     """Configuration for a single wave."""
-    wave_type: str = "sin"  # sin, cos, sin2d, radial, perlin, ridged, terraces, voronoi
+    # Wave types: sin, cos, sin2d, radial, perlin, ridged, terraces, voronoi,
+    #             cliff, plateau, canyon, crater, mountain_range
+    wave_type: str = "sin"
     freq: float = 0.01      # Frequency (lower = larger features)
     freq_z: float = None    # Optional separate Z frequency (for sin2d)
     amp: float = 10.0       # Amplitude (height contribution)
@@ -161,6 +275,9 @@ class WaveConfig:
     cz: float = 0.0         # Center Z (for radial)
     octaves: int = 4        # Octaves (for noise types)
     levels: int = 5         # Levels (for terraces)
+    sharpness: float = 8.0  # Sharpness (for cliffs)
+    width: float = 0.15     # Width (for canyons)
+    flatness: float = 0.6   # Flatness threshold (for plateaus)
 
 
 @dataclass 
@@ -175,32 +292,49 @@ class WorldConfig:
     
     @classmethod
     def create_default(cls) -> "WorldConfig":
-        """Create a world with large flat areas and spaced-out features."""
+        """Create a dramatic world with varied terrain features."""
         return cls(
             name="Default World",
             seed=42,
             waves=[
                 # CONTINENTAL SCALE - very low frequency for huge landmasses
-                # These create variation over 1000s of tiles
-                WaveConfig("sin", freq=0.0001, amp=8, phase=0),  # ~6000 tile wavelength
-                WaveConfig("cos", freq=0.00015, amp=6, phase=0.5, direction=0.7),
-                WaveConfig("perlin", freq=0.0002, amp=10, octaves=2),  # Continental noise
+                WaveConfig("sin", freq=0.00008, amp=12, phase=0),  # ~8000 tile wavelength
+                WaveConfig("cos", freq=0.00012, amp=8, phase=0.5, direction=0.7),
+                WaveConfig("perlin", freq=0.00015, amp=15, octaves=2),  # Continental noise
+                
+                # LARGE PLATEAUS - flat elevated regions with sharp edges
+                WaveConfig("plateau", freq=0.0003, amp=18, flatness=0.5),
+                
+                # OCEAN TRENCHES / DEEP LAKES - crater-like depressions
+                WaveConfig("crater", freq=0.0004, amp=-12),  # Negative = depressions
                 
                 # REGIONAL SCALE - large features like mountain ranges, basins
-                WaveConfig("sin", freq=0.0005, amp=5, phase=0.2),
-                WaveConfig("cos", freq=0.0007, amp=4, phase=0.3, direction=0.4),
-                WaveConfig("perlin", freq=0.001, amp=6, octaves=2),
+                WaveConfig("sin", freq=0.0005, amp=6, phase=0.2),
+                WaveConfig("perlin", freq=0.0008, amp=8, octaves=2),
                 
-                # LOCAL SCALE - individual hills, valleys
-                WaveConfig("sin2d", freq=0.002, freq_z=0.0015, amp=4),
-                WaveConfig("perlin", freq=0.004, amp=4, octaves=2),
+                # MAJOR MOUNTAIN RANGE - runs in one direction
+                WaveConfig("mountain_range", freq=0.0006, amp=25, direction=0.3),
                 
-                # MOUNTAIN RIDGES - sparse, dramatic
-                WaveConfig("ridged", freq=0.003, amp=15, octaves=3),
+                # SECONDARY MOUNTAIN RANGE - different direction
+                WaveConfig("mountain_range", freq=0.0008, amp=18, direction=1.8),
+                
+                # CLIFF LINES - sharp elevation changes
+                WaveConfig("cliff", freq=0.0012, amp=10, direction=0.9, sharpness=6.0),
+                WaveConfig("cliff", freq=0.0015, amp=6, direction=2.2, sharpness=5.0),
+                
+                # CANYONS - deep linear cuts
+                WaveConfig("canyon", freq=0.001, amp=15, direction=0.5, width=0.12),
+                
+                # LOCAL HILLS - smaller undulations
+                WaveConfig("sin2d", freq=0.002, freq_z=0.0018, amp=4),
+                WaveConfig("perlin", freq=0.003, amp=5, octaves=2),
+                
+                # RIDGED PEAKS - sharp mountain peaks
+                WaveConfig("ridged", freq=0.004, amp=12, octaves=3),
                 
                 # DETAIL - small bumps and texture
-                WaveConfig("perlin", freq=0.015, amp=1.5, octaves=2),
-                WaveConfig("perlin", freq=0.04, amp=0.5, octaves=1),
+                WaveConfig("perlin", freq=0.012, amp=2, octaves=2),
+                WaveConfig("perlin", freq=0.03, amp=0.8, octaves=1),
             ]
         )
     
@@ -301,6 +435,11 @@ WAVE_FUNCS = {
     "ridged": wave_ridged,
     "terraces": wave_terraces,
     "voronoi": wave_voronoi,
+    "cliff": wave_cliff,
+    "plateau": wave_plateau,
+    "canyon": wave_canyon,
+    "crater": wave_crater,
+    "mountain_range": wave_mountain_range,
 }
 
 
@@ -326,6 +465,16 @@ def get_height(config: WorldConfig, x: np.ndarray, z: np.ndarray) -> np.ndarray:
             height += wave_terraces(x, z, wave.freq, wave.amp, wave.levels)
         elif wave.wave_type == "voronoi":
             height += wave_voronoi(x, z, wave.freq, wave.amp, config.seed)
+        elif wave.wave_type == "cliff":
+            height += wave_cliff(x, z, wave.freq, wave.amp, wave.direction, wave.sharpness, config.seed)
+        elif wave.wave_type == "plateau":
+            height += wave_plateau(x, z, wave.freq, wave.amp, config.seed, wave.flatness)
+        elif wave.wave_type == "canyon":
+            height += wave_canyon(x, z, wave.freq, wave.amp, wave.direction, wave.width, config.seed)
+        elif wave.wave_type == "crater":
+            height += wave_crater(x, z, wave.freq, wave.amp, config.seed)
+        elif wave.wave_type == "mountain_range":
+            height += wave_mountain_range(x, z, wave.freq, wave.amp, wave.direction, config.seed)
         else:
             height += func(x, z, wave.freq, wave.amp, wave.phase, wave.direction)
     

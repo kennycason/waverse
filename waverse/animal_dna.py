@@ -258,6 +258,29 @@ class AnimalDNA:
     primary_color: Tuple[float, float, float] = (0.5, 0.4, 0.3)
     secondary_color: Tuple[float, float, float] = (0.6, 0.5, 0.4)
     
+    # Pattern variations
+    pattern_type: str = "solid"  # solid, spots, stripes, gradient, patches
+    pattern_scale: float = 1.0   # Size of pattern elements
+    pattern_contrast: float = 0.3  # How much pattern color differs
+    
+    # Tail attributes
+    tail_style: str = "none"     # none, short, long, bushy, curly, whip
+    tail_length: float = 0.5     # Relative tail length
+    
+    # Special effects
+    has_glow: bool = False       # Bioluminescence
+    glow_color: Tuple[float, float, float] = (0.3, 0.8, 0.5)
+    glow_intensity: float = 0.5
+    
+    # Horns/spikes
+    has_horns: bool = False
+    horn_count: int = 2
+    horn_length: float = 0.3
+    horn_style: str = "straight"  # straight, curved, spiral, antler
+    
+    # Texture hints
+    skin_texture: str = "smooth"  # smooth, scaly, furry, feathered, slimy
+    
     def mutate(self, rng: np.random.Generator = None, strength: float = 0.5) -> "AnimalDNA":
         """Create mutated copy of this DNA."""
         if rng is None:
@@ -304,6 +327,36 @@ class AnimalDNA:
         
         new_dna.primary_color = mutate_color(self.primary_color)
         new_dna.secondary_color = mutate_color(self.secondary_color)
+        
+        # Mutate pattern
+        new_dna.pattern_scale = float(np.clip(self.pattern_scale + rng.normal(0, 0.1 * strength), 0.3, 3.0))
+        new_dna.pattern_contrast = float(np.clip(self.pattern_contrast + rng.normal(0, rate), 0, 0.8))
+        if rng.random() < 0.03 * strength:  # Rare pattern type change
+            new_dna.pattern_type = rng.choice(["solid", "spots", "stripes", "gradient", "patches"])
+        
+        # Mutate tail
+        new_dna.tail_length = float(np.clip(self.tail_length + rng.normal(0, 0.1 * strength), 0, 2.0))
+        if rng.random() < 0.03 * strength:
+            new_dna.tail_style = rng.choice(["none", "short", "long", "bushy", "curly", "whip"])
+        
+        # Mutate glow (rare)
+        if rng.random() < 0.02 * strength:
+            new_dna.has_glow = not self.has_glow
+            if new_dna.has_glow:
+                new_dna.glow_intensity = 0.3 + rng.random() * 0.5
+                new_dna.glow_color = mutate_color(self.glow_color)
+        
+        # Mutate horns (rare)
+        if rng.random() < 0.02 * strength:
+            new_dna.has_horns = not self.has_horns
+            if new_dna.has_horns:
+                new_dna.horn_count = int(rng.integers(1, 5))
+                new_dna.horn_length = 0.2 + rng.random() * 0.5
+                new_dna.horn_style = rng.choice(["straight", "curved", "spiral", "antler"])
+        
+        # Mutate texture (rare)
+        if rng.random() < 0.02 * strength:
+            new_dna.skin_texture = rng.choice(["smooth", "scaly", "furry", "feathered", "slimy"])
         
         return new_dna
     

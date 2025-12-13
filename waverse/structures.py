@@ -228,6 +228,7 @@ def generate_tile_building(x: float, y: float, z: float,
     - Each tile has floor/ceiling panels
     - Stair openings cut through floor tiles
     - Walls around perimeter with door opening
+    - Various roof styles, window patterns, and wall decorations
     """
     rng = np.random.default_rng(seed)
     
@@ -236,15 +237,43 @@ def generate_tile_building(x: float, y: float, z: float,
     width = tiles_x * tile_size
     depth = tiles_z * tile_size
     
-    # Colors with variation
-    wall_color = (0.55 + rng.random() * 0.25, 
-                  0.5 + rng.random() * 0.2, 
-                  0.45 + rng.random() * 0.15)
-    floor_color = (0.4 + rng.random() * 0.15,
-                   0.35 + rng.random() * 0.12,
-                   0.3 + rng.random() * 0.1)
+    # Building style variations
+    building_style = rng.choice(["rustic", "modern", "alien", "ancient", "industrial"])
+    roof_style = rng.choice(["flat", "peaked", "dome", "terraced"])
+    has_windows = rng.random() < 0.7  # 70% have windows
+    window_style = rng.choice(["square", "tall", "round", "slit"])
+    has_balcony = floors > 1 and rng.random() < 0.3  # 30% chance per multi-story
+    has_pillars = rng.random() < 0.2  # 20% have exterior pillars
+    
+    # Colors with style-based variation
+    if building_style == "rustic":
+        wall_color = (0.5 + rng.random() * 0.2, 
+                      0.4 + rng.random() * 0.15, 
+                      0.3 + rng.random() * 0.1)
+        roof_color = (0.35, 0.28, 0.2)
+    elif building_style == "modern":
+        gray = 0.5 + rng.random() * 0.3
+        wall_color = (gray, gray, gray + 0.05)
+        roof_color = (0.3, 0.3, 0.32)
+    elif building_style == "alien":
+        wall_color = (0.3 + rng.random() * 0.3, 
+                      0.4 + rng.random() * 0.4, 
+                      0.5 + rng.random() * 0.3)
+        roof_color = (0.2, 0.3, 0.4)
+    elif building_style == "ancient":
+        wall_color = (0.65 + rng.random() * 0.15, 
+                      0.6 + rng.random() * 0.1, 
+                      0.5 + rng.random() * 0.1)
+        roof_color = (0.5, 0.45, 0.35)
+    else:  # industrial
+        wall_color = (0.4 + rng.random() * 0.1, 
+                      0.35 + rng.random() * 0.1, 
+                      0.3 + rng.random() * 0.1)
+        roof_color = (0.25, 0.25, 0.28)
+    
+    floor_color = (wall_color[0] * 0.7, wall_color[1] * 0.7, wall_color[2] * 0.7)
     stair_color = (0.5, 0.45, 0.4)
-    roof_color = (0.35, 0.32, 0.28)
+    window_color = (0.3, 0.4, 0.6)  # Bluish glass
     
     wall_thickness = 0.35
     hw = width / 2
