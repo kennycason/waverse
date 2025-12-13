@@ -110,8 +110,8 @@ class AnimalInstance:
                 hop_height = max(0, math.sin(hop_phase)) * (0.5 + self.dna.base_scale * 0.5)
                 self.y = ground + hop_height
         else:
-            # Ground movement (walking, crawling)
-            walk_speed = speed * 1.0
+            # Ground movement (walking, crawling) - increased speed!
+            walk_speed = speed * 2.5  # Much faster ground movement
             self.x += self.vx * walk_speed * dt_seconds
             self.z += self.vz * walk_speed * dt_seconds
             if get_ground_height:
@@ -196,19 +196,19 @@ class AnimalInstance:
                 self.state_timer = 0.5 if is_flying else 1
     
     def _ai_graze(self, dt: float):
-        """Grazing behavior - mostly stationary with occasional movement."""
+        """Grazing behavior - occasional movement with grazing pauses."""
         if self.state_timer <= 0:
-            if np.random.random() < 0.3:
-                # Move a short distance
+            if np.random.random() < 0.6:  # 60% chance to move (was 30%)
+                # Move a short to medium distance
                 angle = np.random.random() * 2 * math.pi
-                dist = 2 + np.random.random() * 5
+                dist = 3 + np.random.random() * 8  # Move further
                 self.target_x = self.x + math.cos(angle) * dist
                 self.target_z = self.z + math.sin(angle) * dist
                 self.state = "moving"
-                self.state_timer = 2 + np.random.random() * 3
+                self.state_timer = 3 + np.random.random() * 4
             else:
                 self.state = "idle"
-                self.state_timer = 3 + np.random.random() * 5
+                self.state_timer = 1 + np.random.random() * 2  # Shorter idle (was 3-8s)
                 self.vx = 0
                 self.vz = 0
         
@@ -217,8 +217,8 @@ class AnimalInstance:
             dz = self.target_z - self.z
             dist = math.sqrt(dx*dx + dz*dz)
             if dist > 0.3:
-                self.vx = dx / dist * 0.5
-                self.vz = dz / dist * 0.5
+                self.vx = dx / dist  # Full speed (was * 0.5)
+                self.vz = dz / dist
             else:
                 self.state = "idle"
     

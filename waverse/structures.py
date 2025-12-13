@@ -284,7 +284,7 @@ def generate_tile_building(x: float, y: float, z: float,
                     ))
         
         # Perimeter walls as tile segments
-        door_height = 3.2
+        door_height = 3.5  # Taller doors to fit player comfortably
         wall_height = floor_height
         
         # Front wall (+Z side)

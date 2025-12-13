@@ -38,7 +38,7 @@ TERRAIN_SCALE = TILE_SCALE
 BASE_MOVE_SPEED = 0.8  # Base movement speed (adjustable with 1-5 keys)
 MOUSE_SENSITIVITY = 0.06
 CHUNK_RENDER_DISTANCE = 20  # Massive view distance!
-PLAYER_HEIGHT = 3.5  # Eye height above ground (higher to avoid seeing through terrain)
+PLAYER_HEIGHT = 2.5  # Eye height above ground (shorter = world feels bigger, fits through doors)
 WALK_SMOOTH_SPEED = 0.4  # Faster terrain following
 
 # Speed levels (1-5 keys)
@@ -396,7 +396,7 @@ def height_to_color(h: float) -> tuple:
 
 
 class Camera:
-    """Camera with walking and flying modes."""
+    """Camera with walking, jumping, and flying modes."""
     
     def __init__(self):
         self.x = 0
@@ -407,6 +407,12 @@ class Camera:
         self.flying = True
         self.target_y = 40
         self.speed_level = 2  # Default speed (1.0x)
+        
+        # Jump physics
+        self.jumping = False
+        self.jump_velocity = 0.0
+        self.gravity = 2.5  # Gravity acceleration (faster fall)
+        self.jump_strength = 0.5  # Initial jump velocity
     
     def rotate(self, dx, dy):
         self.yaw += dx * MOUSE_SENSITIVITY
@@ -495,20 +501,40 @@ class Camera:
             if self.y < effective_ground:
                 self.y = effective_ground
         else:
-            # Walking mode: follow terrain/floor smoothly
+            # Walking/jumping mode
             self.target_y = effective_ground
-            diff = self.target_y - self.y
             
-            # Fast catch-up if far from terrain, smooth otherwise
-            if abs(diff) > 2:
-                self.y += diff * 0.5  # Fast snap
+            if self.jumping:
+                # Apply jump physics
+                self.jump_velocity -= self.gravity * 0.016  # Gravity
+                self.y += self.jump_velocity
+                
+                # Landed?
+                if self.y <= effective_ground:
+                    self.y = effective_ground
+                    self.jumping = False
+                    self.jump_velocity = 0.0
             else:
-                self.y += diff * WALK_SMOOTH_SPEED  # Smooth follow
+                # Follow terrain/floor smoothly
+                diff = self.target_y - self.y
+                
+                # Fast catch-up if far from terrain, smooth otherwise
+                if abs(diff) > 2:
+                    self.y += diff * 0.5  # Fast snap
+                else:
+                    self.y += diff * WALK_SMOOTH_SPEED  # Smooth follow
             
-            # Jump/fly when pressing up
+            # Fly when pressing up (H key or R3)
             if up > 0:
                 self.flying = True
+                self.jumping = False
                 self.y += speed
+    
+    def jump(self):
+        """Start a jump if on the ground and not already jumping."""
+        if not self.flying and not self.jumping:
+            self.jumping = True
+            self.jump_velocity = self.jump_strength
     
     def set_speed(self, level: int):
         """Set speed level (0-4, corresponds to keys 1-5)."""
@@ -1287,6 +1313,14 @@ def run_explorer(config: WorldConfig = None):
                         camera.set_speed(new_level)
                         print(f"  Speed: {new_level + 1}")
                         gamepad_speed_cooldown = 20
+            
+            # A button = jump (in walk mode)
+            if gamepad.get_button(GamepadConfig.A):
+                camera.jump()
+        
+        # Keyboard space = jump (in walk mode)
+        if keys[pygame.K_SPACE] and not camera.flying:
+            camera.jump()
         
         camera.move(forward, right, up, chunk_manager, structure_manager)
         

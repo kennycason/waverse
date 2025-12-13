@@ -28,14 +28,14 @@ class BiomeDNA:
     """
     # Core biome parameters (0-1 scale)
     temperature: float = 0.5      # 0=frozen, 0.5=temperate, 1=hot
-    humidity: float = 0.5         # 0=arid, 0.5=normal, 1=tropical
+    humidity: float = 0.6         # 0=arid, 0.5=normal, 1=tropical (higher default)
     elevation_factor: float = 0.5 # Affects temperature at height
     
-    # Weather tendencies (how likely certain weather is)
-    rain_tendency: float = 0.3    # Base chance of rain
-    snow_tendency: float = 0.1    # Base chance of snow (modified by temp)
-    storm_tendency: float = 0.1   # Base chance of storms
-    cloud_base: float = 0.3       # Base cloud cover
+    # Weather tendencies (how likely certain weather is) - higher defaults
+    rain_tendency: float = 0.5    # Base chance of rain (was 0.3)
+    snow_tendency: float = 0.2    # Base chance of snow (was 0.1)
+    storm_tendency: float = 0.25  # Base chance of storms (was 0.1)
+    cloud_base: float = 0.4       # Base cloud cover (was 0.3)
     wind_base: float = 0.3        # Base wind strength
     
     def mutate(self, rng: np.random.Generator, strength: float = 0.02) -> "BiomeDNA":
@@ -193,12 +193,19 @@ class ClimateManager:
         if region_key not in self.regional_weather:
             # Get average biome for this region
             biome = self.get_biome(cx, cz)
-            self.regional_weather[region_key] = WeatherState(
-                cloud_cover=biome.cloud_base + random.random() * 0.2,
+            new_weather = WeatherState(
+                cloud_cover=biome.cloud_base + random.random() * 0.3,
                 wind_strength=biome.wind_base + random.random() * 0.2,
                 wind_direction=random.random() * math.pi * 2,
-                weather_timer=60 + random.random() * 120,  # Longer initial timer
+                weather_timer=5 + random.random() * 15,  # Quick first roll (5-20 seconds)
             )
+            # Immediately roll weather so regions start with weather
+            self._roll_new_weather(new_weather, biome)
+            self.regional_weather[region_key] = new_weather
+            
+            # Debug: show new region weather
+            if new_weather.precipitation_type != "none":
+                print(f"  Weather: {new_weather.precipitation_type} ({new_weather.target_precipitation:.1%}) in region {region_key}")
         return self.regional_weather[region_key]
     
     def update(self, dt: float, cx: int, cz: int):
@@ -213,12 +220,12 @@ class ClimateManager:
         weather.weather_timer -= dt / 60.0
         
         if weather.weather_timer <= 0:
-            # Time for weather change - longer intervals for stability
+            # Time for weather change
             self._roll_new_weather(weather, self.current_biome)
-            weather.weather_timer = 90 + random.random() * 180  # 90-270 seconds (1.5-4.5 minutes)
+            weather.weather_timer = 30 + random.random() * 60  # 30-90 seconds (shorter cycles)
         
-        # Smooth transitions
-        transition_speed = 0.02 * dt
+        # Faster transitions for more noticeable weather changes
+        transition_speed = 0.08 * dt
         weather.precipitation += (weather.target_precipitation - weather.precipitation) * transition_speed
         weather.cloud_cover += (weather.target_clouds - weather.cloud_cover) * transition_speed
         
@@ -239,13 +246,15 @@ class ClimateManager:
         """Determine new target weather based on biome."""
         roll = random.random()
         
-        # Determine if precipitation
-        precip_chance = biome.rain_tendency + biome.humidity * 0.2
+        # Higher precipitation chance - about 50-70% in humid areas
+        precip_chance = biome.rain_tendency * 1.5 + biome.humidity * 0.4
+        precip_chance = min(0.75, precip_chance)  # Cap at 75%
+        
         if roll < precip_chance:
             # Precipitation!
-            intensity = 0.3 + random.random() * 0.7
+            intensity = 0.4 + random.random() * 0.6  # 0.4-1.0 (heavier)
             weather.target_precipitation = intensity
-            weather.target_clouds = 0.6 + intensity * 0.3
+            weather.target_clouds = 0.7 + intensity * 0.25  # Heavier clouds
             
             # Rain or snow based on temperature
             if biome.temperature < 0.3 or (biome.temperature < 0.45 and random.random() < biome.snow_tendency * 2):
@@ -253,8 +262,9 @@ class ClimateManager:
             else:
                 weather.precipitation_type = "rain"
             
-            # Storm chance during heavy rain
-            if intensity > 0.6 and random.random() < biome.storm_tendency:
+            # Storm chance during heavy rain - more frequent storms!
+            storm_chance = biome.storm_tendency * 1.5 + (intensity - 0.5) * 0.3
+            if intensity > 0.5 and random.random() < storm_chance:
                 weather.lightning_active = True
                 weather.wind_strength = 0.5 + random.random() * 0.4
             else:
@@ -264,7 +274,7 @@ class ClimateManager:
             weather.target_precipitation = 0
             weather.precipitation_type = "none"
             weather.lightning_active = False
-            weather.target_clouds = biome.cloud_base + random.random() * 0.3
+            weather.target_clouds = biome.cloud_base + random.random() * 0.4
             weather.wind_strength = biome.wind_base + random.random() * 0.2
     
     def cleanup_distant(self, cx: int, cz: int, max_dist: int = 30):
@@ -287,9 +297,9 @@ class ClimateManager:
 class WeatherRenderer:
     """Renders weather effects - rain, snow, clouds, lightning."""
     
-    # Particle pool sizes (performance tuned)
-    MAX_RAIN_PARTICLES = 400
-    MAX_SNOW_PARTICLES = 300
+    # Particle pool sizes - increased for more dramatic weather
+    MAX_RAIN_PARTICLES = 800
+    MAX_SNOW_PARTICLES = 500
     
     def __init__(self):
         self.rain_particles: List[List[float]] = []  # [x, y, z, speed]
@@ -334,7 +344,7 @@ class WeatherRenderer:
         wind_z = math.sin(weather.wind_direction) * weather.wind_strength * 2
         
         # Update rain
-        if weather.precipitation > 0.1 and weather.precipitation_type == "rain":
+        if weather.precipitation > 0.05 and weather.precipitation_type == "rain":
             active_count = int(self.MAX_RAIN_PARTICLES * weather.precipitation)
             for i, p in enumerate(self.rain_particles[:active_count]):
                 p[1] -= p[3] * time_scale  # Fall
@@ -348,7 +358,7 @@ class WeatherRenderer:
                     p[2] = camera_z + (random.random() - 0.5) * 100
         
         # Update snow
-        if weather.precipitation > 0.1 and weather.precipitation_type == "snow":
+        if weather.precipitation > 0.05 and weather.precipitation_type == "snow":
             active_count = int(self.MAX_SNOW_PARTICLES * weather.precipitation)
             for i, p in enumerate(self.snow_particles[:active_count]):
                 p[3] += 0.05 * time_scale  # Drift phase
@@ -384,28 +394,28 @@ class WeatherRenderer:
             glEnable(GL_DEPTH_TEST)
         
         # Rain
-        if weather.precipitation > 0.1 and weather.precipitation_type == "rain":
+        if weather.precipitation > 0.05 and weather.precipitation_type == "rain":
             active_count = int(self.MAX_RAIN_PARTICLES * weather.precipitation)
             
-            # Rain color - slightly blue, semi-transparent
-            alpha = 0.3 + weather.precipitation * 0.3
-            glColor4f(0.7, 0.75, 0.85, alpha)
-            glLineWidth(1)
+            # Rain color - slightly blue, more visible
+            alpha = 0.5 + weather.precipitation * 0.4
+            glColor4f(0.6, 0.7, 0.9, alpha)
+            glLineWidth(2)  # Thicker rain
             
             glBegin(GL_LINES)
             for p in self.rain_particles[:active_count]:
-                # Rain streak
+                # Longer rain streaks
                 glVertex3f(p[0], p[1], p[2])
-                glVertex3f(p[0], p[1] + 0.8, p[2])  # Short streak
+                glVertex3f(p[0], p[1] + 1.5, p[2])
             glEnd()
         
         # Snow
-        if weather.precipitation > 0.1 and weather.precipitation_type == "snow":
+        if weather.precipitation > 0.05 and weather.precipitation_type == "snow":
             active_count = int(self.MAX_SNOW_PARTICLES * weather.precipitation)
             
-            # Snow - white points
-            glColor4f(1, 1, 1, 0.8)
-            glPointSize(3)
+            # Snow - bright white points
+            glColor4f(1, 1, 1, 0.9)
+            glPointSize(4)  # Bigger snowflakes
             
             glBegin(GL_POINTS)
             for p in self.snow_particles[:active_count]:
