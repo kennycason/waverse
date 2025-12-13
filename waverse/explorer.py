@@ -67,21 +67,37 @@ class GamepadConfig:
     L_STICK_X_INV = False
     L_STICK_Y_INV = False
     
-    R_STICK_X = 2
-    R_STICK_Y = 3
+    R_STICK_X = 3
+    R_STICK_Y = 4
     R_STICK_X_INV = False
     R_STICK_Y_INV = False
     
     L2_TYPE = "axis"  # "axis" or "button"
-    L2_ID = 4
+    L2_ID = 2
     L2_BASELINE = -1.0
     
     R2_TYPE = "axis"
     R2_ID = 5
     R2_BASELINE = -1.0
     
-    L3 = 10
-    R3 = 11
+    L3 = 6
+    R3 = 7
+    L1 = 4
+    R1 = 5
+    
+    A = 1
+    B = 2
+    X = 0
+    Y = 3
+    
+    START = 9
+    SELECT = 8
+    
+    # D-pad (can be hat or buttons)
+    DPAD_UP = {"type": "button", "button": 11}
+    DPAD_DOWN = {"type": "button", "button": 12}
+    DPAD_LEFT = {"type": "button", "button": 13}
+    DPAD_RIGHT = {"type": "button", "button": 14}
     
     DEADZONE = 0.25
     
@@ -113,6 +129,21 @@ class GamepadConfig:
                 
                 cls.L3 = data.get("l3", cls.L3)
                 cls.R3 = data.get("r3", cls.R3)
+                cls.L1 = data.get("l1", cls.L1)
+                cls.R1 = data.get("r1", cls.R1)
+                
+                cls.A = data.get("a", cls.A)
+                cls.B = data.get("b", cls.B)
+                cls.X = data.get("x", cls.X)
+                cls.Y = data.get("y", cls.Y)
+                
+                cls.START = data.get("start", cls.START)
+                cls.SELECT = data.get("select", cls.SELECT)
+                
+                cls.DPAD_UP = data.get("dpad_up", cls.DPAD_UP)
+                cls.DPAD_DOWN = data.get("dpad_down", cls.DPAD_DOWN)
+                cls.DPAD_LEFT = data.get("dpad_left", cls.DPAD_LEFT)
+                cls.DPAD_RIGHT = data.get("dpad_right", cls.DPAD_RIGHT)
                 
                 print(f"  Loaded gamepad config from {GAMEPAD_CONFIG_FILE}")
                 return True
@@ -217,8 +248,9 @@ class GamepadManager:
         x = self.get_axis(GamepadConfig.R_STICK_X, GamepadConfig.R_STICK_X_INV)
         y = self.get_axis(GamepadConfig.R_STICK_Y, GamepadConfig.R_STICK_Y_INV)
         # yaw from horizontal (X), pitch from vertical (Y)
+        # Invert X so pushing stick right = look right (standard)
         # Invert Y so pushing stick up = look up (positive pitch)
-        return (x, -y)
+        return (-x, -y)
     
     def get_vertical(self) -> float:
         """Get vertical movement from L3/R3 buttons."""
@@ -245,6 +277,30 @@ class GamepadManager:
         l2 = self.get_trigger(GamepadConfig.L2_TYPE, GamepadConfig.L2_ID, GamepadConfig.L2_BASELINE)
         r2 = self.get_trigger(GamepadConfig.R2_TYPE, GamepadConfig.R2_ID, GamepadConfig.R2_BASELINE)
         return (l2, r2)
+    
+    def get_dpad(self, dpad_config: dict) -> bool:
+        """Check if a D-pad direction is pressed."""
+        if not self.gamepad:
+            return False
+        
+        if dpad_config.get("type") == "hat":
+            hat_id = dpad_config.get("hat", 0)
+            direction = dpad_config.get("direction", "")
+            if hat_id >= self.gamepad.get_numhats():
+                return False
+            hat = self.gamepad.get_hat(hat_id)
+            if direction == "up":
+                return hat[1] == 1
+            elif direction == "down":
+                return hat[1] == -1
+            elif direction == "left":
+                return hat[0] == -1
+            elif direction == "right":
+                return hat[0] == 1
+        elif dpad_config.get("type") == "button":
+            return self.get_button(dpad_config.get("button", -1))
+        
+        return False
     
     def print_debug(self):
         """Print all axis and button values for debugging."""

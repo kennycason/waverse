@@ -166,6 +166,54 @@ def wait_for_trigger(gamepad, prompt):
         time.sleep(0.05)
 
 
+def wait_for_dpad_or_button(gamepad, prompt):
+    """Wait for D-pad input - could be hat or buttons."""
+    print(f"\n>>> {prompt}")
+    print("    (press and hold...)")
+    
+    pygame.event.pump()
+    time.sleep(0.2)
+    
+    while True:
+        if check_quit():
+            return None
+        pygame.event.pump()
+        
+        # Check hats (D-pad on many controllers)
+        for i in range(gamepad.get_numhats()):
+            hat = gamepad.get_hat(i)
+            if hat != (0, 0):
+                direction = None
+                if hat[1] == 1:
+                    direction = "up"
+                elif hat[1] == -1:
+                    direction = "down"
+                elif hat[0] == -1:
+                    direction = "left"
+                elif hat[0] == 1:
+                    direction = "right"
+                if direction:
+                    print(f"    Detected: Hat {i} ({direction})")
+                    # Wait for release
+                    while gamepad.get_hat(i) != (0, 0):
+                        pygame.event.pump()
+                        time.sleep(0.05)
+                    time.sleep(0.2)
+                    return {"type": "hat", "hat": i, "direction": direction}
+        
+        # Check buttons
+        for i in range(gamepad.get_numbuttons()):
+            if gamepad.get_button(i):
+                print(f"    Detected: Button {i}")
+                while gamepad.get_button(i):
+                    pygame.event.pump()
+                    time.sleep(0.05)
+                time.sleep(0.2)
+                return {"type": "button", "button": i}
+        
+        time.sleep(0.05)
+
+
 def main():
     print("=" * 60)
     print("  WAVERSE GAMEPAD CALIBRATION")
@@ -293,6 +341,107 @@ def main():
         pygame.quit()
         return
     mappings["r3"] = r3
+    
+    # Shoulder buttons
+    print("\n[SHOULDER BUTTON CALIBRATION]")
+    time.sleep(0.5)
+    
+    l1 = wait_for_button(gamepad, "Press L1 (left shoulder)")
+    if l1 is None:
+        print("Cancelled.")
+        pygame.quit()
+        return
+    mappings["l1"] = l1
+    
+    r1 = wait_for_button(gamepad, "Press R1 (right shoulder)")
+    if r1 is None:
+        print("Cancelled.")
+        pygame.quit()
+        return
+    mappings["r1"] = r1
+    
+    # Face buttons
+    print("\n[FACE BUTTON CALIBRATION]")
+    time.sleep(0.5)
+    
+    a_btn = wait_for_button(gamepad, "Press A (bottom button)")
+    if a_btn is None:
+        print("Cancelled.")
+        pygame.quit()
+        return
+    mappings["a"] = a_btn
+    
+    b_btn = wait_for_button(gamepad, "Press B (right button)")
+    if b_btn is None:
+        print("Cancelled.")
+        pygame.quit()
+        return
+    mappings["b"] = b_btn
+    
+    x_btn = wait_for_button(gamepad, "Press X (left button)")
+    if x_btn is None:
+        print("Cancelled.")
+        pygame.quit()
+        return
+    mappings["x"] = x_btn
+    
+    y_btn = wait_for_button(gamepad, "Press Y (top button)")
+    if y_btn is None:
+        print("Cancelled.")
+        pygame.quit()
+        return
+    mappings["y"] = y_btn
+    
+    # Start/Select
+    print("\n[MENU BUTTON CALIBRATION]")
+    time.sleep(0.5)
+    
+    start = wait_for_button(gamepad, "Press START")
+    if start is None:
+        print("Cancelled.")
+        pygame.quit()
+        return
+    mappings["start"] = start
+    
+    select = wait_for_button(gamepad, "Press SELECT/BACK")
+    if select is None:
+        print("Cancelled.")
+        pygame.quit()
+        return
+    mappings["select"] = select
+    
+    # D-Pad (could be buttons or hat)
+    print("\n[D-PAD CALIBRATION]")
+    print("    D-Pad may be buttons or a 'hat' - we'll detect both.")
+    time.sleep(0.5)
+    
+    dpad_up = wait_for_dpad_or_button(gamepad, "Press D-PAD UP")
+    if dpad_up is None:
+        print("Cancelled.")
+        pygame.quit()
+        return
+    mappings["dpad_up"] = dpad_up
+    
+    dpad_down = wait_for_dpad_or_button(gamepad, "Press D-PAD DOWN")
+    if dpad_down is None:
+        print("Cancelled.")
+        pygame.quit()
+        return
+    mappings["dpad_down"] = dpad_down
+    
+    dpad_left = wait_for_dpad_or_button(gamepad, "Press D-PAD LEFT")
+    if dpad_left is None:
+        print("Cancelled.")
+        pygame.quit()
+        return
+    mappings["dpad_left"] = dpad_left
+    
+    dpad_right = wait_for_dpad_or_button(gamepad, "Press D-PAD RIGHT")
+    if dpad_right is None:
+        print("Cancelled.")
+        pygame.quit()
+        return
+    mappings["dpad_right"] = dpad_right
     
     # Done!
     print("\n" + "=" * 60)
