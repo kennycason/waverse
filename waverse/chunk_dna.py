@@ -70,10 +70,24 @@ class TerrainPalette:
         new_palette.mountain = _mutate_color(self.mountain, rng, rate)
         new_palette.snow = _mutate_color(self.snow, rng, rate)
         
-        # Subtle overall adjustments
-        new_palette.saturation_mult = _clamp(self.saturation_mult + rng.normal(0, 0.02), 0.7, 1.3)
-        new_palette.brightness_mult = _clamp(self.brightness_mult + rng.normal(0, 0.02), 0.7, 1.3)
-        new_palette.hue_shift = _clamp(self.hue_shift + rng.normal(0, 0.01), -0.15, 0.15)
+        # Overall adjustments - allow wider ranges for psychedelic areas
+        new_palette.saturation_mult = _clamp(self.saturation_mult + rng.normal(0, 0.03), 0.5, 1.8)
+        new_palette.brightness_mult = _clamp(self.brightness_mult + rng.normal(0, 0.02), 0.6, 1.4)
+        # Hue shift can go full range for truly psychedelic colors
+        new_palette.hue_shift = _clamp(self.hue_shift + rng.normal(0, 0.015), -0.5, 0.5)
+        
+        # Rare "burst" mutation - occasionally make a bigger color jump
+        if rng.random() < 0.05:  # 5% chance
+            burst_color = rng.choice(["grass", "forest", "hills", "mountain"])
+            burst_shift = rng.normal(0, 0.15)  # Larger shift
+            if burst_color == "grass":
+                new_palette.grass = tuple(_clamp(c + burst_shift) for c in new_palette.grass)
+            elif burst_color == "forest":
+                new_palette.forest = tuple(_clamp(c + burst_shift) for c in new_palette.forest)
+            elif burst_color == "hills":
+                new_palette.hills = tuple(_clamp(c + burst_shift) for c in new_palette.hills)
+            elif burst_color == "mountain":
+                new_palette.mountain = tuple(_clamp(c + burst_shift) for c in new_palette.mountain)
         
         return new_palette
     

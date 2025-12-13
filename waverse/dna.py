@@ -62,9 +62,13 @@ class ColorGene:
         return (self.r, self.g, self.b)
     
     def mutate(self, rng: np.random.Generator, strength: float = 1.0) -> "ColorGene":
-        """Return a mutated copy."""
+        """Return a mutated copy with potential for larger color shifts."""
         def mutate_channel(val):
+            # Regular small mutation
             mutation = rng.normal(0, self.mutation_rate * strength)
+            # Rare larger mutation for color variety
+            if rng.random() < 0.08:  # 8% chance of bigger shift
+                mutation += rng.normal(0, 0.2 * strength)
             return float(np.clip(val + mutation, 0, 1))
         
         return ColorGene(

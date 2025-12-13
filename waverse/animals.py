@@ -117,14 +117,16 @@ class AnimalInstance:
             if get_ground_height:
                 self.y = get_ground_height(self.x, self.z)
         
-        # Update rotation to face movement direction
+        # Update rotation to face movement direction - smooth interpolation
         if abs(self.vx) > 0.01 or abs(self.vz) > 0.01:
             target_rot = math.degrees(math.atan2(self.vx, self.vz))
-            # Smooth rotation
+            # Very smooth rotation using lerp
             diff = target_rot - self.rotation
             while diff > 180: diff -= 360
             while diff < -180: diff += 360
-            self.rotation += diff * min(1, dt_seconds * 8)
+            # Smooth lerp factor - faster for big differences, slower for small
+            lerp_speed = min(0.15, 0.05 + abs(diff) * 0.002)
+            self.rotation += diff * lerp_speed
     
     def _update_ai(self, dt: float, neighbors: List["AnimalInstance"], 
                    player_pos: Tuple[float, float, float]):
@@ -696,8 +698,8 @@ class AnimalManager:
         h, w = heightmap.shape
         animals = []
         
-        # More animals per chunk - performance is good!
-        num_animals = rng.integers(2, 6)  # 2-5 animals per chunk
+        # Animals per chunk - balanced for performance
+        num_animals = rng.integers(1, 5)  # 1-4 animals per chunk
         
         for _ in range(num_animals):
             local_x = rng.integers(5, w - 5)

@@ -662,8 +662,8 @@ class FloraManager:
         plants = []
         h, w = heightmap.shape
         
-        # Place plants using chunk's DNA species
-        num_plants = rng.integers(20, 45)
+        # Place plants using chunk's DNA species (reduced ~10% for perf)
+        num_plants = rng.integers(18, 40)
         
         for _ in range(num_plants):
             local_x = rng.integers(2, w - 2)

@@ -122,12 +122,15 @@ class WeatherState:
 
 
 class ClimateManager:
-    """Manages biome DNA and weather per chunk."""
+    """Manages biome DNA and weather per region (groups of chunks)."""
+    
+    # Weather is regional - covers 4x4 chunk areas for consistency
+    WEATHER_REGION_SIZE = 4
     
     def __init__(self, seed: int = 42):
         self.seed = seed
         self.biomes: Dict[Tuple[int, int], BiomeDNA] = {}
-        self.weather: Dict[Tuple[int, int], WeatherState] = {}
+        self.regional_weather: Dict[Tuple[int, int], WeatherState] = {}  # Per region, not per chunk
         self.current_chunk = (0, 0)
         self.current_biome = BiomeDNA()
         self.current_weather = WeatherState()
@@ -179,17 +182,24 @@ class ClimateManager:
         self.biomes[key] = new_biome
         return new_biome
     
+    def _chunk_to_region(self, cx: int, cz: int) -> Tuple[int, int]:
+        """Convert chunk coords to weather region coords."""
+        return (cx // self.WEATHER_REGION_SIZE, cz // self.WEATHER_REGION_SIZE)
+    
     def get_weather(self, cx: int, cz: int) -> WeatherState:
-        """Get or create weather state for a chunk."""
-        key = (cx, cz)
-        if key not in self.weather:
+        """Get or create weather state for a region (group of chunks)."""
+        region_key = self._chunk_to_region(cx, cz)
+        
+        if region_key not in self.regional_weather:
+            # Get average biome for this region
             biome = self.get_biome(cx, cz)
-            self.weather[key] = WeatherState(
+            self.regional_weather[region_key] = WeatherState(
                 cloud_cover=biome.cloud_base + random.random() * 0.2,
                 wind_strength=biome.wind_base + random.random() * 0.2,
                 wind_direction=random.random() * math.pi * 2,
+                weather_timer=60 + random.random() * 120,  # Longer initial timer
             )
-        return self.weather[key]
+        return self.regional_weather[region_key]
     
     def update(self, dt: float, cx: int, cz: int):
         """Update weather for current chunk."""
@@ -203,9 +213,9 @@ class ClimateManager:
         weather.weather_timer -= dt / 60.0
         
         if weather.weather_timer <= 0:
-            # Time for weather change
+            # Time for weather change - longer intervals for stability
             self._roll_new_weather(weather, self.current_biome)
-            weather.weather_timer = 30 + random.random() * 60  # 30-90 seconds
+            weather.weather_timer = 90 + random.random() * 180  # 90-270 seconds (1.5-4.5 minutes)
         
         # Smooth transitions
         transition_speed = 0.02 * dt
@@ -258,12 +268,20 @@ class ClimateManager:
             weather.wind_strength = biome.wind_base + random.random() * 0.2
     
     def cleanup_distant(self, cx: int, cz: int, max_dist: int = 30):
-        """Remove data for distant chunks."""
+        """Remove data for distant chunks/regions."""
         to_remove = [k for k in self.biomes if abs(k[0]-cx) > max_dist or abs(k[1]-cz) > max_dist]
         for k in to_remove:
             del self.biomes[k]
-            if k in self.weather:
-                del self.weather[k]
+        
+        # Clean up regional weather
+        region_dist = max_dist // self.WEATHER_REGION_SIZE + 1
+        current_region = self._chunk_to_region(cx, cz)
+        to_remove_regions = [
+            k for k in self.regional_weather 
+            if abs(k[0] - current_region[0]) > region_dist or abs(k[1] - current_region[1]) > region_dist
+        ]
+        for k in to_remove_regions:
+            del self.regional_weather[k]
 
 
 class WeatherRenderer:

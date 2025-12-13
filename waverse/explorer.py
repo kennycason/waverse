@@ -14,6 +14,7 @@ import os
 
 from .chunk_dna import ChunkDNAManager, ChunkDNA, TerrainPalette
 from .climate import ClimateManager, WeatherRenderer
+from .structures import StructureManager, Structure
 
 try:
     from OpenGL.GL import *
@@ -51,6 +52,216 @@ LOD_QUARTER_DISTANCE = 15  # Quarter detail within this range
 
 
 SAVE_FILE = os.path.expanduser("~/.waverse.json")
+
+
+# Gamepad/Controller configuration
+GAMEPAD_CONFIG_FILE = os.path.expanduser("~/.waverse_gamepad.json")
+
+
+class GamepadConfig:
+    """Gamepad button and axis mappings - loaded from calibration file."""
+    
+    # Default mappings (Logitech Dual Action style)
+    L_STICK_X = 0
+    L_STICK_Y = 1
+    L_STICK_X_INV = False
+    L_STICK_Y_INV = False
+    
+    R_STICK_X = 2
+    R_STICK_Y = 3
+    R_STICK_X_INV = False
+    R_STICK_Y_INV = False
+    
+    L2_TYPE = "axis"  # "axis" or "button"
+    L2_ID = 4
+    L2_BASELINE = -1.0
+    
+    R2_TYPE = "axis"
+    R2_ID = 5
+    R2_BASELINE = -1.0
+    
+    L3 = 10
+    R3 = 11
+    
+    DEADZONE = 0.25
+    
+    @classmethod
+    def load_from_file(cls):
+        """Load mappings from calibration file if it exists."""
+        if os.path.exists(GAMEPAD_CONFIG_FILE):
+            try:
+                with open(GAMEPAD_CONFIG_FILE, 'r') as f:
+                    data = json.load(f)
+                
+                cls.L_STICK_X = data.get("left_stick_x", cls.L_STICK_X)
+                cls.L_STICK_Y = data.get("left_stick_y", cls.L_STICK_Y)
+                cls.L_STICK_X_INV = data.get("left_stick_x_inverted", False)
+                cls.L_STICK_Y_INV = data.get("left_stick_y_inverted", False)
+                
+                cls.R_STICK_X = data.get("right_stick_x", cls.R_STICK_X)
+                cls.R_STICK_Y = data.get("right_stick_y", cls.R_STICK_Y)
+                cls.R_STICK_X_INV = data.get("right_stick_x_inverted", False)
+                cls.R_STICK_Y_INV = data.get("right_stick_y_inverted", False)
+                
+                cls.L2_TYPE = data.get("l2_type", cls.L2_TYPE)
+                cls.L2_ID = data.get("l2_id", cls.L2_ID)
+                cls.L2_BASELINE = data.get("l2_baseline", cls.L2_BASELINE)
+                
+                cls.R2_TYPE = data.get("r2_type", cls.R2_TYPE)
+                cls.R2_ID = data.get("r2_id", cls.R2_ID)
+                cls.R2_BASELINE = data.get("r2_baseline", cls.R2_BASELINE)
+                
+                cls.L3 = data.get("l3", cls.L3)
+                cls.R3 = data.get("r3", cls.R3)
+                
+                print(f"  Loaded gamepad config from {GAMEPAD_CONFIG_FILE}")
+                return True
+            except Exception as e:
+                print(f"  Warning: Could not load gamepad config: {e}")
+                return False
+        return False
+    
+    @staticmethod
+    def apply_deadzone(value: float, deadzone: float = 0.25) -> float:
+        """Apply deadzone to analog stick value."""
+        if abs(value) < deadzone:
+            return 0.0
+        sign = 1 if value > 0 else -1
+        return sign * (abs(value) - deadzone) / (1.0 - deadzone)
+
+
+class GamepadManager:
+    """Manages gamepad input with hotplug support."""
+    
+    def __init__(self):
+        self.gamepad = None
+        self.name = "None"
+        self.debug_mode = False
+        self.debug_cooldown = 0
+        self.config_loaded = False
+        pygame.joystick.init()
+        self._detect_gamepad()
+    
+    def _detect_gamepad(self):
+        """Detect and initialize first available gamepad."""
+        pygame.joystick.quit()
+        pygame.joystick.init()
+        count = pygame.joystick.get_count()
+        if count > 0:
+            self.gamepad = pygame.joystick.Joystick(0)
+            self.gamepad.init()
+            self.name = self.gamepad.get_name()
+            print(f"  Gamepad detected: {self.name}")
+            print(f"    Axes: {self.gamepad.get_numaxes()}")
+            print(f"    Buttons: {self.gamepad.get_numbuttons()}")
+            
+            # Try to load calibration
+            self.config_loaded = GamepadConfig.load_from_file()
+            if not self.config_loaded:
+                print("    Run 'python calibrate_gamepad.py' to calibrate!")
+            
+            print("    Press G to toggle gamepad debug mode")
+            return True
+        else:
+            if self.gamepad is None:
+                print("  No gamepad detected (keyboard only)")
+            self.gamepad = None
+            self.name = "None"
+            return False
+    
+    def check_hotplug(self):
+        """Check for newly connected gamepads (call periodically)."""
+        if self.gamepad is None:
+            return self._detect_gamepad()
+        return True
+    
+    def is_connected(self) -> bool:
+        return self.gamepad is not None
+    
+    def get_axis_raw(self, axis: int) -> float:
+        """Get raw axis value without deadzone."""
+        if not self.gamepad:
+            return 0.0
+        if axis >= self.gamepad.get_numaxes():
+            return 0.0
+        return self.gamepad.get_axis(axis)
+    
+    def get_axis(self, axis: int, inverted: bool = False, deadzone: float = 0.25) -> float:
+        """Get axis value with deadzone applied and optional inversion."""
+        if not self.gamepad:
+            return 0.0
+        if axis >= self.gamepad.get_numaxes():
+            return 0.0
+        value = self.gamepad.get_axis(axis)
+        if inverted:
+            value = -value
+        return GamepadConfig.apply_deadzone(value, deadzone)
+    
+    def get_button(self, button: int) -> bool:
+        """Get button state."""
+        if not self.gamepad:
+            return False
+        if button >= self.gamepad.get_numbuttons():
+            return False
+        return self.gamepad.get_button(button)
+    
+    def get_movement(self) -> tuple:
+        """Get movement from left stick (forward, right)."""
+        x = self.get_axis(GamepadConfig.L_STICK_X, GamepadConfig.L_STICK_X_INV)
+        y = self.get_axis(GamepadConfig.L_STICK_Y, GamepadConfig.L_STICK_Y_INV)
+        # Forward is -Y on stick (up = negative Y), right is +X
+        return (-y, x)
+    
+    def get_look(self) -> tuple:
+        """Get look from right stick (yaw, pitch)."""
+        x = self.get_axis(GamepadConfig.R_STICK_X, GamepadConfig.R_STICK_X_INV)
+        y = self.get_axis(GamepadConfig.R_STICK_Y, GamepadConfig.R_STICK_Y_INV)
+        # yaw from horizontal (X), pitch from vertical (Y)
+        # Invert Y so pushing stick up = look up (positive pitch)
+        return (x, -y)
+    
+    def get_vertical(self) -> float:
+        """Get vertical movement from L3/R3 buttons."""
+        up = 1.0 if self.get_button(GamepadConfig.R3) else 0.0
+        down = -1.0 if self.get_button(GamepadConfig.L3) else 0.0
+        return up + down
+    
+    def get_trigger(self, trigger_type: str, trigger_id: int, baseline: float) -> float:
+        """Get trigger value normalized to 0-1."""
+        if trigger_type == "button":
+            return 1.0 if self.get_button(trigger_id) else 0.0
+        else:
+            raw = self.get_axis_raw(trigger_id)
+            # Normalize based on baseline
+            # If baseline is -1, range is -1 to 1, so normalize to 0-1
+            if baseline < -0.5:
+                return (raw + 1.0) / 2.0
+            else:
+                # Baseline is ~0, so just use raw value clamped
+                return max(0.0, raw)
+    
+    def get_triggers(self) -> tuple:
+        """Get L2/R2 trigger values (normalized 0-1)."""
+        l2 = self.get_trigger(GamepadConfig.L2_TYPE, GamepadConfig.L2_ID, GamepadConfig.L2_BASELINE)
+        r2 = self.get_trigger(GamepadConfig.R2_TYPE, GamepadConfig.R2_ID, GamepadConfig.R2_BASELINE)
+        return (l2, r2)
+    
+    def print_debug(self):
+        """Print all axis and button values for debugging."""
+        if not self.gamepad or self.debug_cooldown > 0:
+            return
+        self.debug_cooldown = 30  # Print every 0.5 seconds
+        
+        axes = []
+        for i in range(self.gamepad.get_numaxes()):
+            axes.append(f"{i}:{self.get_axis_raw(i):+.2f}")
+        
+        buttons = []
+        for i in range(min(16, self.gamepad.get_numbuttons())):
+            if self.get_button(i):
+                buttons.append(str(i))
+        
+        print(f"  Axes: {' '.join(axes)} | Buttons: {','.join(buttons) if buttons else 'none'}")
 
 
 def save_position(camera, seed: int):
@@ -155,7 +366,7 @@ class Camera:
         """Get terrain height at current position."""
         return chunk_manager.get_height_at(self.x, self.z) * HEIGHT_SCALE
     
-    def move(self, forward, right, up, chunk_manager: ChunkManager):
+    def move(self, forward, right, up, chunk_manager: ChunkManager, structure_manager=None):
         # Get current speed based on level
         speed = BASE_MOVE_SPEED * SPEED_LEVELS[self.speed_level]
         
@@ -175,28 +386,61 @@ class Camera:
         right_x = math.cos(yaw_rad)
         right_z = -math.sin(yaw_rad)
         
-        self.x += (forward * forward_x + right * right_x) * speed
-        self.z += (forward * forward_z + right * right_z) * speed
+        # Calculate new position
+        new_x = self.x + (forward * forward_x + right * right_x) * speed
+        new_z = self.z + (forward * forward_z + right * right_z) * speed
         
+        # Check structure collision at new position
+        blocked = False
+        structure_floor = None
+        if structure_manager:
+            blocked, structure_floor = structure_manager.check_collision(new_x, self.y, new_z)
+        
+        # Apply horizontal movement if not blocked
+        if not blocked:
+            self.x = new_x
+            self.z = new_z
+        
+        # Calculate ground/floor height
         terrain_h = self.get_terrain_height(chunk_manager)
-        ground_height = terrain_h + PLAYER_HEIGHT
+        terrain_ground = terrain_h + PLAYER_HEIGHT
+        
+        # Effective ground = highest of terrain or structure floor
+        if structure_floor is not None:
+            effective_ground = max(terrain_ground, structure_floor + PLAYER_HEIGHT)
+        else:
+            effective_ground = terrain_ground
         
         if self.flying:
-            self.y += forward * forward_y * speed
-            self.y += up * speed
+            # Calculate new Y position
+            new_y = self.y + forward * forward_y * speed + up * speed
+            
+            # Check for ceiling collision at new height
+            ceiling_blocked = False
+            if structure_manager and up > 0:
+                ceiling_blocked, _ = structure_manager.check_collision(self.x, new_y, self.z)
+            
+            if not ceiling_blocked:
+                self.y = new_y
+            
+            # Recheck floor at new position
+            if structure_manager:
+                _, new_floor = structure_manager.check_collision(self.x, self.y, self.z)
+                if new_floor is not None:
+                    effective_ground = max(terrain_ground, new_floor + PLAYER_HEIGHT)
             
             # Land when pressing down and at ground level
-            if up < 0 and self.y <= ground_height + 0.5:
-                self.y = ground_height
+            if up < 0 and self.y <= effective_ground + 0.5:
+                self.y = effective_ground
                 self.flying = False
-                self.target_y = ground_height
+                self.target_y = effective_ground
             
-            # Don't go below ground
-            if self.y < ground_height:
-                self.y = ground_height
+            # Don't go below ground/floor
+            if self.y < effective_ground:
+                self.y = effective_ground
         else:
-            # Walking mode: follow terrain smoothly
-            self.target_y = ground_height
+            # Walking mode: follow terrain/floor smoothly
+            self.target_y = effective_ground
             diff = self.target_y - self.y
             
             # Fast catch-up if far from terrain, smooth otherwise
@@ -800,6 +1044,9 @@ def run_explorer(config: WorldConfig = None):
     pygame.mouse.set_visible(True)
     pygame.event.set_grab(False)
     
+    # Initialize gamepad
+    gamepad = GamepadManager()
+    
     setup_opengl()
     
     glMatrixMode(GL_PROJECTION)
@@ -825,6 +1072,9 @@ def run_explorer(config: WorldConfig = None):
     # Climate/weather system
     climate_manager = ClimateManager(config.seed)
     weather_renderer = WeatherRenderer()
+    
+    # Structure system (buildings, etc.)
+    structure_manager = StructureManager(config.seed)
     
     # Camera - try to load saved position
     camera = Camera()
@@ -854,11 +1104,14 @@ def run_explorer(config: WorldConfig = None):
     print("\n" + "=" * 60)
     print(f"  WAVERSE - {config.name}")
     print("=" * 60)
-    print("  MOVEMENT: WASD/Arrows | H/Space=Up F/Shift=Down")
-    print("  CAMERA: IJKL or Right-Click+Mouse")
-    print("  SPEED: 1=Slow 2 3=Normal 4 5=Fast")
-    print("  SAVE: S (saves position to ~/.waverse.json)")
-    print("  EXIT: ESC")
+    print("  KEYBOARD:")
+    print("    Movement: WASD/Arrows | H/Space=Up F/Shift=Down")
+    print("    Camera: IJKL or Right-Click+Mouse")
+    print("    Speed: 1=Slow 2 3=Normal 4 5=Fast | S=Save | ESC=Exit")
+    if gamepad.is_connected():
+        print(f"  GAMEPAD ({gamepad.name}):")
+        print("    Left Stick=Move | Right Stick=Look")
+        print("    L3=Down | R3=Up | L2/R2=Change Speed")
     print("=" * 60 + "\n")
     
     clock = pygame.time.Clock()
@@ -867,9 +1120,16 @@ def run_explorer(config: WorldConfig = None):
     last_chunk = None
     frame_count = 0
     
+    # Gamepad speed change cooldown
+    gamepad_speed_cooldown = 0
+    
     while running:
         frame_count += 1
         dt = clock.tick(60) / 16.67
+        
+        # Update gamepad speed cooldown
+        if gamepad_speed_cooldown > 0:
+            gamepad_speed_cooldown -= dt
         
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -895,6 +1155,9 @@ def run_explorer(config: WorldConfig = None):
                     print("  Speed: 5 (Fast)")
                 elif event.key == pygame.K_s:
                     save_position(camera, config.seed)
+                elif event.key == pygame.K_g:
+                    gamepad.debug_mode = not gamepad.debug_mode
+                    print(f"  Gamepad debug: {'ON' if gamepad.debug_mode else 'OFF'}")
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 3:
                     mouse_look = True
@@ -927,7 +1190,49 @@ def run_explorer(config: WorldConfig = None):
         if keys[pygame.K_j]: camera.rotate_keyboard(look_speed * 1.5, 0)
         if keys[pygame.K_l]: camera.rotate_keyboard(-look_speed * 1.5, 0)
         
-        camera.move(forward, right, up, chunk_manager)
+        # Gamepad input (check for hotplug every 60 frames)
+        if frame_count % 60 == 0:
+            gamepad.check_hotplug()
+        
+        if gamepad.is_connected():
+            # Debug mode - print axis values
+            if gamepad.debug_mode:
+                gamepad.debug_cooldown = max(0, gamepad.debug_cooldown - 1)
+                gamepad.print_debug()
+            
+            # Left stick = movement (WASD)
+            gp_move = gamepad.get_movement()
+            forward += gp_move[0] * dt * speed
+            right += gp_move[1] * dt * speed
+            
+            # Right stick = look (IJKL)
+            # gp_look returns (yaw, pitch) with proper signs
+            gp_look = gamepad.get_look()
+            gamepad_look_speed = dt * 2.5
+            camera.rotate_keyboard(gp_look[0] * gamepad_look_speed, gp_look[1] * gamepad_look_speed)
+            
+            # L3 = go down, R3 = go up
+            up += gamepad.get_vertical() * dt * speed
+            
+            # L2/R2 for speed changes (with cooldown to prevent rapid changes)
+            # Use normalized trigger values (0-1 range)
+            if gamepad_speed_cooldown <= 0:
+                l2_val, r2_val = gamepad.get_triggers()
+                
+                if l2_val > 0.7:  # L2 = decrease speed
+                    new_level = max(0, camera.speed_level - 1)
+                    if new_level != camera.speed_level:
+                        camera.set_speed(new_level)
+                        print(f"  Speed: {new_level + 1}")
+                        gamepad_speed_cooldown = 20  # ~0.33 seconds
+                elif r2_val > 0.7:  # R2 = increase speed
+                    new_level = min(4, camera.speed_level + 1)
+                    if new_level != camera.speed_level:
+                        camera.set_speed(new_level)
+                        print(f"  Speed: {new_level + 1}")
+                        gamepad_speed_cooldown = 20
+        
+        camera.move(forward, right, up, chunk_manager, structure_manager)
         
         # Update chunks (stream in new ones as we move)
         current_chunk = camera.get_chunk_pos()
@@ -983,6 +1288,10 @@ def run_explorer(config: WorldConfig = None):
             animal_manager.spawn_animals_for_chunk(
                 cx, cz, chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE
             )
+            # Maybe spawn buildings
+            structure_manager.spawn_random_buildings(
+                cx, cz, chunk.world_x, chunk.world_z, chunk.heightmap, HEIGHT_SCALE, TILE_SCALE
+            )
         
         # Update animals every few frames for performance
         if frame_count % 3 == 0:  # Update AI every 3rd frame
@@ -991,11 +1300,15 @@ def run_explorer(config: WorldConfig = None):
         # Render animals
         animal_manager.render(cam_pos[0], cam_pos[1], cam_pos[2])
         
+        # Render structures (buildings)
+        structure_manager.render(cam_pos[0], cam_pos[1], cam_pos[2])
+        
         # Cleanup distant chunks occasionally
         if frame_count % 60 == 0:
             animal_manager.cleanup_distant_chunks(current_chunk[0], current_chunk[1])
             chunk_dna_manager.cleanup_distant(current_chunk[0], current_chunk[1])
             climate_manager.cleanup_distant(current_chunk[0], current_chunk[1])
+            structure_manager.cleanup_distant(current_chunk[0], current_chunk[1])
         
         # Render water plane at water level, centered on camera
         render_water(camera.x, camera.z, water_level)

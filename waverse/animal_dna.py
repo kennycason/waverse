@@ -291,9 +291,16 @@ class AnimalDNA:
         new_dna.group_tendency = float(np.clip(self.group_tendency + rng.normal(0, rate), 0, 1))
         new_dna.base_scale = float(np.clip(self.base_scale + rng.normal(0, 0.15 * strength), 0.2, 3.0))
         
-        # Mutate colors
+        # Mutate colors - with occasional larger shifts for variety
         def mutate_color(c):
-            return tuple(float(np.clip(v + rng.normal(0, rate), 0, 1)) for v in c)
+            result = list(c)
+            for i in range(3):
+                mutation = rng.normal(0, rate)
+                # Rare larger color mutation for psychedelic creatures
+                if rng.random() < 0.1:  # 10% chance per channel
+                    mutation += rng.normal(0, 0.15)
+                result[i] = float(np.clip(c[i] + mutation, 0, 1))
+            return tuple(result)
         
         new_dna.primary_color = mutate_color(self.primary_color)
         new_dna.secondary_color = mutate_color(self.secondary_color)
