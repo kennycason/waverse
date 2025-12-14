@@ -671,10 +671,8 @@ class FloraManager:
             
             ground_h = heightmap[local_z, local_x]
             
-            # Placement constraints
+            # Placement constraints - only skip underwater
             if ground_h < 1:  # Underwater
-                continue
-            if ground_h > 45:  # Too high
                 continue
             
             # World position
@@ -682,7 +680,27 @@ class FloraManager:
             world_z = chunk_world_z + local_z * tile_scale
             
             # Pick a species from this chunk's DNA pool
-            dna = rng.choice(chunk_dna_list)
+            # At high elevations, prefer alpine/hardy plants
+            if ground_h > 40:  # High elevation - alpine zone
+                # Prefer pines, crystals, grass, some hardy bushes
+                alpine_types = [PlantType.GRASS, PlantType.PINE, PlantType.CRYSTAL, 
+                               PlantType.BUSH, PlantType.SHRUB, PlantType.CACTUS]
+                alpine_dnas = [d for d in chunk_dna_list if d.plant_type in alpine_types]
+                if alpine_dnas:
+                    dna = rng.choice(alpine_dnas)
+                else:
+                    dna = rng.choice(chunk_dna_list)
+            elif ground_h > 30:  # Mountain zone
+                # Mixed - some trees, mostly smaller plants
+                mountain_types = [PlantType.PINE, PlantType.TREE, PlantType.BUSH, 
+                                 PlantType.SHRUB, PlantType.GRASS, PlantType.FERN]
+                mountain_dnas = [d for d in chunk_dna_list if d.plant_type in mountain_types]
+                if mountain_dnas:
+                    dna = rng.choice(mountain_dnas)
+                else:
+                    dna = rng.choice(chunk_dna_list)
+            else:
+                dna = rng.choice(chunk_dna_list)
             
             # Apply slight per-plant mutation for variety
             if rng.random() < 0.3:

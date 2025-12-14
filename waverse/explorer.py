@@ -11,6 +11,7 @@ import math
 import time
 import json
 import os
+import random
 
 from .chunk_dna import ChunkDNAManager, ChunkDNA, TerrainPalette
 from .climate import ClimateManager, WeatherRenderer
@@ -396,7 +397,7 @@ def height_to_color(h: float) -> tuple:
 
 
 class Camera:
-    """Camera with walking, jumping, and flying modes."""
+    """Camera with walking, jumping, flying, and auto-fly modes."""
     
     def __init__(self):
         self.x = 0
@@ -413,6 +414,25 @@ class Camera:
         self.jump_velocity = 0.0
         self.gravity = 2.5  # Gravity acceleration (faster fall)
         self.jump_strength = 0.5  # Initial jump velocity
+        
+        # Auto-fly modes: 0=off, 1=spiral, 2=wander
+        self.auto_fly_mode = 0
+        self.auto_fly_timer = 0.0
+        
+        # Spiral mode state
+        self.spiral_angle = 0.0      # Current angle in spiral
+        self.spiral_radius = 50.0    # Current radius (grows over time)
+        self.spiral_center_x = 0.0   # Center of spiral
+        self.spiral_center_z = 0.0
+        self.spiral_growth_rate = 2.0  # How fast radius grows
+        
+        # Wander mode state
+        self.wander_timer = 0.0
+        self.wander_direction = 0.0
+        self.wander_turn_time = 45.0  # Seconds until next turn
+        
+        # Auto-fly height above ground
+        self.auto_fly_height = 15.0  # Above trees but not too high
     
     def rotate(self, dx, dy):
         self.yaw += dx * MOUSE_SENSITIVITY
@@ -535,6 +555,98 @@ class Camera:
         if not self.flying and not self.jumping:
             self.jumping = True
             self.jump_velocity = self.jump_strength
+    
+    def toggle_auto_fly(self):
+        """Cycle through auto-fly modes: off -> spiral -> wander -> off."""
+        self.auto_fly_mode = (self.auto_fly_mode + 1) % 3
+        
+        if self.auto_fly_mode == 0:
+            print("  Auto-fly: OFF")
+        elif self.auto_fly_mode == 1:
+            print("  Auto-fly: SPIRAL (expanding counter-clockwise)")
+            # Initialize spiral from current position
+            self.spiral_center_x = self.x
+            self.spiral_center_z = self.z
+            self.spiral_angle = math.atan2(self.z - self.spiral_center_z, 
+                                           self.x - self.spiral_center_x)
+            self.spiral_radius = 50.0
+            self.flying = True
+            self.pitch = -5  # Slight downward look
+        elif self.auto_fly_mode == 2:
+            print("  Auto-fly: WANDER (random exploration)")
+            self.wander_direction = math.radians(self.yaw)
+            self.wander_timer = 30 + random.random() * 30  # 30-60 seconds
+            self.flying = True
+            self.pitch = -5
+    
+    def update_auto_fly(self, dt: float, chunk_manager: ChunkManager):
+        """Update auto-fly movement."""
+        if self.auto_fly_mode == 0:
+            return 0, 0, 0  # No auto movement
+        
+        speed_mult = SPEED_LEVELS[self.speed_level] * 2.0  # Faster for exploration
+        
+        if self.auto_fly_mode == 1:
+            # SPIRAL MODE - counter-clockwise expanding spiral
+            # Increase angle (counter-clockwise)
+            angular_speed = 0.015 * dt  # Radians per frame
+            self.spiral_angle += angular_speed
+            
+            # Increase radius gradually
+            self.spiral_radius += self.spiral_growth_rate * dt * 0.1
+            
+            # Calculate target position on spiral
+            target_x = self.spiral_center_x + math.cos(self.spiral_angle) * self.spiral_radius
+            target_z = self.spiral_center_z + math.sin(self.spiral_angle) * self.spiral_radius
+            
+            # Move toward target
+            dx = target_x - self.x
+            dz = target_z - self.z
+            dist = math.sqrt(dx*dx + dz*dz)
+            
+            if dist > 0.1:
+                # Update yaw to face movement direction
+                self.yaw = math.degrees(math.atan2(-dx, -dz))
+                
+                # Calculate forward movement
+                forward = min(dist * 0.1, 1.0) * dt * speed_mult
+                return forward, 0, 0
+            
+        elif self.auto_fly_mode == 2:
+            # WANDER MODE - random direction changes
+            self.wander_timer -= dt / 60.0  # Convert to seconds
+            
+            if self.wander_timer <= 0:
+                # Time to turn - random angle within ±30 degrees
+                turn_angle = (random.random() - 0.5) * 60  # -30 to +30 degrees
+                self.wander_direction += math.radians(turn_angle)
+                self.wander_timer = 30 + random.random() * 30  # 30-60 seconds
+                print(f"  Wander: turning {turn_angle:.0f}° (next turn in {self.wander_timer:.0f}s)")
+            
+            # Update yaw to match wander direction
+            target_yaw = math.degrees(self.wander_direction)
+            yaw_diff = target_yaw - self.yaw
+            while yaw_diff > 180: yaw_diff -= 360
+            while yaw_diff < -180: yaw_diff += 360
+            self.yaw += yaw_diff * 0.05  # Smooth turn
+            
+            # Move forward
+            forward = dt * speed_mult
+            return forward, 0, 0
+        
+        return 0, 0, 0
+    
+    def maintain_auto_fly_height(self, chunk_manager: ChunkManager):
+        """Keep camera at consistent height above terrain during auto-fly."""
+        if self.auto_fly_mode == 0:
+            return
+        
+        terrain_h = self.get_terrain_height(chunk_manager)
+        target_y = terrain_h + self.auto_fly_height
+        
+        # Smooth height adjustment
+        diff = target_y - self.y
+        self.y += diff * 0.1  # Smooth follow
     
     def set_speed(self, level: int):
         """Set speed level (0-4, corresponds to keys 1-5)."""
@@ -1240,6 +1352,8 @@ def run_explorer(config: WorldConfig = None):
                 elif event.key == pygame.K_g:
                     gamepad.debug_mode = not gamepad.debug_mode
                     print(f"  Gamepad debug: {'ON' if gamepad.debug_mode else 'OFF'}")
+                elif event.key == pygame.K_x:
+                    camera.toggle_auto_fly()
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 3:
                     mouse_look = True
@@ -1322,7 +1436,17 @@ def run_explorer(config: WorldConfig = None):
         if keys[pygame.K_SPACE] and not camera.flying:
             camera.jump()
         
+        # Auto-fly mode - overrides manual movement
+        if camera.auto_fly_mode > 0:
+            auto_forward, auto_right, auto_up = camera.update_auto_fly(dt, chunk_manager)
+            forward += auto_forward
+            right += auto_right
+            up += auto_up
+        
         camera.move(forward, right, up, chunk_manager, structure_manager)
+        
+        # Maintain height during auto-fly
+        camera.maintain_auto_fly_height(chunk_manager)
         
         # Update chunks (stream in new ones as we move)
         current_chunk = camera.get_chunk_pos()
