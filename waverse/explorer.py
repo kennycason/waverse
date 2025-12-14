@@ -496,6 +496,10 @@ class Camera:
         self.view_yaw_offset = 0.0   # Look offset from movement direction
         self.view_pitch = -5.0       # View pitch (default slight down)
         self.view_return_timer = 0.0 # Timer for returning to forward
+        
+        # Waypoint markers (for compass)
+        self.markers = []  # List of (x, z, color, name) tuples
+        self.max_markers = 10  # Limit markers
     
     def rotate(self, dx, dy):
         if self.auto_fly_mode > 0:
@@ -632,6 +636,39 @@ class Camera:
         if not self.flying and not self.jumping:
             self.jumping = True
             self.jump_velocity = self.jump_strength
+    
+    def add_marker(self):
+        """Add a marker at current position."""
+        # Cycle through colors for different markers
+        colors = [
+            (0.2, 0.6, 1.0),   # Blue
+            (0.3, 1.0, 0.4),   # Green
+            (1.0, 1.0, 0.2),   # Yellow
+            (1.0, 0.5, 0.0),   # Orange
+            (0.9, 0.2, 0.9),   # Magenta
+            (0.2, 1.0, 1.0),   # Cyan
+            (1.0, 0.6, 0.6),   # Light red
+        ]
+        
+        # Use letters A, B, C...
+        labels = "ABCDEFGHIJ"
+        marker_idx = len(self.markers)
+        label = labels[marker_idx] if marker_idx < len(labels) else "?"
+        color = colors[marker_idx % len(colors)]
+        
+        self.markers.append((self.x, self.z, color, label))
+        
+        # Limit number of markers
+        if len(self.markers) > self.max_markers:
+            self.markers.pop(0)
+        
+        print(f"  Marker {label} set at ({self.x:.1f}, {self.z:.1f})")
+        return label
+    
+    def clear_markers(self):
+        """Clear all markers."""
+        self.markers.clear()
+        print("  All markers cleared")
     
     def toggle_auto_fly(self):
         """Toggle tour/wander mode on/off."""
@@ -1087,7 +1124,91 @@ def draw_crosshair(display: tuple):
     glMatrixMode(GL_MODELVIEW)
 
 
-def draw_hud(display: tuple, camera: Camera, sky: SkySystem = None, climate: ClimateManager = None):
+# Text rendering cache for OpenGL
+_text_textures = {}
+
+def _draw_text(font, text: str, x: float, y: float, color: tuple):
+    """Draw text at position using pygame font and OpenGL texture."""
+    global _text_textures
+    
+    # Create cache key
+    cache_key = (text, color)
+    
+    if cache_key not in _text_textures:
+        # Render text to surface
+        text_surface = font.render(text, True, color)
+        text_data = pygame.image.tostring(text_surface, "RGBA", True)
+        width, height = text_surface.get_size()
+        
+        # Create OpenGL texture
+        texture_id = glGenTextures(1)
+        glBindTexture(GL_TEXTURE_2D, texture_id)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, text_data)
+        
+        _text_textures[cache_key] = (texture_id, width, height)
+    
+    texture_id, width, height = _text_textures[cache_key]
+    
+    # Draw textured quad
+    glEnable(GL_TEXTURE_2D)
+    glBindTexture(GL_TEXTURE_2D, texture_id)
+    glColor4f(1, 1, 1, 1)
+    
+    glBegin(GL_QUADS)
+    glTexCoord2f(0, 0); glVertex2f(x, y + height)
+    glTexCoord2f(1, 0); glVertex2f(x + width, y + height)
+    glTexCoord2f(1, 1); glVertex2f(x + width, y)
+    glTexCoord2f(0, 1); glVertex2f(x, y)
+    glEnd()
+    
+    glDisable(GL_TEXTURE_2D)
+
+
+def _draw_number(x: float, y: float, value: float):
+    """Draw a number using simple line segments (fallback when no font)."""
+    # Format number
+    text = f"{value:.1f}"
+    char_w = 8
+    
+    for i, char in enumerate(text):
+        cx = x + i * char_w
+        _draw_digit(cx, y, char)
+
+
+def _draw_digit(x: float, y: float, char: str):
+    """Draw a single digit/character using line segments."""
+    # 7-segment style digits
+    h = 10
+    w = 6
+    
+    segments = {
+        '0': [(0,0,w,0), (w,0,w,h/2), (w,h/2,w,h), (w,h,0,h), (0,h,0,h/2), (0,h/2,0,0)],
+        '1': [(w/2,0,w/2,h)],
+        '2': [(0,0,w,0), (w,0,w,h/2), (w,h/2,0,h/2), (0,h/2,0,h), (0,h,w,h)],
+        '3': [(0,0,w,0), (w,0,w,h/2), (w,h/2,0,h/2), (w,h/2,w,h), (w,h,0,h)],
+        '4': [(0,0,0,h/2), (0,h/2,w,h/2), (w,0,w,h)],
+        '5': [(w,0,0,0), (0,0,0,h/2), (0,h/2,w,h/2), (w,h/2,w,h), (w,h,0,h)],
+        '6': [(w,0,0,0), (0,0,0,h), (0,h,w,h), (w,h,w,h/2), (w,h/2,0,h/2)],
+        '7': [(0,0,w,0), (w,0,w,h)],
+        '8': [(0,0,w,0), (w,0,w,h), (w,h,0,h), (0,h,0,0), (0,h/2,w,h/2)],
+        '9': [(w,h,w,0), (w,0,0,0), (0,0,0,h/2), (0,h/2,w,h/2)],
+        '.': [(w/2-1,h-2,w/2+1,h)],
+        '-': [(0,h/2,w,h/2)],
+        ' ': [],
+    }
+    
+    segs = segments.get(char, [])
+    glBegin(GL_LINES)
+    for seg in segs:
+        glVertex2f(x + seg[0], y + seg[1])
+        glVertex2f(x + seg[2], y + seg[3])
+    glEnd()
+
+
+def draw_hud(display: tuple, camera: Camera, sky: SkySystem = None, climate: ClimateManager = None,
+              hud_font=None):
     """Draw HUD."""
     glMatrixMode(GL_PROJECTION)
     glPushMatrix()
@@ -1102,6 +1223,178 @@ def draw_hud(display: tuple, camera: Camera, sky: SkySystem = None, climate: Cli
     glDisable(GL_DEPTH_TEST)
     glEnable(GL_BLEND)
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+    
+    # ========== TOP BAR: Coordinates + Compass ==========
+    top_bar_h = 36
+    
+    # Coordinates background (left side, after minimap ~190px)
+    coord_x = 200
+    coord_w = 130  # Sized for ~12 digit coordinates
+    glColor4f(0, 0, 0, 0.6)
+    glBegin(GL_QUADS)
+    glVertex2f(coord_x, 10)
+    glVertex2f(coord_x + coord_w, 10)
+    glVertex2f(coord_x + coord_w, 10 + top_bar_h)
+    glVertex2f(coord_x, 10 + top_bar_h)
+    glEnd()
+    
+    # Draw coordinate text using pygame font if available
+    if hud_font:
+        # X coordinate
+        x_text = f"X: {camera.x:.1f}"
+        y_text = f"Y: {camera.z:.1f}"  # Z is the "Y" in top-down view
+        
+        _draw_text(hud_font, x_text, coord_x + 10, 14, (255, 180, 100))
+        _draw_text(hud_font, y_text, coord_x + 10, 28, (100, 200, 255))
+    else:
+        # Fallback: draw simple coordinate indicators
+        glColor4f(1.0, 0.7, 0.4, 1.0)
+        _draw_number(coord_x + 10, 18, camera.x)
+        glColor4f(0.4, 0.8, 1.0, 1.0)
+        _draw_number(coord_x + 10, 32, camera.z)
+    
+    # Compass background (2x wider)
+    compass_x = coord_x + coord_w + 10
+    compass_w = 400  # 2x wider
+    glColor4f(0, 0, 0, 0.6)
+    glBegin(GL_QUADS)
+    glVertex2f(compass_x, 10)
+    glVertex2f(compass_x + compass_w, 10)
+    glVertex2f(compass_x + compass_w, 10 + top_bar_h)
+    glVertex2f(compass_x, 10 + top_bar_h)
+    glEnd()
+    
+    # Compass center line
+    compass_center = compass_x + compass_w / 2
+    glColor4f(0.5, 0.5, 0.5, 0.8)
+    glBegin(GL_LINES)
+    glVertex2f(compass_x + 10, 28)
+    glVertex2f(compass_x + compass_w - 10, 28)
+    glEnd()
+    
+    # Center tick mark
+    glColor4f(1.0, 1.0, 1.0, 0.9)
+    glBegin(GL_LINES)
+    glVertex2f(compass_center, 22)
+    glVertex2f(compass_center, 34)
+    glEnd()
+    
+    # North marker only - red circle with "N"
+    yaw = camera.yaw
+    
+    # North direction (yaw 0)
+    north_diff = 0 - yaw
+    while north_diff > 180: north_diff -= 360
+    while north_diff < -180: north_diff += 360
+    
+    # Only show if within view range (-90 to +90 degrees)
+    if abs(north_diff) < 90:
+        pos_x = compass_center + (north_diff / 90) * (compass_w / 2 - 30)
+        radius = 12
+        
+        # Red filled circle
+        glColor4f(1.0, 0.3, 0.3, 0.9)
+        glBegin(GL_TRIANGLE_FAN)
+        glVertex2f(pos_x, 28)
+        for i in range(13):
+            angle = (i / 12) * 2 * math.pi
+            glVertex2f(pos_x + math.cos(angle) * radius, 28 + math.sin(angle) * radius)
+        glEnd()
+        
+        # White outline
+        glColor4f(1, 1, 1, 1)
+        glBegin(GL_LINE_LOOP)
+        for i in range(12):
+            angle = (i / 12) * 2 * math.pi
+            glVertex2f(pos_x + math.cos(angle) * radius, 28 + math.sin(angle) * radius)
+        glEnd()
+        
+        # "N" letter inside (simple shape)
+        glBegin(GL_LINES)
+        # Left vertical
+        glVertex2f(pos_x - 4, 32)
+        glVertex2f(pos_x - 4, 24)
+        # Diagonal
+        glVertex2f(pos_x - 4, 24)
+        glVertex2f(pos_x + 4, 32)
+        # Right vertical
+        glVertex2f(pos_x + 4, 32)
+        glVertex2f(pos_x + 4, 24)
+        glEnd()
+    
+    # Draw markers on compass (labeled A, B, C...)
+    marker_labels = "ABCDEFGHIJ"
+    for idx, (mx, mz, mcolor, mname) in enumerate(camera.markers):
+        # Calculate angle to marker
+        dx = mx - camera.x
+        dz = mz - camera.z
+        marker_angle = math.degrees(math.atan2(-dx, -dz))  # Angle to marker
+        
+        # Difference from current yaw
+        diff = marker_angle - yaw
+        while diff > 180: diff -= 360
+        while diff < -180: diff += 360
+        
+        # Show if within range
+        if abs(diff) < 90:
+            pos_x = compass_center + (diff / 90) * (compass_w / 2 - 30)
+            
+            # Colored marker circle
+            glColor4f(*mcolor, 0.9)
+            radius = 10
+            glBegin(GL_TRIANGLE_FAN)
+            glVertex2f(pos_x, 28)
+            for j in range(13):
+                angle = (j / 12) * 2 * math.pi
+                glVertex2f(pos_x + math.cos(angle) * radius, 28 + math.sin(angle) * radius)
+            glEnd()
+            
+            # White outline
+            glColor4f(1, 1, 1, 1)
+            glBegin(GL_LINE_LOOP)
+            for j in range(12):
+                angle = (j / 12) * 2 * math.pi
+                glVertex2f(pos_x + math.cos(angle) * radius, 28 + math.sin(angle) * radius)
+            glEnd()
+            
+            # Draw letter (A, B, C...) - simplified letter shapes
+            label = marker_labels[idx] if idx < len(marker_labels) else "?"
+            if label == "A":
+                glBegin(GL_LINES)
+                glVertex2f(pos_x, 23)
+                glVertex2f(pos_x - 4, 33)
+                glVertex2f(pos_x, 23)
+                glVertex2f(pos_x + 4, 33)
+                glVertex2f(pos_x - 2, 29)
+                glVertex2f(pos_x + 2, 29)
+                glEnd()
+            elif label == "B":
+                glBegin(GL_LINES)
+                glVertex2f(pos_x - 3, 23)
+                glVertex2f(pos_x - 3, 33)
+                glVertex2f(pos_x - 3, 23)
+                glVertex2f(pos_x + 2, 23)
+                glVertex2f(pos_x - 3, 28)
+                glVertex2f(pos_x + 2, 28)
+                glVertex2f(pos_x - 3, 33)
+                glVertex2f(pos_x + 2, 33)
+                glEnd()
+            elif label == "C":
+                glBegin(GL_LINE_STRIP)
+                glVertex2f(pos_x + 3, 24)
+                glVertex2f(pos_x - 2, 24)
+                glVertex2f(pos_x - 3, 28)
+                glVertex2f(pos_x - 2, 32)
+                glVertex2f(pos_x + 3, 32)
+                glEnd()
+            else:
+                # Simple dot for other letters
+                glBegin(GL_QUADS)
+                glVertex2f(pos_x - 2, 26)
+                glVertex2f(pos_x + 2, 26)
+                glVertex2f(pos_x + 2, 30)
+                glVertex2f(pos_x - 2, 30)
+                glEnd()
     
     # Info box
     has_climate = climate is not None
@@ -1321,6 +1614,13 @@ def run_explorer(config: WorldConfig = None):
     pygame.mouse.set_visible(True)
     pygame.event.set_grab(False)
     
+    # Initialize font for HUD text
+    pygame.font.init()
+    try:
+        hud_font = pygame.font.SysFont("monospace", 14)
+    except:
+        hud_font = pygame.font.Font(None, 16)
+    
     # Initialize gamepad
     gamepad = GamepadManager()
     
@@ -1437,6 +1737,10 @@ def run_explorer(config: WorldConfig = None):
                     print(f"  Gamepad debug: {'ON' if gamepad.debug_mode else 'OFF'}")
                 elif event.key == pygame.K_x:
                     camera.toggle_auto_fly()
+                elif event.key == pygame.K_m:
+                    camera.add_marker()
+                elif event.key == pygame.K_c:
+                    camera.clear_markers()
                 elif event.key == pygame.K_w and not (keys[pygame.K_LCTRL] or keys[pygame.K_RCTRL]):
                     # W key alone (not with ctrl) = warp to new universe
                     # Only trigger on keydown, not when W is held for movement
@@ -1641,7 +1945,7 @@ def run_explorer(config: WorldConfig = None):
                                climate_manager.lightning_flash)
         
         draw_crosshair(display)
-        draw_hud(display, camera, sky, climate_manager)
+        draw_hud(display, camera, sky, climate_manager, hud_font)
         minimap.draw(display, camera.x, camera.z)
         
         pygame.display.flip()
