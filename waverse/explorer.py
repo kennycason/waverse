@@ -415,34 +415,42 @@ class Camera:
         self.gravity = 2.5  # Gravity acceleration (faster fall)
         self.jump_strength = 0.5  # Initial jump velocity
         
-        # Auto-fly modes: 0=off, 1=spiral, 2=wander
+        # Auto-fly / Tour mode: 0=off, 1=wander
         self.auto_fly_mode = 0
-        self.auto_fly_timer = 0.0
         
-        # Spiral mode state
-        self.spiral_angle = 0.0      # Current angle in spiral
-        self.spiral_radius = 50.0    # Current radius (grows over time)
-        self.spiral_center_x = 0.0   # Center of spiral
-        self.spiral_center_z = 0.0
-        self.spiral_growth_rate = 2.0  # How fast radius grows
-        
-        # Wander mode state
+        # Wander mode state - movement direction (independent of view)
         self.wander_timer = 0.0
-        self.wander_direction = 0.0
-        self.wander_turn_time = 45.0  # Seconds until next turn
+        self.wander_direction = 0.0  # Radians - actual movement direction
         
-        # Auto-fly height above ground
-        self.auto_fly_height = 15.0  # Above trees but not too high
+        # Tour mode height and view
+        self.auto_fly_height = 40.0  # Height above terrain (above trees)
+        self.view_yaw_offset = 0.0   # Look offset from movement direction
+        self.view_pitch = -5.0       # View pitch (default slight down)
+        self.view_return_timer = 0.0 # Timer for returning to forward
     
     def rotate(self, dx, dy):
-        self.yaw += dx * MOUSE_SENSITIVITY
-        self.pitch -= dy * MOUSE_SENSITIVITY
-        self.pitch = max(-89, min(89, self.pitch))
+        if self.auto_fly_mode > 0:
+            # In tour mode, adjust view offset from movement direction
+            self.view_yaw_offset += dx * MOUSE_SENSITIVITY
+            self.view_pitch -= dy * MOUSE_SENSITIVITY
+            self.view_pitch = max(-60, min(60, self.view_pitch))
+            self.view_return_timer = 2.0  # Seconds before returning to forward
+        else:
+            self.yaw += dx * MOUSE_SENSITIVITY
+            self.pitch -= dy * MOUSE_SENSITIVITY
+            self.pitch = max(-89, min(89, self.pitch))
     
     def rotate_keyboard(self, dyaw, dpitch):
-        self.yaw += dyaw
-        self.pitch += dpitch
-        self.pitch = max(-89, min(89, self.pitch))
+        if self.auto_fly_mode > 0:
+            # In tour mode, adjust view offset from movement direction
+            self.view_yaw_offset += dyaw
+            self.view_pitch += dpitch
+            self.view_pitch = max(-60, min(60, self.view_pitch))
+            self.view_return_timer = 2.0
+        else:
+            self.yaw += dyaw
+            self.pitch += dpitch
+            self.pitch = max(-89, min(89, self.pitch))
     
     def get_terrain_height(self, chunk_manager: ChunkManager) -> float:
         """Get terrain height at current position."""
@@ -557,96 +565,102 @@ class Camera:
             self.jump_velocity = self.jump_strength
     
     def toggle_auto_fly(self):
-        """Cycle through auto-fly modes: off -> spiral -> wander -> off."""
-        self.auto_fly_mode = (self.auto_fly_mode + 1) % 3
+        """Toggle tour/wander mode on/off."""
+        self.auto_fly_mode = 1 - self.auto_fly_mode  # Toggle 0 <-> 1
         
         if self.auto_fly_mode == 0:
-            print("  Auto-fly: OFF")
-        elif self.auto_fly_mode == 1:
-            print("  Auto-fly: SPIRAL (expanding counter-clockwise)")
-            # Initialize spiral from current position
-            self.spiral_center_x = self.x
-            self.spiral_center_z = self.z
-            self.spiral_angle = math.atan2(self.z - self.spiral_center_z, 
-                                           self.x - self.spiral_center_x)
-            self.spiral_radius = 50.0
-            self.flying = True
-            self.pitch = -5  # Slight downward look
-        elif self.auto_fly_mode == 2:
-            print("  Auto-fly: WANDER (random exploration)")
+            print("=" * 40)
+            print("  TOUR MODE: OFF")
+            print("=" * 40)
+        else:
+            print("=" * 40)
+            print("  TOUR MODE: ON")
+            print("  Auto-flying, random exploration")
+            print("  Look around freely - returns to forward")
+            print("  Press X to turn OFF")
+            print("=" * 40)
+            # Start wandering in current facing direction
             self.wander_direction = math.radians(self.yaw)
-            self.wander_timer = 30 + random.random() * 30  # 30-60 seconds
+            self.wander_timer = 30 + random.random() * 30
             self.flying = True
-            self.pitch = -5
+            # Reset view to forward
+            self.view_yaw_offset = 0.0
+            self.view_pitch = -5.0
+            self.view_return_timer = 0.0
     
     def update_auto_fly(self, dt: float, chunk_manager: ChunkManager):
-        """Update auto-fly movement."""
+        """Update tour mode - movement and view are independent."""
         if self.auto_fly_mode == 0:
-            return 0, 0, 0  # No auto movement
+            return 0, 0, 0
         
-        speed_mult = SPEED_LEVELS[self.speed_level] * 2.0  # Faster for exploration
+        dt_seconds = dt / 60.0
+        speed_mult = SPEED_LEVELS[self.speed_level] * 3.0
         
-        if self.auto_fly_mode == 1:
-            # SPIRAL MODE - counter-clockwise expanding spiral
-            # Increase angle (counter-clockwise)
-            angular_speed = 0.015 * dt  # Radians per frame
-            self.spiral_angle += angular_speed
-            
-            # Increase radius gradually
-            self.spiral_radius += self.spiral_growth_rate * dt * 0.1
-            
-            # Calculate target position on spiral
-            target_x = self.spiral_center_x + math.cos(self.spiral_angle) * self.spiral_radius
-            target_z = self.spiral_center_z + math.sin(self.spiral_angle) * self.spiral_radius
-            
-            # Move toward target
-            dx = target_x - self.x
-            dz = target_z - self.z
-            dist = math.sqrt(dx*dx + dz*dz)
-            
-            if dist > 0.1:
-                # Update yaw to face movement direction
-                self.yaw = math.degrees(math.atan2(-dx, -dz))
-                
-                # Calculate forward movement
-                forward = min(dist * 0.1, 1.0) * dt * speed_mult
-                return forward, 0, 0
-            
-        elif self.auto_fly_mode == 2:
-            # WANDER MODE - random direction changes
-            self.wander_timer -= dt / 60.0  # Convert to seconds
-            
-            if self.wander_timer <= 0:
-                # Time to turn - random angle within ±30 degrees
-                turn_angle = (random.random() - 0.5) * 60  # -30 to +30 degrees
-                self.wander_direction += math.radians(turn_angle)
-                self.wander_timer = 30 + random.random() * 30  # 30-60 seconds
-                print(f"  Wander: turning {turn_angle:.0f}° (next turn in {self.wander_timer:.0f}s)")
-            
-            # Update yaw to match wander direction
-            target_yaw = math.degrees(self.wander_direction)
-            yaw_diff = target_yaw - self.yaw
-            while yaw_diff > 180: yaw_diff -= 360
-            while yaw_diff < -180: yaw_diff += 360
-            self.yaw += yaw_diff * 0.05  # Smooth turn
-            
-            # Move forward
-            forward = dt * speed_mult
-            return forward, 0, 0
+        # === MOVEMENT (independent of view) ===
+        # Random direction changes
+        self.wander_timer -= dt_seconds
+        if self.wander_timer <= 0:
+            turn_angle = (random.random() - 0.5) * 60  # ±30 degrees
+            self.wander_direction += math.radians(turn_angle)
+            self.wander_timer = 30 + random.random() * 30
+            print(f"  Tour: turning {turn_angle:.0f}° (next in {self.wander_timer:.0f}s)")
         
-        return 0, 0, 0
+        # === VIEW (can look around, returns to forward) ===
+        # Update return timer
+        if self.view_return_timer > 0:
+            self.view_return_timer -= dt_seconds
+        
+        # If not actively looking, smoothly return to forward
+        if self.view_return_timer <= 0:
+            # Decay yaw offset toward 0
+            self.view_yaw_offset *= 0.97
+            if abs(self.view_yaw_offset) < 0.5:
+                self.view_yaw_offset = 0
+            # Decay pitch toward default (-5)
+            self.view_pitch = self.view_pitch * 0.97 + (-5.0) * 0.03
+        
+        # Set camera view = movement direction + view offset
+        movement_yaw_deg = math.degrees(self.wander_direction)
+        self.yaw = movement_yaw_deg + self.view_yaw_offset
+        self.pitch = self.view_pitch
+        
+        # === ACTUALLY MOVE along wander_direction (not yaw!) ===
+        # Calculate movement vector from wander_direction
+        move_x = -math.sin(self.wander_direction)
+        move_z = -math.cos(self.wander_direction)
+        
+        move_speed = speed_mult * 0.5 * dt_seconds * 60  # Convert back to per-frame
+        self.x += move_x * move_speed
+        self.z += move_z * move_speed
+        
+        return 0, 0, 0  # We moved directly, don't use forward/right/up
     
     def maintain_auto_fly_height(self, chunk_manager: ChunkManager):
-        """Keep camera at consistent height above terrain during auto-fly."""
+        """Keep camera at consistent height above terrain during tour mode."""
         if self.auto_fly_mode == 0:
             return
         
         terrain_h = self.get_terrain_height(chunk_manager)
         target_y = terrain_h + self.auto_fly_height
         
-        # Smooth height adjustment
+        # Calculate height difference
         diff = target_y - self.y
-        self.y += diff * 0.1  # Smooth follow
+        
+        # Smooth height adjustment with velocity limits
+        MAX_RISE_SPEED = 1.0    # Rise quickly to clear hills
+        MAX_FALL_SPEED = 0.3    # Fall slowly over cliffs
+        
+        if diff > 0:
+            change = min(diff * 0.2, MAX_RISE_SPEED)
+        else:
+            change = max(diff * 0.15, -MAX_FALL_SPEED)
+        
+        self.y += change
+        
+        # Hard floor - never clip through terrain
+        min_height = terrain_h + 8
+        if self.y < min_height:
+            self.y = min_height
     
     def set_speed(self, level: int):
         """Set speed level (0-4, corresponds to keys 1-5)."""
@@ -1305,7 +1319,7 @@ def run_explorer(config: WorldConfig = None):
     if gamepad.is_connected():
         print(f"  GAMEPAD ({gamepad.name}):")
         print("    Left Stick=Move | Right Stick=Look")
-        print("    L3=Down | R3=Up | L2/R2=Change Speed")
+        print("    L3=Down | R3=Up | L2/R2=Speed (normal) or Height (tour)")
     print("=" * 60 + "\n")
     
     clock = pygame.time.Clock()
@@ -1376,8 +1390,16 @@ def run_explorer(config: WorldConfig = None):
         if keys[pygame.K_s] or keys[pygame.K_DOWN]: forward -= dt * speed
         if keys[pygame.K_a] or keys[pygame.K_LEFT]: right -= dt * speed
         if keys[pygame.K_d] or keys[pygame.K_RIGHT]: right += dt * speed
-        if keys[pygame.K_h]: up += dt * speed
-        if keys[pygame.K_f]: up -= dt * speed
+        
+        # H/F for height - in tour mode adjusts target height, otherwise moves up/down
+        if camera.auto_fly_mode > 0:
+            if keys[pygame.K_h]:
+                camera.auto_fly_height = min(100, camera.auto_fly_height + 0.3)
+            if keys[pygame.K_f]:
+                camera.auto_fly_height = max(15, camera.auto_fly_height - 0.3)
+        else:
+            if keys[pygame.K_h]: up += dt * speed
+            if keys[pygame.K_f]: up -= dt * speed
         
         # Keyboard look
         look_speed = dt * 0.8
@@ -1410,23 +1432,32 @@ def run_explorer(config: WorldConfig = None):
             # L3 = go down, R3 = go up
             up += gamepad.get_vertical() * dt * speed
             
-            # L2/R2 for speed changes (with cooldown to prevent rapid changes)
-            # Use normalized trigger values (0-1 range)
-            if gamepad_speed_cooldown <= 0:
-                l2_val, r2_val = gamepad.get_triggers()
-                
-                if l2_val > 0.7:  # L2 = decrease speed
-                    new_level = max(0, camera.speed_level - 1)
-                    if new_level != camera.speed_level:
-                        camera.set_speed(new_level)
-                        print(f"  Speed: {new_level + 1}")
-                        gamepad_speed_cooldown = 20  # ~0.33 seconds
-                elif r2_val > 0.7:  # R2 = increase speed
-                    new_level = min(4, camera.speed_level + 1)
-                    if new_level != camera.speed_level:
-                        camera.set_speed(new_level)
-                        print(f"  Speed: {new_level + 1}")
-                        gamepad_speed_cooldown = 20
+            # L2/R2 behavior depends on mode
+            l2_val, r2_val = gamepad.get_triggers()
+            
+            if camera.auto_fly_mode > 0:
+                # TOUR MODE: L2/R2 adjust flight height
+                if l2_val > 0.3:  # L2 = lower height
+                    camera.auto_fly_height -= l2_val * 0.5
+                    camera.auto_fly_height = max(15, camera.auto_fly_height)
+                if r2_val > 0.3:  # R2 = raise height
+                    camera.auto_fly_height += r2_val * 0.5
+                    camera.auto_fly_height = min(100, camera.auto_fly_height)
+            else:
+                # NORMAL MODE: L2/R2 for speed changes (with cooldown)
+                if gamepad_speed_cooldown <= 0:
+                    if l2_val > 0.7:  # L2 = decrease speed
+                        new_level = max(0, camera.speed_level - 1)
+                        if new_level != camera.speed_level:
+                            camera.set_speed(new_level)
+                            print(f"  Speed: {new_level + 1}")
+                            gamepad_speed_cooldown = 20  # ~0.33 seconds
+                    elif r2_val > 0.7:  # R2 = increase speed
+                        new_level = min(4, camera.speed_level + 1)
+                        if new_level != camera.speed_level:
+                            camera.set_speed(new_level)
+                            print(f"  Speed: {new_level + 1}")
+                            gamepad_speed_cooldown = 20
             
             # A button = jump (in walk mode)
             if gamepad.get_button(GamepadConfig.A):
