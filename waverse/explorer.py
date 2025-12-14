@@ -52,7 +52,18 @@ LOD_QUARTER_DISTANCE = 15  # Quarter detail within this range
 # Beyond that = 1/8th detail
 
 
-SAVE_FILE = os.path.expanduser("~/.waverse.json")
+# Waverse data directory - all user data goes here
+WAVERSE_DIR = os.path.expanduser("~/.waverse")
+SAVE_FILE = os.path.join(WAVERSE_DIR, "config.json")
+DNA_LOGS_DIR = os.path.join(WAVERSE_DIR, "dna_logs")
+SCREENSHOTS_DIR = os.path.join(WAVERSE_DIR, "screenshots")
+CHUNK_CACHE_DIR = os.path.join(WAVERSE_DIR, "chunks")
+
+# Ensure directories exist
+os.makedirs(WAVERSE_DIR, exist_ok=True)
+os.makedirs(DNA_LOGS_DIR, exist_ok=True)
+os.makedirs(SCREENSHOTS_DIR, exist_ok=True)
+os.makedirs(CHUNK_CACHE_DIR, exist_ok=True)
 
 
 # Gamepad/Controller configuration
@@ -348,9 +359,8 @@ def take_screenshot():
     
     print("  Taking screenshot...")
     
-    # Create screenshots directory if it doesn't exist
-    screenshots_dir = "screenshots"
-    os.makedirs(screenshots_dir, exist_ok=True)
+    # Use waverse screenshots directory
+    screenshots_dir = SCREENSHOTS_DIR
     
     # Generate timestamped filename
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -384,17 +394,20 @@ def render_entity_to_png(entity, entity_type: str, filename: str, size: int = 51
     from waverse.flora import PlantRenderer, PlantInstance
     from waverse.animals import AnimalRenderer
     
-    # Save current viewport
+    # Save current OpenGL state
     viewport = glGetIntegerv(GL_VIEWPORT)
+    
+    # Disable fog for clean render
+    glDisable(GL_FOG)
     
     # Set up a square viewport for rendering
     glViewport(0, 0, size, size)
     
-    # Clear to transparent (alpha = 0)
+    # Clear to transparent background
     glClearColor(0.0, 0.0, 0.0, 0.0)
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
     
-    # Set up orthographic projection looking at the entity
+    # Set up orthographic projection
     glMatrixMode(GL_PROJECTION)
     glPushMatrix()
     glLoadIdentity()
@@ -412,30 +425,26 @@ def render_entity_to_png(entity, entity_type: str, filename: str, size: int = 51
             entity_height = total_size * 1.5
             entity_width = total_size * 2
     
-    # Add padding
-    view_size = max(entity_height, entity_width) * 1.5
+    # Add padding - make view big enough
+    view_size = max(entity_height, entity_width, 5.0) * 2.0
     half_size = view_size / 2
     
-    # Orthographic projection
-    glOrtho(-half_size, half_size, -half_size * 0.2, half_size * 1.8, -100, 100)
+    # Orthographic projection - center the view
+    glOrtho(-half_size, half_size, -half_size * 0.3, half_size * 1.7, -100, 100)
     
     glMatrixMode(GL_MODELVIEW)
     glPushMatrix()
     glLoadIdentity()
     
-    # Look at entity from a nice angle (slightly above and to the side)
+    # Look at entity from the front-right, slightly above
     gluLookAt(
-        half_size * 0.8, half_size * 0.5, half_size * 0.8,  # Eye position
-        0, half_size * 0.4, 0,  # Look at center
+        half_size * 0.7, half_size * 0.5, half_size * 0.7,  # Eye position
+        0, entity_height * 0.4, 0,  # Look at center of entity
         0, 1, 0   # Up vector
     )
     
-    # Enable lighting for nice rendering
-    glEnable(GL_LIGHTING)
-    glEnable(GL_LIGHT0)
-    glLightfv(GL_LIGHT0, GL_POSITION, [1.0, 2.0, 1.0, 0.0])
-    glLightfv(GL_LIGHT0, GL_DIFFUSE, [1.0, 1.0, 1.0, 1.0])
-    glLightfv(GL_LIGHT0, GL_AMBIENT, [0.4, 0.4, 0.4, 1.0])
+    # Simple lighting
+    glDisable(GL_LIGHTING)  # Use simple colors for now
     
     # Render the entity at origin
     if entity_type == "plant":
@@ -444,14 +453,14 @@ def render_entity_to_png(entity, entity_type: str, filename: str, size: int = 51
             x=0, y=0, z=0,
             dna=entity.dna,
             scale=entity.scale,
-            rotation=0  # Face camera
+            rotation=45  # Rotate a bit for better view
         )
         PlantRenderer.draw_full(temp_plant)
     else:
         # Render animal
         AnimalRenderer.draw_full(entity, at_origin=True)
     
-    glDisable(GL_LIGHTING)
+    glFlush()  # Make sure rendering is complete
     
     # Read pixels with alpha
     glPixelStorei(GL_PACK_ALIGNMENT, 1)
@@ -461,19 +470,20 @@ def render_entity_to_png(entity, entity_type: str, filename: str, size: int = 51
     raw = np.frombuffer(pixels, dtype=np.uint8).reshape((size, size, 4))
     raw = np.flipud(raw)
     
-    # Create pygame surface with alpha
+    # Create pygame surface with alpha and copy pixels
     surface = pygame.Surface((size, size), pygame.SRCALPHA)
-    
-    # Copy pixel data (need to transpose for pygame)
     for y in range(size):
         for x in range(size):
             r, g, b, a = raw[y, x]
+            # Make black pixels transparent
+            if r == 0 and g == 0 and b == 0:
+                a = 0
             surface.set_at((x, y), (r, g, b, a))
     
     # Save as PNG (preserves transparency)
     pygame.image.save(surface, filename)
     
-    # Restore matrices and viewport
+    # Restore state
     glMatrixMode(GL_MODELVIEW)
     glPopMatrix()
     glMatrixMode(GL_PROJECTION)
@@ -481,7 +491,8 @@ def render_entity_to_png(entity, entity_type: str, filename: str, size: int = 51
     glMatrixMode(GL_MODELVIEW)
     glViewport(viewport[0], viewport[1], viewport[2], viewport[3])
     
-    # Restore clear color
+    # Restore fog and clear color
+    glEnable(GL_FOG)
     glClearColor(0.5, 0.7, 1.0, 1.0)
 
 
@@ -491,18 +502,12 @@ def log_dna_at_cursor(camera, flora_manager, animal_manager):
     from datetime import datetime
     from dataclasses import asdict
     
-    # Get camera look direction
-    yaw_rad = math.radians(camera.yaw)
-    pitch_rad = math.radians(camera.pitch)
-    
-    # Look direction vector (normalized)
-    look_x = math.sin(yaw_rad) * math.cos(pitch_rad)
-    look_y = -math.sin(pitch_rad)
-    look_z = -math.cos(yaw_rad) * math.cos(pitch_rad)
+    # Get camera look direction - use Camera's method for consistency
+    look_x, look_y, look_z = camera.get_forward_vector()
     
     # Search distance and hit radius
     max_dist = 100.0  # Max distance to search
-    hit_radius = 3.0  # How close the ray must pass to the entity center
+    hit_radius = 5.0  # How close the ray must pass to the entity center (increased for easier selection)
     
     best_entity = None
     best_type = None
@@ -568,7 +573,7 @@ def log_dna_at_cursor(camera, flora_manager, animal_manager):
         return None
     
     # Create DNA log directory
-    dna_log_dir = "dna_logs"
+    dna_log_dir = DNA_LOGS_DIR
     os.makedirs(dna_log_dir, exist_ok=True)
     
     # Generate filename
@@ -613,6 +618,86 @@ def log_dna_at_cursor(camera, flora_manager, animal_manager):
     except Exception as e:
         print(f"  Error logging DNA: {e}")
         return None
+
+
+def modify_terrain_at_cursor(camera, chunk_manager, mode: str = "MINE", amount: float = 2.0):
+    """Modify terrain at cursor position (MINE = lower, FILL = raise).
+    
+    Args:
+        camera: Camera object
+        chunk_manager: ChunkManager for terrain access
+        mode: "MINE" to lower terrain, "FILL" to raise terrain
+        amount: How much to modify (default 2.0 units)
+    """
+    # Get look direction
+    look_x, look_y, look_z = camera.get_forward_vector()
+    
+    # Ray march to find terrain intersection
+    max_dist = 50.0
+    step = 0.5
+    
+    for t in np.arange(step, max_dist, step):
+        # Point along ray
+        px = camera.x + look_x * t
+        py = camera.y + look_y * t
+        pz = camera.z + look_z * t
+        
+        # Get chunk and local coordinates
+        cx = int(px // 32)
+        cz = int(pz // 32)
+        
+        chunk = chunk_manager.get_chunk(cx, cz)
+        if chunk is None:
+            continue
+        
+        # Local coordinates within chunk
+        local_x = int((px - chunk.world_x) / chunk.tile_size)
+        local_z = int((pz - chunk.world_z) / chunk.tile_size)
+        
+        # Bounds check
+        h, w = chunk.heightmap.shape
+        if 0 <= local_x < w and 0 <= local_z < h:
+            terrain_height = chunk.heightmap[local_z, local_x] * HEIGHT_SCALE
+            
+            # Check if ray is at or below terrain
+            if py <= terrain_height:
+                # Found intersection! Modify terrain
+                if mode == "MINE":
+                    # Lower terrain
+                    delta = -amount / HEIGHT_SCALE
+                    chunk.heightmap[local_z, local_x] += delta
+                    
+                    # Also affect neighbors slightly for smoother result
+                    for dz in [-1, 0, 1]:
+                        for dx in [-1, 0, 1]:
+                            nx, nz = local_x + dx, local_z + dz
+                            if 0 <= nx < w and 0 <= nz < h and (dx != 0 or dz != 0):
+                                chunk.heightmap[nz, nx] += delta * 0.3
+                    
+                    print(f"  [MINE] Lowered terrain at ({px:.1f}, {pz:.1f})")
+                    
+                elif mode == "FILL":
+                    # Raise terrain
+                    delta = amount / HEIGHT_SCALE
+                    chunk.heightmap[local_z, local_x] += delta
+                    
+                    # Also affect neighbors slightly
+                    for dz in [-1, 0, 1]:
+                        for dx in [-1, 0, 1]:
+                            nx, nz = local_x + dx, local_z + dz
+                            if 0 <= nx < w and 0 <= nz < h and (dx != 0 or dz != 0):
+                                chunk.heightmap[nz, nx] += delta * 0.3
+                    
+                    print(f"  [FILL] Raised terrain at ({px:.1f}, {pz:.1f})")
+                
+                # Mark chunk as needing re-render
+                chunk_key = (cx, cz)
+                # The chunk renderer will need to regenerate the display list
+                # We'll handle this by removing from the cache
+                return (cx, cz)
+    
+    print(f"  No terrain in range")
+    return None
 
 
 def load_position(seed: int) -> dict:
@@ -739,6 +824,15 @@ def height_to_color(h: float) -> tuple:
         return (0.80 + t*0.15, 0.75 + t*0.2, 0.75 + t*0.2)  # Snow caps
 
 
+# Tool types
+class ToolType:
+    SCAN = "SCAN"   # Scan/log DNA of plants and animals
+    MINE = "MINE"   # Mine/lower terrain (L1 = single point)
+    FILL = "FILL"   # Fill/raise terrain (inverse of MINE)
+    
+    ALL_TOOLS = [SCAN, MINE, FILL]
+
+
 class Camera:
     """Camera with walking, jumping, flying, and auto-fly modes."""
     
@@ -770,6 +864,73 @@ class Camera:
         self.view_yaw_offset = 0.0   # Look offset from movement direction
         self.view_pitch = -5.0       # View pitch (default slight down)
         self.view_return_timer = 0.0 # Timer for returning to forward
+        
+        # Tool system
+        self.current_tool_index = 0  # Index into ToolType.ALL_TOOLS
+        self.current_tool = ToolType.SCAN
+        
+        # Markers for compass (list of (x, z, color, name) tuples)
+        self.markers = []
+        
+        # Menu state
+        self.menu_open = False
+        self.menu_tab = 0  # 0 = Inventory, 1 = Log
+        self.log_index = 0  # Currently selected log item
+        self.log_items = []  # List of logged DNA files
+    
+    def toggle_menu(self):
+        """Toggle menu open/closed."""
+        self.menu_open = not self.menu_open
+        if self.menu_open:
+            # Refresh log items when opening menu
+            self.refresh_log_items()
+            print("  [Menu] Opened")
+        else:
+            print("  [Menu] Closed")
+    
+    def refresh_log_items(self):
+        """Refresh list of logged DNA items."""
+        self.log_items = []
+        if os.path.exists(DNA_LOGS_DIR):
+            for f in sorted(os.listdir(DNA_LOGS_DIR), reverse=True):
+                if f.endswith('.json'):
+                    self.log_items.append(f)
+        self.log_index = min(self.log_index, max(0, len(self.log_items) - 1))
+    
+    def menu_navigate(self, direction: int):
+        """Navigate in menu (direction: -1 = left/up, 1 = right/down)."""
+        if self.menu_tab == 1:  # Log tab
+            self.log_index = max(0, min(len(self.log_items) - 1, self.log_index + direction))
+    
+    def menu_switch_tab(self, direction: int):
+        """Switch menu tab (direction: -1 = left, 1 = right)."""
+        self.menu_tab = (self.menu_tab + direction) % 2  # 2 tabs: Inventory, Log
+    
+    def add_marker(self):
+        """Add a marker at current position."""
+        colors = [(0.2, 0.6, 1.0), (0.2, 1.0, 0.4), (1.0, 0.8, 0.2), 
+                  (1.0, 0.4, 0.4), (0.8, 0.4, 1.0), (1.0, 0.6, 0.2)]
+        color = colors[len(self.markers) % len(colors)]
+        name = chr(ord('A') + len(self.markers))
+        self.markers.append((self.x, self.z, color, name))
+        print(f"  Marker {name} set at ({self.x:.1f}, {self.z:.1f})")
+    
+    def clear_markers(self):
+        """Clear all markers."""
+        self.markers.clear()
+        print("  Markers cleared")
+    
+    def next_tool(self):
+        """Switch to next tool (R1)."""
+        self.current_tool_index = (self.current_tool_index + 1) % len(ToolType.ALL_TOOLS)
+        self.current_tool = ToolType.ALL_TOOLS[self.current_tool_index]
+        print(f"  Tool: {self.current_tool}")
+    
+    def prev_tool(self):
+        """Switch to previous tool (L1)."""
+        self.current_tool_index = (self.current_tool_index - 1) % len(ToolType.ALL_TOOLS)
+        self.current_tool = ToolType.ALL_TOOLS[self.current_tool_index]
+        print(f"  Tool: {self.current_tool}")
         
         # Waypoint markers (for compass)
         self.markers = []  # List of (x, z, color, name) tuples
@@ -1481,6 +1642,147 @@ def _draw_digit(x: float, y: float, char: str):
     glEnd()
 
 
+def draw_menu(display: tuple, camera: Camera, hud_font=None):
+    """Draw the menu overlay when open."""
+    if not camera.menu_open:
+        return
+    
+    glMatrixMode(GL_PROJECTION)
+    glPushMatrix()
+    glLoadIdentity()
+    glOrtho(0, display[0], display[1], 0, -1, 1)
+    
+    glMatrixMode(GL_MODELVIEW)
+    glPushMatrix()
+    glLoadIdentity()
+    
+    glDisable(GL_LIGHTING)
+    glDisable(GL_DEPTH_TEST)
+    glEnable(GL_BLEND)
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+    
+    # Semi-transparent background overlay
+    glColor4f(0, 0, 0, 0.7)
+    glBegin(GL_QUADS)
+    glVertex2f(0, 0)
+    glVertex2f(display[0], 0)
+    glVertex2f(display[0], display[1])
+    glVertex2f(0, display[1])
+    glEnd()
+    
+    # Menu box
+    menu_w = min(600, display[0] - 100)
+    menu_h = min(400, display[1] - 100)
+    menu_x = (display[0] - menu_w) / 2
+    menu_y = (display[1] - menu_h) / 2
+    
+    # Menu background
+    glColor4f(0.15, 0.15, 0.2, 0.95)
+    glBegin(GL_QUADS)
+    glVertex2f(menu_x, menu_y)
+    glVertex2f(menu_x + menu_w, menu_y)
+    glVertex2f(menu_x + menu_w, menu_y + menu_h)
+    glVertex2f(menu_x, menu_y + menu_h)
+    glEnd()
+    
+    # Menu border
+    glColor4f(0.4, 0.6, 0.8, 1.0)
+    glLineWidth(2)
+    glBegin(GL_LINE_LOOP)
+    glVertex2f(menu_x, menu_y)
+    glVertex2f(menu_x + menu_w, menu_y)
+    glVertex2f(menu_x + menu_w, menu_y + menu_h)
+    glVertex2f(menu_x, menu_y + menu_h)
+    glEnd()
+    
+    # Tab bar
+    tab_h = 35
+    tab_names = ["INVENTORY", "LOG"]
+    tab_w = menu_w / len(tab_names)
+    
+    for i, name in enumerate(tab_names):
+        tx = menu_x + i * tab_w
+        
+        # Tab background
+        if i == camera.menu_tab:
+            glColor4f(0.3, 0.5, 0.7, 1.0)  # Selected
+        else:
+            glColor4f(0.2, 0.25, 0.3, 1.0)  # Unselected
+        
+        glBegin(GL_QUADS)
+        glVertex2f(tx + 2, menu_y + 2)
+        glVertex2f(tx + tab_w - 2, menu_y + 2)
+        glVertex2f(tx + tab_w - 2, menu_y + tab_h)
+        glVertex2f(tx + 2, menu_y + tab_h)
+        glEnd()
+        
+        # Tab text
+        if hud_font:
+            _draw_text(hud_font, name, tx + tab_w/2 - 30, menu_y + 12, (255, 255, 255))
+    
+    # Content area
+    content_y = menu_y + tab_h + 10
+    content_h = menu_h - tab_h - 20
+    
+    if camera.menu_tab == 0:  # Inventory
+        if hud_font:
+            _draw_text(hud_font, "Inventory (Coming Soon)", menu_x + 20, content_y, (200, 200, 200))
+    
+    elif camera.menu_tab == 1:  # Log
+        if len(camera.log_items) == 0:
+            if hud_font:
+                _draw_text(hud_font, "No DNA logs yet. Use SCAN tool to log creatures!", 
+                          menu_x + 20, content_y, (200, 200, 200))
+        else:
+            # Show list of log items
+            item_h = 24
+            visible_items = int(content_h / item_h)
+            start_idx = max(0, camera.log_index - visible_items // 2)
+            
+            for i, item in enumerate(camera.log_items[start_idx:start_idx + visible_items]):
+                iy = content_y + i * item_h
+                
+                # Highlight selected item
+                if start_idx + i == camera.log_index:
+                    glColor4f(0.3, 0.5, 0.7, 0.8)
+                    glBegin(GL_QUADS)
+                    glVertex2f(menu_x + 10, iy - 2)
+                    glVertex2f(menu_x + menu_w - 10, iy - 2)
+                    glVertex2f(menu_x + menu_w - 10, iy + item_h - 4)
+                    glVertex2f(menu_x + 10, iy + item_h - 4)
+                    glEnd()
+                
+                # Item text
+                if hud_font:
+                    # Parse filename for type and timestamp
+                    parts = item.replace('.json', '').split('_')
+                    if len(parts) >= 3:
+                        entity_type = parts[0]  # plant or animal
+                        date = parts[2] if len(parts) > 2 else ""
+                        time = parts[3] if len(parts) > 3 else ""
+                        display_text = f"{entity_type.upper()} - {date} {time}"
+                    else:
+                        display_text = item
+                    
+                    color = (100, 200, 255) if start_idx + i == camera.log_index else (180, 180, 180)
+                    _draw_text(hud_font, display_text, menu_x + 20, iy, color)
+    
+    # Help text at bottom
+    if hud_font:
+        help_y = menu_y + menu_h - 25
+        _draw_text(hud_font, "D-Pad/Stick: Navigate | START: Close", 
+                  menu_x + 20, help_y, (150, 150, 150))
+    
+    glDisable(GL_BLEND)
+    glEnable(GL_DEPTH_TEST)
+    glEnable(GL_LIGHTING)
+    
+    glPopMatrix()
+    glMatrixMode(GL_PROJECTION)
+    glPopMatrix()
+    glMatrixMode(GL_MODELVIEW)
+
+
 def draw_hud(display: tuple, camera: Camera, sky: SkySystem = None, climate: ClimateManager = None,
               hud_font=None):
     """Draw HUD."""
@@ -1834,8 +2136,41 @@ def draw_hud(display: tuple, camera: Camera, sky: SkySystem = None, climate: Cli
         glVertex2f(box_x + 10, cloud_y + 4)
         glEnd()
     
-    glBegin(GL_QUADS)  # Dummy begin to match the end below
+    # ========== TOOL DISPLAY (to the right of compass) ==========
+    tool_x = compass_x + compass_w + 15
+    tool_w = 80
+    tool_h = 28
+    
+    # Background
+    glColor4f(0, 0, 0, 0.7)
+    glBegin(GL_QUADS)
+    glVertex2f(tool_x, 15)
+    glVertex2f(tool_x + tool_w, 15)
+    glVertex2f(tool_x + tool_w, 15 + tool_h)
+    glVertex2f(tool_x, 15 + tool_h)
     glEnd()
+    
+    # Tool-specific color
+    if camera.current_tool == ToolType.SCAN:
+        glColor4f(0.2, 0.8, 1.0, 0.9)  # Cyan for scan
+    elif camera.current_tool == ToolType.MINE:
+        glColor4f(1.0, 0.6, 0.2, 0.9)  # Orange for mine
+    elif camera.current_tool == ToolType.FILL:
+        glColor4f(0.4, 1.0, 0.4, 0.9)  # Green for fill
+    else:
+        glColor4f(0.8, 0.8, 0.8, 0.9)  # Gray default
+    
+    # Tool indicator bar
+    glBegin(GL_QUADS)
+    glVertex2f(tool_x + 5, 18)
+    glVertex2f(tool_x + tool_w - 5, 18)
+    glVertex2f(tool_x + tool_w - 5, 22)
+    glVertex2f(tool_x + 5, 22)
+    glEnd()
+    
+    # Draw tool name with font if available
+    if hud_font:
+        _draw_text(hud_font, camera.current_tool, tool_x + 10, 26, (255, 255, 255))
     
     glDisable(GL_BLEND)
     glEnable(GL_DEPTH_TEST)
@@ -1959,12 +2294,12 @@ def run_explorer(config: WorldConfig = None):
     print("    Movement: WASD/Arrows | H/Space=Up F/Shift=Down")
     print("    Camera: IJKL or Right-Click+Mouse")
     print("    Speed: [/- = slower | ]/= = faster")
-    print("    S=Save | P=Screenshot | B=Log DNA | X=Tour | N=Warp | M=Marker | C=Clear")
+    print("    P=Screenshot | B=Use Tool | Tab=Menu | ,/.=Switch Tool | X=Tour | N=Warp")
     if gamepad.is_connected():
         print(f"  GAMEPAD ({gamepad.name}):")
         print("    Left Stick=Move | Right Stick=Look")
-        print("    L3=Down | R3=Up | L2/R2=Speed | A=Jump | B=Log DNA")
-        print("    START=Screenshot | SELECT=Warp")
+        print("    L3=Down | R3=Up | L2/R2=Speed | A=Jump | B=Use Tool | Y=Screenshot")
+        print("    L1/R1=Switch Tool | START=Menu | SELECT=Warp")
     print("=" * 60 + "\n")
     
     clock = pygame.time.Clock()
@@ -2005,8 +2340,26 @@ def run_explorer(config: WorldConfig = None):
                     save_position(camera, config.seed)
                 elif event.key == pygame.K_p:  # P for Picture/Screenshot
                     take_screenshot()
-                elif event.key == pygame.K_b:  # B for log DNA (next to A for jump)
-                    log_dna_at_cursor(camera, flora_manager, animal_manager)
+                elif event.key == pygame.K_TAB:  # Tab = toggle menu
+                    camera.toggle_menu()
+                elif event.key == pygame.K_b:  # B = use current tool
+                    if camera.current_tool == ToolType.SCAN:
+                        log_dna_at_cursor(camera, flora_manager, animal_manager)
+                    elif camera.current_tool == ToolType.MINE:
+                        result = modify_terrain_at_cursor(camera, chunk_manager, "MINE")
+                        if result:
+                            # Invalidate chunk display list to force re-render
+                            if result in chunk_renderer.display_lists:
+                                del chunk_renderer.display_lists[result]
+                    elif camera.current_tool == ToolType.FILL:
+                        result = modify_terrain_at_cursor(camera, chunk_manager, "FILL")
+                        if result:
+                            if result in chunk_renderer.display_lists:
+                                del chunk_renderer.display_lists[result]
+                elif event.key == pygame.K_COMMA:  # , = previous tool
+                    camera.prev_tool()
+                elif event.key == pygame.K_PERIOD:  # . = next tool
+                    camera.next_tool()
                 elif event.key == pygame.K_g:
                     gamepad.debug_mode = not gamepad.debug_mode
                     print(f"  Gamepad debug: {'ON' if gamepad.debug_mode else 'OFF'}")
@@ -2117,15 +2470,37 @@ def run_explorer(config: WorldConfig = None):
             if gamepad.get_button(GamepadConfig.A):
                 camera.jump()
             
-            # B button = log DNA
+            # B button = use current tool
             if gamepad.get_button(GamepadConfig.B) and gamepad_speed_cooldown <= 0:
-                log_dna_at_cursor(camera, flora_manager, animal_manager)
-                gamepad_speed_cooldown = 30  # Prevent rapid fire
+                if camera.current_tool == ToolType.SCAN:
+                    log_dna_at_cursor(camera, flora_manager, animal_manager)
+                elif camera.current_tool == ToolType.MINE:
+                    result = modify_terrain_at_cursor(camera, chunk_manager, "MINE")
+                    if result and result in chunk_renderer.display_lists:
+                        del chunk_renderer.display_lists[result]
+                elif camera.current_tool == ToolType.FILL:
+                    result = modify_terrain_at_cursor(camera, chunk_manager, "FILL")
+                    if result and result in chunk_renderer.display_lists:
+                        del chunk_renderer.display_lists[result]
+                gamepad_speed_cooldown = 20  # Faster for terrain tools
             
-            # START button = screenshot
-            if gamepad.get_button(GamepadConfig.START) and gamepad_speed_cooldown <= 0:
+            # L1 = previous tool, R1 = next tool
+            if gamepad.get_button(GamepadConfig.L1) and gamepad_speed_cooldown <= 0:
+                camera.prev_tool()
+                gamepad_speed_cooldown = 15
+            if gamepad.get_button(GamepadConfig.R1) and gamepad_speed_cooldown <= 0:
+                camera.next_tool()
+                gamepad_speed_cooldown = 15
+            
+            # Y button = screenshot
+            if gamepad.get_button(GamepadConfig.Y) and gamepad_speed_cooldown <= 0:
                 take_screenshot()
                 gamepad_speed_cooldown = 30
+            
+            # START button = toggle menu
+            if gamepad.get_button(GamepadConfig.START) and gamepad_speed_cooldown <= 0:
+                camera.toggle_menu()
+                gamepad_speed_cooldown = 20
             
             # SELECT button = warp to new universe
             if gamepad.get_button(GamepadConfig.SELECT) and gamepad_speed_cooldown <= 0:
@@ -2134,6 +2509,31 @@ def run_explorer(config: WorldConfig = None):
                                     chunk_dna_manager, climate_manager,
                                     structure_manager, config)
                 gamepad_speed_cooldown = 60  # Longer cooldown for warp
+            
+            # Menu navigation with D-pad or left stick when menu is open
+            if camera.menu_open and gamepad_speed_cooldown <= 0:
+                # D-pad left/right = switch tabs
+                if gamepad.get_dpad(GamepadConfig.DPAD_LEFT):
+                    camera.menu_switch_tab(-1)
+                    gamepad_speed_cooldown = 15
+                elif gamepad.get_dpad(GamepadConfig.DPAD_RIGHT):
+                    camera.menu_switch_tab(1)
+                    gamepad_speed_cooldown = 15
+                # D-pad up/down = navigate items
+                elif gamepad.get_dpad(GamepadConfig.DPAD_UP):
+                    camera.menu_navigate(-1)
+                    gamepad_speed_cooldown = 10
+                elif gamepad.get_dpad(GamepadConfig.DPAD_DOWN):
+                    camera.menu_navigate(1)
+                    gamepad_speed_cooldown = 10
+                # Left stick also works for navigation
+                gp_move = gamepad.get_movement()
+                if abs(gp_move[0]) > 0.5:  # Forward/back = up/down
+                    camera.menu_navigate(-1 if gp_move[0] > 0 else 1)
+                    gamepad_speed_cooldown = 10
+                if abs(gp_move[1]) > 0.5:  # Left/right = switch tabs
+                    camera.menu_switch_tab(1 if gp_move[1] > 0 else -1)
+                    gamepad_speed_cooldown = 15
         
         # Keyboard space = jump (in walk mode)
         if keys[pygame.K_SPACE] and not camera.flying:
@@ -2237,6 +2637,7 @@ def run_explorer(config: WorldConfig = None):
         
         draw_crosshair(display)
         draw_hud(display, camera, sky, climate_manager, hud_font)
+        draw_menu(display, camera, hud_font)  # Draw menu overlay if open
         minimap.draw(display, camera.x, camera.z)
         
         pygame.display.flip()

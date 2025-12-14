@@ -1,0 +1,119 @@
+{
+  "plant_type": "groundcover",
+  "species_id": 622914026,
+  "generation": 0,
+  "height_gene": {
+    "value": 0.1784429462583804,
+    "min_val": 0.05,
+    "max_val": 0.6,
+    "mutation_rate": 0.15
+  },
+  "width_gene": {
+    "value": 2.3135122903183194,
+    "min_val": 0.5,
+    "max_val": 6.0,
+    "mutation_rate": 0.25
+  },
+  "trunk_segments": [
+    {
+      "length": 0.1,
+      "width": 0.8,
+      "taper": 0.95,
+      "curve": 0,
+      "twist": 0
+    }
+  ],
+  "branch_count": "12",
+  "branch_angle": 0.8159526278130885,
+  "branch_spread": 1.0,
+  "branch_height": 0.6,
+  "branch_segments": [
+    {
+      "length": 0.5,
+      "width": 0.1,
+      "taper": 0.7,
+      "curve": 0.1,
+      "twist": 0.0
+    }
+  ],
+  "sub_branch_chance": 0.6560304514626247,
+  "leaf_density": 0.8715860876324956,
+  "leaf_size": 0.4959435356853941,
+  "leaf_shape": "round",
+  "canopy_shape": "dome",
+  "canopy_spread": 0.5,
+  "has_flowers": false,
+  "flower_size": 0.0,
+  "has_fruit": false,
+  "fruit_size": 0.0,
+  "has_glow": false,
+  "glow_intensity": 0.0,
+  "has_thorns": false,
+  "trunk_color": {
+    "r": 0.17736035893912758,
+    "g": 0.34643565638830814,
+    "b": 0.24499047791879988,
+    "mutation_rate": 0.15
+  },
+  "leaf_color": {
+    "r": 0.1380199148962886,
+    "g": 0.40269782633168033,
+    "b": 0.2438910794704454,
+    "mutation_rate": 0.15
+  },
+  "flower_color": {
+    "r": 0.9,
+    "g": 0.3,
+    "b": 0.5,
+    "mutation_rate": 0.15
+  },
+  "glow_color": {
+    "r": 0.5,
+    "g": 0.8,
+    "b": 0.5,
+    "mutation_rate": 0.15
+  },
+  "asymmetry": 0.1,
+  "droop": 0.0,
+  "wind_sway": 0.3,
+  "recursive_depth": 1,
+  "growth_direction": 0.0,
+  "spiral_factor": 0.0,
+  "bulb_count": 0,
+  "bulb_size": 0.0,
+  "bark_texture": "smooth",
+  "surface_bumps": 0.0,
+  "has_moss": false,
+  "moss_density": 0.0,
+  "secondary_trunk_color": {
+    "r": 0.3,
+    "g": 0.22,
+    "b": 0.12,
+    "mutation_rate": 0.15
+  },
+  "tip_color": {
+    "r": 0.4,
+    "g": 0.6,
+    "b": 0.3,
+    "mutation_rate": 0.15
+  },
+  "fruit_color": {
+    "r": 0.8,
+    "g": 0.2,
+    "b": 0.2,
+    "mutation_rate": 0.15
+  },
+  "moss_color": {
+    "r": 0.2,
+    "g": 0.4,
+    "b": 0.15,
+    "mutation_rate": 0.15
+  },
+  "bioluminescent": false,
+  "crystal_growth": false,
+  "spore_pods": false,
+  "tendrils": 0,
+  "root_exposure": 0.0,
+  "upside_down": false,
+  "lean_angle": 0.0
+}

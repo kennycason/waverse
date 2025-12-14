@@ -1,0 +1,161 @@
+{
+  "plant_type": "creeper",
+  "species_id": 520703445,
+  "generation": 1,
+  "height_gene": {
+    "value": 0.18867078035825094,
+    "min_val": 0.02,
+    "max_val": 0.3,
+    "mutation_rate": 0.1
+  },
+  "width_gene": {
+    "value": 2.016008182242931,
+    "min_val": 0.8,
+    "max_val": 8.0,
+    "mutation_rate": 0.3
+  },
+  "trunk_segments": [
+    {
+      "length": 0.9244914500364444,
+      "width": 0.9980831408015831,
+      "taper": 0.9699488119336205,
+      "curve": -0.10482384124124663,
+      "twist": 0.0012290296465693306
+    },
+    {
+      "length": 0.9884103480234713,
+      "width": 0.9480268889935265,
+      "taper": 0.9840117032475945,
+      "curve": -0.07072178684581663,
+      "twist": 0.002836209170633993
+    },
+    {
+      "length": 0.8710350653305147,
+      "width": 0.9402478446984056,
+      "taper": 0.9829825049676744,
+      "curve": -0.051131724855701124,
+      "twist": 0.0
+    },
+    {
+      "length": 0.718184264517304,
+      "width": 0.952387004947361,
+      "taper": 0.9830868728609111,
+      "curve": 0.07800409107957847,
+      "twist": 0.0
+    },
+    {
+      "length": 0.7703694993233126,
+      "width": 0.963578434864666,
+      "taper": 0.9901795480435532,
+      "curve": 0.12119708337626155,
+      "twist": 0.0048756171362578675
+    },
+    {
+      "length": 0.8079652008166688,
+      "width": 0.952895007601613,
+      "taper": 0.9684560126944255,
+      "curve": 0.11473293734455793,
+      "twist": 0.003029755436240386
+    },
+    {
+      "length": 0.7081390286040412,
+      "width": 0.9565519720983199,
+      "taper": 0.9849445848978093,
+      "curve": -0.10048531999975903,
+      "twist": 0.0
+    }
+  ],
+  "branch_count": "4",
+  "branch_angle": 0.5735701598719833,
+  "branch_spread": 0.9954433286830876,
+  "branch_height": 0.6181837820221194,
+  "branch_segments": [
+    {
+      "length": 0.5078484629480694,
+      "width": 0.07410025965284399,
+      "taper": 0.7009483710676155,
+      "curve": 0.14582645906883365,
+      "twist": 0.008349662346917015
+    }
+  ],
+  "sub_branch_chance": 0.38178106615863966,
+  "leaf_density": 0.5115956882998064,
+  "leaf_size": 0.42082520468089035,
+  "leaf_shape": "round",
+  "canopy_shape": "dome",
+  "canopy_spread": 0.553737828787863,
+  "has_flowers": false,
+  "flower_size": 0.0,
+  "has_fruit": false,
+  "fruit_size": 0.0,
+  "has_glow": false,
+  "glow_intensity": 0.0,
+  "has_thorns": false,
+  "trunk_color": {
+    "r": 0.1083152025033902,
+    "g": 0.20167159038166196,
+    "b": 0.2941204962112204,
+    "mutation_rate": 0.15
+  },
+  "leaf_color": {
+    "r": 0.29793536136422555,
+    "g": 0.6035844311988725,
+    "b": 0.49263782998202604,
+    "mutation_rate": 0.15
+  },
+  "flower_color": {
+    "r": 0.8969820639088883,
+    "g": 0.34447127400821154,
+    "b": 0.47872038071342377,
+    "mutation_rate": 0.15
+  },
+  "glow_color": {
+    "r": 0.5730222440202293,
+    "g": 0.8785246148141675,
+    "b": 0.5179719185074628,
+    "mutation_rate": 0.15
+  },
+  "asymmetry": 0.0820992869210328,
+  "droop": 0.0,
+  "wind_sway": 0.3,
+  "recursive_depth": 1,
+  "growth_direction": -0.04526193072878348,
+  "spiral_factor": 0.0,
+  "bulb_count": 0,
+  "bulb_size": 0.033482188182662846,
+  "bark_texture": "smooth",
+  "surface_bumps": 0.0,
+  "has_moss": false,
+  "moss_density": 0.01365487812093276,
+  "secondary_trunk_color": {
+    "r": 0.3603631451623493,
+    "g": 0.23039150955789245,
+    "b": 0.06001857809006215,
+    "mutation_rate": 0.15
+  },
+  "tip_color": {
+    "r": 0.3484526151025343,
+    "g": 0.5546600003419879,
+    "b": 0.16360773567493278,
+    "mutation_rate": 0.15
+  },
+  "fruit_color": {
+    "r": 0.7433066445082132,
+    "g": 0.16754754943517963,
+    "b": 0.33861317743773156,
+    "mutation_rate": 0.15
+  },
+  "moss_color": {
+    "r": 0.23391144123139762,
+    "g": 0.4499681077354768,
+    "b": 0.04001385334513842,
+    "mutation_rate": 0.15
+  },
+  "bioluminescent": false,
+  "crystal_growth": false,
+  "spore_pods": false,
+  "tendrils": 1,
+  "root_exposure": 0.0,
+  "upside_down": false,
+  "lean_angle": 0.061566081182368025
+}

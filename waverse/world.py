@@ -488,9 +488,11 @@ def get_height(config: WorldConfig, x: np.ndarray, z: np.ndarray) -> np.ndarray:
 CHUNK_SIZE = 32  # Tiles per chunk (smaller = faster generation)
 TILE_SCALE = 1.0  # World units per tile
 
-# Disk cache for chunks
+# Disk cache for chunks - stored in ~/.waverse/chunks/
 import os
-CACHE_DIR = os.path.join(os.path.dirname(__file__), '..', '.chunk_cache')
+WAVERSE_DIR = os.path.expanduser("~/.waverse")
+CACHE_DIR = os.path.join(WAVERSE_DIR, "chunks")
+os.makedirs(CACHE_DIR, exist_ok=True)
 
 
 @dataclass

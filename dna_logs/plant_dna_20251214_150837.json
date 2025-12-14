@@ -1,0 +1,119 @@
+{
+  "plant_type": "fern",
+  "species_id": 521669722,
+  "generation": 6,
+  "height_gene": {
+    "value": 1.8751234538541468,
+    "min_val": 0.3,
+    "max_val": 2.5,
+    "mutation_rate": 0.15
+  },
+  "width_gene": {
+    "value": 0.02,
+    "min_val": 0.02,
+    "max_val": 0.1,
+    "mutation_rate": 0.05
+  },
+  "trunk_segments": [
+    {
+      "length": 0.1707246307726746,
+      "width": 0.05,
+      "taper": 0.8833692789723891,
+      "curve": 0.10441586451575782,
+      "twist": 0.00556142761138556
+    }
+  ],
+  "branch_count": "9",
+  "branch_angle": 0.9900472687582766,
+  "branch_spread": 1.067022397941846,
+  "branch_height": 0.8940601425770207,
+  "branch_segments": [
+    {
+      "length": 0.490374367729859,
+      "width": 0.07046071412501288,
+      "taper": 0.7023691527826371,
+      "curve": 0.09847246738779239,
+      "twist": 0.0
+    }
+  ],
+  "sub_branch_chance": 0.3217780488930857,
+  "leaf_density": 0.6362489765075703,
+  "leaf_size": 0.39669407454032257,
+  "leaf_shape": "frond",
+  "canopy_shape": "dome",
+  "canopy_spread": 0.4343452499618357,
+  "has_flowers": false,
+  "flower_size": 0.0,
+  "has_fruit": false,
+  "fruit_size": 0.0,
+  "has_glow": true,
+  "glow_intensity": 0.7705138223114885,
+  "has_thorns": false,
+  "trunk_color": {
+    "r": 0.39154888422477846,
+    "g": 0.32066721321298725,
+    "b": 0.06901208870407802,
+    "mutation_rate": 0.15
+  },
+  "leaf_color": {
+    "r": 0.19635850871860536,
+    "g": 0.4375193818048177,
+    "b": 0.23708229188157998,
+    "mutation_rate": 0.15
+  },
+  "flower_color": {
+    "r": 0.8221883361151329,
+    "g": 0.3450930591533076,
+    "b": 0.5098600806670388,
+    "mutation_rate": 0.15
+  },
+  "glow_color": {
+    "r": 0.5024226772291552,
+    "g": 0.7820356125448525,
+    "b": 0.40207117239800205,
+    "mutation_rate": 0.15
+  },
+  "asymmetry": 0.08708105111745607,
+  "droop": 0.598051359758092,
+  "wind_sway": 0.3,
+  "recursive_depth": 1,
+  "growth_direction": -0.05304495131748632,
+  "spiral_factor": 0.0,
+  "bulb_count": 0,
+  "bulb_size": 0.0,
+  "bark_texture": "smooth",
+  "surface_bumps": 0.005676863912004374,
+  "has_moss": false,
+  "moss_density": 0.0,
+  "secondary_trunk_color": {
+    "r": 0.2493851165601813,
+    "g": 0.24092376951815273,
+    "b": 0.1322379122692392,
+    "mutation_rate": 0.15
+  },
+  "tip_color": {
+    "r": 0.4722165374499452,
+    "g": 0.6368309482769301,
+    "b": 0.28577946004013993,
+    "mutation_rate": 0.15
+  },
+  "fruit_color": {
+    "r": 0.7269257134399308,
+    "g": 0.23536574482506703,
+    "b": 0.27154383427141804,
+    "mutation_rate": 0.15
+  },
+  "moss_color": {
+    "r": 0.25025879421162606,
+    "g": 0.30585749322177996,
+    "b": 0.2133262055557359,
+    "mutation_rate": 0.15
+  },
+  "bioluminescent": false,
+  "crystal_growth": false,
+  "spore_pods": false,
+  "tendrils": 0,
+  "root_exposure": 0.0,
+  "upside_down": false,
+  "lean_angle": 0.01885073418880775
+}
