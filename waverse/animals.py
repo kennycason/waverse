@@ -333,11 +333,17 @@ class AnimalRenderer:
     """Renders animals from DNA with articulated joints."""
     
     @staticmethod
-    def draw_full(animal: AnimalInstance):
-        """Draw animal at full detail with animation."""
+    def draw_full(animal: AnimalInstance, at_origin: bool = False):
+        """Draw animal at full detail with animation.
+        
+        Args:
+            animal: The animal instance to render
+            at_origin: If True, render at origin (0,0,0) instead of animal's position
+        """
         glPushMatrix()
-        glTranslatef(animal.x, animal.y, animal.z)
-        glRotatef(animal.rotation, 0, 1, 0)
+        if not at_origin:
+            glTranslatef(animal.x, animal.y, animal.z)
+            glRotatef(animal.rotation, 0, 1, 0)
         
         scale = animal.dna.base_scale
         glScalef(scale, scale, scale)

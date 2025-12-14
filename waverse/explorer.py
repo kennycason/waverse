@@ -379,6 +379,242 @@ def take_screenshot():
     return filename
 
 
+def render_entity_to_png(entity, entity_type: str, filename: str, size: int = 512):
+    """Render a plant or animal to a PNG with transparent background."""
+    from waverse.flora import PlantRenderer, PlantInstance
+    from waverse.animals import AnimalRenderer
+    
+    # Save current viewport
+    viewport = glGetIntegerv(GL_VIEWPORT)
+    
+    # Set up a square viewport for rendering
+    glViewport(0, 0, size, size)
+    
+    # Clear to transparent (alpha = 0)
+    glClearColor(0.0, 0.0, 0.0, 0.0)
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+    
+    # Set up orthographic projection looking at the entity
+    glMatrixMode(GL_PROJECTION)
+    glPushMatrix()
+    glLoadIdentity()
+    
+    # Determine entity size for proper framing
+    if entity_type == "plant":
+        entity_height = entity.dna.height_gene.value * entity.scale
+        entity_width = max(entity.dna.width_gene.value * entity.scale * 2, entity_height * 0.5)
+    else:
+        # Animals - estimate size from body segments
+        entity_height = 3.0
+        entity_width = 3.0
+        if hasattr(entity.dna, 'body_segments') and entity.dna.body_segments:
+            total_size = sum(seg.size for seg in entity.dna.body_segments)
+            entity_height = total_size * 1.5
+            entity_width = total_size * 2
+    
+    # Add padding
+    view_size = max(entity_height, entity_width) * 1.5
+    half_size = view_size / 2
+    
+    # Orthographic projection
+    glOrtho(-half_size, half_size, -half_size * 0.2, half_size * 1.8, -100, 100)
+    
+    glMatrixMode(GL_MODELVIEW)
+    glPushMatrix()
+    glLoadIdentity()
+    
+    # Look at entity from a nice angle (slightly above and to the side)
+    gluLookAt(
+        half_size * 0.8, half_size * 0.5, half_size * 0.8,  # Eye position
+        0, half_size * 0.4, 0,  # Look at center
+        0, 1, 0   # Up vector
+    )
+    
+    # Enable lighting for nice rendering
+    glEnable(GL_LIGHTING)
+    glEnable(GL_LIGHT0)
+    glLightfv(GL_LIGHT0, GL_POSITION, [1.0, 2.0, 1.0, 0.0])
+    glLightfv(GL_LIGHT0, GL_DIFFUSE, [1.0, 1.0, 1.0, 1.0])
+    glLightfv(GL_LIGHT0, GL_AMBIENT, [0.4, 0.4, 0.4, 1.0])
+    
+    # Render the entity at origin
+    if entity_type == "plant":
+        # Create a temporary plant instance at origin
+        temp_plant = PlantInstance(
+            x=0, y=0, z=0,
+            dna=entity.dna,
+            scale=entity.scale,
+            rotation=0  # Face camera
+        )
+        PlantRenderer.draw_full(temp_plant)
+    else:
+        # Render animal
+        AnimalRenderer.draw_full(entity, at_origin=True)
+    
+    glDisable(GL_LIGHTING)
+    
+    # Read pixels with alpha
+    glPixelStorei(GL_PACK_ALIGNMENT, 1)
+    pixels = glReadPixels(0, 0, size, size, GL_RGBA, GL_UNSIGNED_BYTE)
+    
+    # Convert to numpy array and flip vertically
+    raw = np.frombuffer(pixels, dtype=np.uint8).reshape((size, size, 4))
+    raw = np.flipud(raw)
+    
+    # Create pygame surface with alpha
+    surface = pygame.Surface((size, size), pygame.SRCALPHA)
+    
+    # Copy pixel data (need to transpose for pygame)
+    for y in range(size):
+        for x in range(size):
+            r, g, b, a = raw[y, x]
+            surface.set_at((x, y), (r, g, b, a))
+    
+    # Save as PNG (preserves transparency)
+    pygame.image.save(surface, filename)
+    
+    # Restore matrices and viewport
+    glMatrixMode(GL_MODELVIEW)
+    glPopMatrix()
+    glMatrixMode(GL_PROJECTION)
+    glPopMatrix()
+    glMatrixMode(GL_MODELVIEW)
+    glViewport(viewport[0], viewport[1], viewport[2], viewport[3])
+    
+    # Restore clear color
+    glClearColor(0.5, 0.7, 1.0, 1.0)
+
+
+def log_dna_at_cursor(camera, flora_manager, animal_manager):
+    """Find and log the DNA of the nearest plant or animal at the cursor (camera look direction)."""
+    import os
+    from datetime import datetime
+    from dataclasses import asdict
+    
+    # Get camera look direction
+    yaw_rad = math.radians(camera.yaw)
+    pitch_rad = math.radians(camera.pitch)
+    
+    # Look direction vector (normalized)
+    look_x = math.sin(yaw_rad) * math.cos(pitch_rad)
+    look_y = -math.sin(pitch_rad)
+    look_z = -math.cos(yaw_rad) * math.cos(pitch_rad)
+    
+    # Search distance and hit radius
+    max_dist = 100.0  # Max distance to search
+    hit_radius = 3.0  # How close the ray must pass to the entity center
+    
+    best_entity = None
+    best_type = None
+    best_ray_dist = float('inf')  # Distance along ray to closest point
+    best_perp_dist = float('inf')  # Perpendicular distance from ray
+    
+    def check_entity(entity, entity_type):
+        """Check if ray passes close to entity. Returns (ray_dist, perp_dist) or None."""
+        nonlocal best_entity, best_type, best_ray_dist, best_perp_dist
+        
+        # Vector from camera to entity
+        dx = entity.x - camera.x
+        dy = entity.y - camera.y
+        dz = entity.z - camera.z
+        
+        # Project onto look direction (distance along ray)
+        ray_dist = dx * look_x + dy * look_y + dz * look_z
+        
+        # Must be in front of camera and within range
+        if ray_dist < 0 or ray_dist > max_dist:
+            return
+        
+        # Closest point on ray to entity
+        closest_x = camera.x + look_x * ray_dist
+        closest_y = camera.y + look_y * ray_dist
+        closest_z = camera.z + look_z * ray_dist
+        
+        # Perpendicular distance from ray to entity
+        perp_dx = entity.x - closest_x
+        perp_dy = entity.y - closest_y
+        perp_dz = entity.z - closest_z
+        perp_dist = math.sqrt(perp_dx*perp_dx + perp_dy*perp_dy + perp_dz*perp_dz)
+        
+        # Check if within hit radius and closer than current best
+        if perp_dist < hit_radius:
+            # Prioritize by perpendicular distance first (most accurate hit), then ray distance
+            if perp_dist < best_perp_dist or (perp_dist < best_perp_dist + 0.5 and ray_dist < best_ray_dist):
+                best_entity = entity
+                best_type = entity_type
+                best_ray_dist = ray_dist
+                best_perp_dist = perp_dist
+    
+    # Search in nearby chunks
+    cam_cx = int(camera.x // 32)
+    cam_cz = int(camera.z // 32)
+    
+    for dcx in range(-2, 3):
+        for dcz in range(-2, 3):
+            cx, cz = cam_cx + dcx, cam_cz + dcz
+            
+            # Check plants
+            if (cx, cz) in flora_manager.chunk_plants:
+                for plant in flora_manager.chunk_plants[(cx, cz)]:
+                    check_entity(plant, "plant")
+            
+            # Check animals
+            if (cx, cz) in animal_manager.chunk_animals:
+                for animal in animal_manager.chunk_animals[(cx, cz)]:
+                    check_entity(animal, "animal")
+    
+    if best_entity is None:
+        print("  [DNA Logger] No plant or animal found at cursor (aim at something within 100 units)")
+        return None
+    
+    # Create DNA log directory
+    dna_log_dir = "dna_logs"
+    os.makedirs(dna_log_dir, exist_ok=True)
+    
+    # Generate filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = os.path.join(dna_log_dir, f"{best_type}_dna_{timestamp}.json")
+    
+    # Convert DNA to dict and save
+    try:
+        dna_dict = asdict(best_entity.dna)
+        dna_string = json.dumps(dna_dict, indent=2, default=str)
+        
+        with open(filename, "w") as f:
+            f.write(dna_string)
+        
+        # Get type name
+        if best_type == "plant":
+            type_name = best_entity.dna.plant_type
+        else:
+            type_name = best_entity.dna.animal_type
+        
+        # Render the entity to a PNG with transparent background
+        png_filename = filename.replace(".json", ".png")
+        render_entity_to_png(best_entity, best_type, png_filename)
+        
+        # Print full info
+        print(f"\n  ========== LOG {best_type.upper()} DNA ==========")
+        print(f"  Type: {type_name}")
+        print(f"  Distance: {best_ray_dist:.1f} units")
+        print(f"  Accuracy: {best_perp_dist:.2f} (0 = perfect aim)")
+        print(f"  Saved: {filename}")
+        print(f"  Image: {png_filename}")
+        print(f"  ----------------------------------------")
+        # Print compact DNA string (single line, truncated)
+        compact_dna = json.dumps(dna_dict, default=str)
+        if len(compact_dna) > 300:
+            print(f"  DNA: {compact_dna[:300]}...")
+        else:
+            print(f"  DNA: {compact_dna}")
+        print(f"  ==========================================\n")
+        
+        return filename
+    except Exception as e:
+        print(f"  Error logging DNA: {e}")
+        return None
+
+
 def load_position(seed: int) -> dict:
     """Load saved position if it exists and matches seed."""
     try:
@@ -1723,11 +1959,12 @@ def run_explorer(config: WorldConfig = None):
     print("    Movement: WASD/Arrows | H/Space=Up F/Shift=Down")
     print("    Camera: IJKL or Right-Click+Mouse")
     print("    Speed: [/- = slower | ]/= = faster")
-    print("    S=Save | P=Screenshot | X=Tour Mode | N=New Location | M=Marker | C=Clear")
+    print("    S=Save | P=Screenshot | B=Log DNA | X=Tour | N=Warp | M=Marker | C=Clear")
     if gamepad.is_connected():
         print(f"  GAMEPAD ({gamepad.name}):")
         print("    Left Stick=Move | Right Stick=Look")
-        print("    L3=Down | R3=Up | L2/R2=Speed (normal) or Height (tour)")
+        print("    L3=Down | R3=Up | L2/R2=Speed | A=Jump | B=Log DNA")
+        print("    START=Screenshot | SELECT=Warp")
     print("=" * 60 + "\n")
     
     clock = pygame.time.Clock()
@@ -1768,6 +2005,8 @@ def run_explorer(config: WorldConfig = None):
                     save_position(camera, config.seed)
                 elif event.key == pygame.K_p:  # P for Picture/Screenshot
                     take_screenshot()
+                elif event.key == pygame.K_b:  # B for log DNA (next to A for jump)
+                    log_dna_at_cursor(camera, flora_manager, animal_manager)
                 elif event.key == pygame.K_g:
                     gamepad.debug_mode = not gamepad.debug_mode
                     print(f"  Gamepad debug: {'ON' if gamepad.debug_mode else 'OFF'}")
@@ -1877,6 +2116,24 @@ def run_explorer(config: WorldConfig = None):
             # A button = jump (in walk mode)
             if gamepad.get_button(GamepadConfig.A):
                 camera.jump()
+            
+            # B button = log DNA
+            if gamepad.get_button(GamepadConfig.B) and gamepad_speed_cooldown <= 0:
+                log_dna_at_cursor(camera, flora_manager, animal_manager)
+                gamepad_speed_cooldown = 30  # Prevent rapid fire
+            
+            # START button = screenshot
+            if gamepad.get_button(GamepadConfig.START) and gamepad_speed_cooldown <= 0:
+                take_screenshot()
+                gamepad_speed_cooldown = 30
+            
+            # SELECT button = warp to new universe
+            if gamepad.get_button(GamepadConfig.SELECT) and gamepad_speed_cooldown <= 0:
+                warp_to_new_universe(camera, chunk_manager, chunk_renderer, 
+                                    flora_manager, animal_manager,
+                                    chunk_dna_manager, climate_manager,
+                                    structure_manager, config)
+                gamepad_speed_cooldown = 60  # Longer cooldown for warp
         
         # Keyboard space = jump (in walk mode)
         if keys[pygame.K_SPACE] and not camera.flying:
