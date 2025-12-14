@@ -59,6 +59,12 @@ class PlantRenderer:
             PlantRenderer._draw_tentacle(dna)
         elif dna.plant_type == PlantType.SPIRAL:
             PlantRenderer._draw_spiral(dna)
+        elif dna.plant_type in (PlantType.GROUNDCOVER, PlantType.CREEPER, PlantType.LICHEN, PlantType.MOSS_PAD):
+            PlantRenderer._draw_groundcover(dna)
+        elif dna.plant_type == PlantType.LILY_PAD:
+            PlantRenderer._draw_lily_pad(dna)
+        elif dna.plant_type == PlantType.CORAL:
+            PlantRenderer._draw_coral(dna)
         else:
             # Trees (TREE, TALL_TREE, PALM, ALIEN)
             PlantRenderer._draw_tree(dna)
@@ -160,6 +166,37 @@ class PlantRenderer:
                 x, z = math.cos(angle) * r, math.sin(angle) * r
                 glVertex3f(x - w, t * height, z)
                 glVertex3f(x + w, t * height, z)
+            glEnd()
+        elif dna.plant_type in (PlantType.GROUNDCOVER, PlantType.CREEPER, PlantType.LICHEN, PlantType.MOSS_PAD):
+            # Simple ground cover - flat circle
+            glColor3f(*dna.leaf_color.rgb)
+            width = dna.width_gene.value
+            glBegin(GL_TRIANGLE_FAN)
+            glVertex3f(0, height, 0)
+            for i in range(9):
+                angle = (i / 8) * 2 * math.pi
+                glVertex3f(math.cos(angle) * width * 0.5, 0, math.sin(angle) * width * 0.5)
+            glEnd()
+        elif dna.plant_type == PlantType.LILY_PAD:
+            # Simple lily pad - flat circle
+            glColor3f(*dna.leaf_color.rgb)
+            width = dna.width_gene.value
+            glBegin(GL_TRIANGLE_FAN)
+            glVertex3f(0, 0.02, 0)
+            for i in range(9):
+                angle = (i / 8) * 2 * math.pi
+                glVertex3f(math.cos(angle) * width * 0.5, 0.02, math.sin(angle) * width * 0.5)
+            glEnd()
+        elif dna.plant_type == PlantType.CORAL:
+            # Simple coral - a few branches
+            glColor3f(*dna.trunk_color.rgb)
+            glBegin(GL_TRIANGLES)
+            for i in range(max(2, dna.branch_count // 2)):
+                angle = (i / max(1, dna.branch_count // 2)) * 2 * math.pi
+                w = dna.width_gene.value * 0.3
+                glVertex3f(0, 0, 0)
+                glVertex3f(math.cos(angle) * w, height * 0.7, math.sin(angle) * w)
+                glVertex3f(math.cos(angle + 0.2) * w * 0.5, height * 0.5, math.sin(angle + 0.2) * w * 0.5)
             glEnd()
         else:
             # Trees - trunk + layered cone canopy (looks better than flat triangle)
@@ -674,6 +711,147 @@ class PlantRenderer:
         glEnd()
     
     @staticmethod
+    def _draw_groundcover(dna: PlantDNA):
+        """Draw sprawling ground cover - wide, flat, spreading plants."""
+        width = dna.width_gene.value
+        height = dna.height_gene.value
+        
+        glColor3f(*dna.leaf_color.rgb)
+        
+        # Draw radiating flat patches/leaves
+        num_patches = max(4, dna.branch_count)
+        for i in range(num_patches):
+            angle = (i / num_patches) * 2 * math.pi + (hash(i) % 100) / 200.0
+            dist = width * (0.3 + (hash(i + 100) % 70) / 100.0)
+            
+            x = math.cos(angle) * dist
+            z = math.sin(angle) * dist
+            
+            # Each patch is a small dome or flat circle
+            patch_size = width * 0.2 * (0.5 + (hash(i + 200) % 50) / 100.0)
+            patch_height = height * (0.5 + (hash(i + 300) % 50) / 100.0)
+            
+            glBegin(GL_TRIANGLE_FAN)
+            glVertex3f(x, patch_height, z)  # Center top
+            for j in range(9):
+                a = (j / 8) * 2 * math.pi
+                glVertex3f(x + math.cos(a) * patch_size, 0, z + math.sin(a) * patch_size)
+            glEnd()
+        
+        # Central mound
+        glBegin(GL_TRIANGLE_FAN)
+        glVertex3f(0, height * 1.2, 0)
+        for j in range(9):
+            a = (j / 8) * 2 * math.pi
+            glVertex3f(math.cos(a) * width * 0.3, 0, math.sin(a) * width * 0.3)
+        glEnd()
+    
+    @staticmethod
+    def _draw_lily_pad(dna: PlantDNA):
+        """Draw floating lily pad with optional flower."""
+        width = dna.width_gene.value
+        
+        # Main pad - circular with notch
+        glColor3f(*dna.leaf_color.rgb)
+        glBegin(GL_TRIANGLE_FAN)
+        glVertex3f(0, 0.02, 0)  # Center, slightly above water
+        segments = 16
+        for i in range(segments + 1):
+            angle = (i / segments) * 2 * math.pi
+            # Skip a small wedge for the classic lily pad notch
+            if 0.4 < (i / segments) < 0.5:
+                continue
+            r = width * 0.5
+            glVertex3f(math.cos(angle) * r, 0.02, math.sin(angle) * r)
+        glEnd()
+        
+        # Add slight rim/edge coloring
+        glColor3f(dna.leaf_color.r * 0.7, dna.leaf_color.g * 0.9, dna.leaf_color.b * 0.7)
+        glBegin(GL_LINE_LOOP)
+        for i in range(segments):
+            angle = (i / segments) * 2 * math.pi
+            if 0.4 < (i / segments) < 0.5:
+                continue
+            r = width * 0.5
+            glVertex3f(math.cos(angle) * r, 0.03, math.sin(angle) * r)
+        glEnd()
+        
+        # Optional flower
+        if hasattr(dna, 'has_flower') and dna.has_flower:
+            glColor3f(*dna.flower_color.rgb)
+            # Flower petals
+            petal_count = 6
+            for i in range(petal_count):
+                angle = (i / petal_count) * 2 * math.pi
+                glBegin(GL_TRIANGLES)
+                glVertex3f(0, 0.3, 0)  # Center
+                pa = 0.15
+                glVertex3f(math.cos(angle - pa) * 0.1, 0.15, math.sin(angle - pa) * 0.1)
+                glVertex3f(math.cos(angle + pa) * 0.1, 0.15, math.sin(angle + pa) * 0.1)
+                glEnd()
+            # Yellow center
+            glColor3f(1.0, 0.9, 0.3)
+            glBegin(GL_TRIANGLE_FAN)
+            glVertex3f(0, 0.32, 0)
+            for i in range(7):
+                a = (i / 6) * 2 * math.pi
+                glVertex3f(math.cos(a) * 0.05, 0.28, math.sin(a) * 0.05)
+            glEnd()
+    
+    @staticmethod
+    def _draw_coral(dna: PlantDNA):
+        """Draw coral - branching underwater structure."""
+        height = dna.height_gene.value
+        width = dna.width_gene.value
+        
+        glColor3f(*dna.trunk_color.rgb)
+        
+        # Main branches growing up
+        num_branches = max(3, dna.branch_count)
+        for i in range(num_branches):
+            angle = (i / num_branches) * 2 * math.pi + (hash(i) % 100) / 100.0
+            lean = dna.branch_angle
+            
+            # Branch parameters
+            branch_height = height * (0.5 + (hash(i + 10) % 50) / 100.0)
+            branch_width = width * (0.3 + (hash(i + 20) % 40) / 100.0)
+            
+            # Draw as tapered column
+            glBegin(GL_QUAD_STRIP)
+            segments = 6
+            for j in range(segments + 1):
+                t = j / segments
+                y = t * branch_height
+                current_w = branch_width * (1 - t * 0.6)
+                
+                # Offset outward as it grows
+                x_offset = math.cos(angle) * lean * y
+                z_offset = math.sin(angle) * lean * y
+                
+                for k in [0, 1]:
+                    a = (k * 0.5) * 2 * math.pi
+                    glVertex3f(
+                        x_offset + math.cos(a + angle) * current_w,
+                        y,
+                        z_offset + math.sin(a + angle) * current_w
+                    )
+            glEnd()
+            
+            # Ball tip
+            tip_x = math.cos(angle) * lean * branch_height
+            tip_z = math.sin(angle) * lean * branch_height
+            glBegin(GL_TRIANGLE_FAN)
+            glVertex3f(tip_x, branch_height + branch_width * 0.3, tip_z)
+            for k in range(7):
+                a = (k / 6) * 2 * math.pi
+                glVertex3f(
+                    tip_x + math.cos(a) * branch_width * 0.5,
+                    branch_height,
+                    tip_z + math.sin(a) * branch_width * 0.5
+                )
+            glEnd()
+    
+    @staticmethod
     def _draw_tree(dna: PlantDNA):
         """Draw tree with multi-segment trunk, branches, and canopy."""
         # Draw multi-segment trunk
@@ -939,26 +1117,42 @@ class FloraManager:
         # Place plants using chunk's DNA species (reduced ~10% for perf)
         num_plants = rng.integers(18, 40)
         
-        for _ in range(num_plants):
+        # Also spawn underwater plants
+        num_underwater = rng.integers(5, 15)
+        
+        for _ in range(num_plants + num_underwater):
             local_x = rng.integers(2, w - 2)
             local_z = rng.integers(2, h - 2)
             
             ground_h = heightmap[local_z, local_x]
             
-            # Placement constraints - only skip underwater
-            if ground_h < 1:  # Underwater
-                continue
-            
             # World position
             world_x = chunk_world_x + local_x * tile_scale
             world_z = chunk_world_z + local_z * tile_scale
             
-            # Pick a species from this chunk's DNA pool
-            # At high elevations, prefer alpine/hardy plants
-            if ground_h > 40:  # High elevation - alpine zone
+            # Pick species based on environment
+            if ground_h < -2:  # Deep underwater - spawn underwater plants
+                # Underwater plants: seaweed, coral
+                underwater_types = [PlantType.SEAWEED, PlantType.CORAL]
+                underwater_dnas = [d for d in chunk_dna_list if d.plant_type in underwater_types]
+                if not underwater_dnas:
+                    # Generate underwater DNA on the fly
+                        dna = PlantDNA.create_random(PlantType.SEAWEED if rng.random() < 0.7 else PlantType.CORAL, int(rng.integers(0, 2**31)))
+                else:
+                    dna = rng.choice(underwater_dnas)
+            elif ground_h < 1:  # Shallow water / shoreline
+                # Mix of lily pads and shoreline plants
+                shore_types = [PlantType.LILY_PAD, PlantType.SEAWEED, PlantType.FERN, PlantType.GRASS]
+                shore_dnas = [d for d in chunk_dna_list if d.plant_type in shore_types]
+                if not shore_dnas:
+                    dna = PlantDNA.create_random(rng.choice([PlantType.LILY_PAD, PlantType.SEAWEED]), int(rng.integers(0, 2**31)))
+                else:
+                    dna = rng.choice(shore_dnas)
+            elif ground_h > 40:  # High elevation - alpine zone
                 # Prefer pines, crystals, grass, some hardy bushes
                 alpine_types = [PlantType.GRASS, PlantType.PINE, PlantType.CRYSTAL, 
-                               PlantType.BUSH, PlantType.SHRUB, PlantType.CACTUS]
+                               PlantType.BUSH, PlantType.SHRUB, PlantType.CACTUS,
+                               PlantType.LICHEN, PlantType.MOSS_PAD]
                 alpine_dnas = [d for d in chunk_dna_list if d.plant_type in alpine_types]
                 if alpine_dnas:
                     dna = rng.choice(alpine_dnas)
@@ -967,14 +1161,25 @@ class FloraManager:
             elif ground_h > 30:  # Mountain zone
                 # Mixed - some trees, mostly smaller plants
                 mountain_types = [PlantType.PINE, PlantType.TREE, PlantType.BUSH, 
-                                 PlantType.SHRUB, PlantType.GRASS, PlantType.FERN]
+                                 PlantType.SHRUB, PlantType.GRASS, PlantType.FERN,
+                                 PlantType.MOSS_PAD, PlantType.LICHEN]
                 mountain_dnas = [d for d in chunk_dna_list if d.plant_type in mountain_types]
                 if mountain_dnas:
                     dna = rng.choice(mountain_dnas)
                 else:
                     dna = rng.choice(chunk_dna_list)
             else:
-                dna = rng.choice(chunk_dna_list)
+                # Normal terrain - occasionally spawn ground cover
+                if rng.random() < 0.15:  # 15% chance of ground cover
+                    ground_types = [PlantType.GROUNDCOVER, PlantType.CREEPER, 
+                                   PlantType.LICHEN, PlantType.MOSS_PAD]
+                    ground_dnas = [d for d in chunk_dna_list if d.plant_type in ground_types]
+                    if ground_dnas:
+                        dna = rng.choice(ground_dnas)
+                    else:
+                        dna = PlantDNA.create_random(rng.choice(ground_types), int(rng.integers(0, 2**31)))
+                else:
+                    dna = rng.choice(chunk_dna_list)
             
             # Apply slight per-plant mutation for variety
             if rng.random() < 0.3:

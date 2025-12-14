@@ -43,7 +43,7 @@ PLAYER_HEIGHT = 2.5  # Eye height above ground (shorter = world feels bigger, fi
 WALK_SMOOTH_SPEED = 0.4  # Faster terrain following
 
 # Speed levels (keys: ` 1 2 3 4 5)
-SPEED_LEVELS = [0.05, 0.15, 0.3, 0.6, 1.0, 2.0, 4.0]  # Ultra-slow to fast
+SPEED_LEVELS = [0.05, 0.15, 0.3, 0.6, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0]  # Ultra-slow to insane
 
 # LOD settings - aggressive LOD for huge view distance
 LOD_FULL_DISTANCE = 5      # Full detail within this range
@@ -339,6 +339,44 @@ def save_position(camera, seed: int):
         print(f"  Position saved to {SAVE_FILE}")
     except Exception as e:
         print(f"  Error saving: {e}")
+
+
+def take_screenshot():
+    """Take a screenshot of the current view including HUD."""
+    import os
+    from datetime import datetime
+    
+    print("  Taking screenshot...")
+    
+    # Create screenshots directory if it doesn't exist
+    screenshots_dir = "screenshots"
+    os.makedirs(screenshots_dir, exist_ok=True)
+    
+    # Generate timestamped filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = os.path.join(screenshots_dir, f"screenshot_{timestamp}.png")
+    
+    # Get the current display size
+    display = pygame.display.get_surface()
+    width, height = display.get_size()
+    
+    # Read pixels from OpenGL
+    glPixelStorei(GL_PACK_ALIGNMENT, 1)
+    pixels = glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE)
+    
+    # Convert to pygame surface (OpenGL gives us bottom-up, so flip)
+    surface = pygame.Surface((width, height))
+    raw = np.frombuffer(pixels, dtype=np.uint8).reshape((height, width, 3))
+    # Flip vertically (OpenGL origin is bottom-left)
+    raw = np.flipud(raw)
+    # Convert RGB to pygame surface
+    pygame.surfarray.blit_array(surface, np.transpose(raw, (1, 0, 2)))
+    
+    # Save the screenshot
+    pygame.image.save(surface, filename)
+    print(f"  [Screenshot] Saved: {filename}")
+    
+    return filename
 
 
 def load_position(seed: int) -> dict:
@@ -1684,7 +1722,8 @@ def run_explorer(config: WorldConfig = None):
     print("  KEYBOARD:")
     print("    Movement: WASD/Arrows | H/Space=Up F/Shift=Down")
     print("    Camera: IJKL or Right-Click+Mouse")
-    print("    Speed: `=Crawl 1=V.Slow 2=Slow 3=Med 4=Normal 5=Fast 6=V.Fast")
+    print("    Speed: [/- = slower | ]/= = faster")
+    print("    S=Save | P=Screenshot | X=Tour Mode | N=New Location | M=Marker | C=Clear")
     if gamepad.is_connected():
         print(f"  GAMEPAD ({gamepad.name}):")
         print("    Left Stick=Move | Right Stick=Look")
@@ -1714,30 +1753,21 @@ def run_explorer(config: WorldConfig = None):
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     running = False
-                # Speed controls: 1-5 keys
-                elif event.key == pygame.K_BACKQUOTE:  # ` key
-                    camera.set_speed(0)
-                    print("  Speed: ` (Crawl - 0.05x)")
-                elif event.key == pygame.K_1:
-                    camera.set_speed(1)
-                    print("  Speed: 1 (Very Slow - 0.15x)")
-                elif event.key == pygame.K_2:
-                    camera.set_speed(2)
-                    print("  Speed: 2 (Slow - 0.3x)")
-                elif event.key == pygame.K_3:
-                    camera.set_speed(3)
-                    print("  Speed: 3 (Medium - 0.6x)")
-                elif event.key == pygame.K_4:
-                    camera.set_speed(4)
-                    print("  Speed: 4 (Normal - 1.0x)")
-                elif event.key == pygame.K_5:
-                    camera.set_speed(5)
-                    print("  Speed: 5 (Fast - 2.0x)")
-                elif event.key == pygame.K_6:
-                    camera.set_speed(6)
-                    print("  Speed: 6 (Very Fast - 4.0x)")
+                # Speed controls: [ and ] or - and = to decrease/increase
+                elif event.key in (pygame.K_LEFTBRACKET, pygame.K_MINUS):
+                    new_level = max(0, camera.speed_level - 1)
+                    if new_level != camera.speed_level:
+                        camera.set_speed(new_level)
+                        print(f"  Speed: {SPEED_LEVELS[new_level]:.2f}x")
+                elif event.key in (pygame.K_RIGHTBRACKET, pygame.K_EQUALS):
+                    new_level = min(len(SPEED_LEVELS) - 1, camera.speed_level + 1)
+                    if new_level != camera.speed_level:
+                        camera.set_speed(new_level)
+                        print(f"  Speed: {SPEED_LEVELS[new_level]:.2f}x")
                 elif event.key == pygame.K_s:
                     save_position(camera, config.seed)
+                elif event.key == pygame.K_p:  # P for Picture/Screenshot
+                    take_screenshot()
                 elif event.key == pygame.K_g:
                     gamepad.debug_mode = not gamepad.debug_mode
                     print(f"  Gamepad debug: {'ON' if gamepad.debug_mode else 'OFF'}")
@@ -1747,14 +1777,12 @@ def run_explorer(config: WorldConfig = None):
                     camera.add_marker()
                 elif event.key == pygame.K_c:
                     camera.clear_markers()
-                elif event.key == pygame.K_w and not (keys[pygame.K_LCTRL] or keys[pygame.K_RCTRL]):
-                    # W key alone (not with ctrl) = warp to new universe
-                    # Only trigger on keydown, not when W is held for movement
-                    if not keys[pygame.K_w]:  # Fresh press check
-                        warp_to_new_universe(camera, chunk_manager, chunk_renderer, 
-                                            flora_manager, animal_manager,
-                                            chunk_dna_manager, climate_manager,
-                                            structure_manager, config)
+                elif event.key == pygame.K_n:
+                    # N = New location (warp to new universe)
+                    warp_to_new_universe(camera, chunk_manager, chunk_renderer, 
+                                        flora_manager, animal_manager,
+                                        chunk_dna_manager, climate_manager,
+                                        structure_manager, config)
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 3:
                     mouse_look = True
@@ -1837,13 +1865,13 @@ def run_explorer(config: WorldConfig = None):
                         new_level = max(0, camera.speed_level - 1)
                         if new_level != camera.speed_level:
                             camera.set_speed(new_level)
-                            print(f"  Speed: {new_level}")
+                            print(f"  Speed: {SPEED_LEVELS[new_level]:.2f}x")
                             gamepad_speed_cooldown = 20  # ~0.33 seconds
                     elif r2_val > 0.7:  # R2 = increase speed
-                        new_level = min(6, camera.speed_level + 1)
+                        new_level = min(len(SPEED_LEVELS) - 1, camera.speed_level + 1)
                         if new_level != camera.speed_level:
                             camera.set_speed(new_level)
-                            print(f"  Speed: {new_level + 1}")
+                            print(f"  Speed: {SPEED_LEVELS[new_level]:.2f}x")
                             gamepad_speed_cooldown = 20
             
             # A button = jump (in walk mode)

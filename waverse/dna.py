@@ -165,10 +165,22 @@ class PlantType:
     TENTACLE = "tentacle"         # Upside-down dangling growths
     SPIRAL = "spiral"             # Spiraling growth patterns
     SEAWEED = "seaweed"           # Underwater swaying plants
+    # Sprawling ground-cover plants
+    GROUNDCOVER = "groundcover"   # Low spreading mats
+    CREEPER = "creeper"           # Spreading vines along ground
+    LICHEN = "lichen"             # Crusty spreading growth
+    MOSS_PAD = "moss_pad"         # Thick moss cushions
+    LILY_PAD = "lily_pad"         # Floating water plants
     
     ALL_TYPES = [GRASS, FLOWER, FERN, BUSH, SHRUB, TREE, TALL_TREE, PINE, PALM, WILLOW, 
                  CACTUS, MUSHROOM, CORAL, CRYSTAL, ALIEN, VINE, SPINY_VINE, OCTOPUS, 
-                 TENTACLE, SPIRAL, SEAWEED]
+                 TENTACLE, SPIRAL, SEAWEED, GROUNDCOVER, CREEPER, LICHEN, MOSS_PAD, LILY_PAD]
+    
+    # Underwater-specific types
+    UNDERWATER_TYPES = [SEAWEED, CORAL]
+    
+    # Sprawling ground types
+    GROUND_TYPES = [GROUNDCOVER, CREEPER, LICHEN, MOSS_PAD]
 
 
 @dataclass
@@ -884,6 +896,92 @@ class PlantDNA:
             hue = rng.choice([0.25, 0.3, 0.35, 0.05, 0.95])
             dna.trunk_color = ColorGene.from_hsv(hue, 0.3 + rng.random() * 0.4, 0.3 + rng.random() * 0.3)
             dna.leaf_color = ColorGene.from_hsv(hue, 0.4 + rng.random() * 0.3, 0.4 + rng.random() * 0.3)
+            
+        elif plant_type == PlantType.GROUNDCOVER:
+            # Low spreading ground cover - wide and flat
+            dna.height_gene = Gene(0.1 + rng.random() * 0.3, 0.05, 0.6, 0.15)
+            dna.width_gene = Gene(1.5 + rng.random() * 3.0, 0.5, 6.0, 0.25)  # Wide spread
+            dna.trunk_segments = [SegmentGene(0.1, 0.8, 0.95, 0, 0)]
+            dna.branch_count = 8 + rng.integers(0, 12)  # Many spreading branches
+            dna.branch_angle = 0.8 + rng.random() * 0.15  # Nearly horizontal
+            dna.sub_branch_chance = 0.5 + rng.random() * 0.3
+            dna.leaf_density = 0.8 + rng.random() * 0.2
+            dna.leaf_size = 0.3 + rng.random() * 0.4
+            hue = rng.choice([0.25, 0.3, 0.35, 0.15, 0.4])  # Greens, yellows
+            dna.trunk_color = ColorGene.from_hsv(hue, 0.3 + rng.random() * 0.3, 0.3 + rng.random() * 0.2)
+            dna.leaf_color = ColorGene.from_hsv(hue, 0.4 + rng.random() * 0.4, 0.4 + rng.random() * 0.4)
+            
+        elif plant_type == PlantType.CREEPER:
+            # Ground-hugging vines that spread outward
+            dna.height_gene = Gene(0.05 + rng.random() * 0.15, 0.02, 0.3, 0.1)
+            dna.width_gene = Gene(2.0 + rng.random() * 4.0, 0.8, 8.0, 0.3)  # Long spread
+            num_segments = 5 + rng.integers(0, 8)
+            dna.trunk_segments = [
+                SegmentGene(
+                    0.5 + rng.random() * 0.5,
+                    0.95,
+                    0.98,
+                    (rng.random() - 0.5) * 0.3,  # Winding path
+                    0
+                )
+                for _ in range(num_segments)
+            ]
+            dna.branch_count = 3 + rng.integers(0, 5)
+            dna.branch_angle = 0.3 + rng.random() * 0.4
+            dna.sub_branch_chance = 0.4
+            dna.leaf_density = 0.4 + rng.random() * 0.4
+            dna.tendrils = True
+            hue = rng.choice([0.3, 0.35, 0.4, 0.1])
+            dna.trunk_color = ColorGene.from_hsv(hue, 0.3 + rng.random() * 0.3, 0.25 + rng.random() * 0.2)
+            dna.leaf_color = ColorGene.from_hsv(hue, 0.5 + rng.random() * 0.3, 0.4 + rng.random() * 0.3)
+            
+        elif plant_type == PlantType.LICHEN:
+            # Crusty, spreading, irregular patches
+            dna.height_gene = Gene(0.02 + rng.random() * 0.08, 0.01, 0.15, 0.1)
+            dna.width_gene = Gene(1.0 + rng.random() * 2.5, 0.3, 5.0, 0.25)
+            dna.trunk_segments = [SegmentGene(0.05, 0.9, 0.95, 0, 0)]
+            dna.branch_count = 12 + rng.integers(0, 15)  # Many irregular patches
+            dna.branch_angle = 0.85 + rng.random() * 0.1  # Nearly flat
+            dna.asymmetry = 0.5 + rng.random() * 0.3
+            dna.leaf_density = 0
+            dna.surface_bumps = 0.6 + rng.random() * 0.3
+            # Lichens: grays, yellows, oranges, pale greens
+            hue = rng.choice([0.1, 0.15, 0.25, 0.0, 0.05])
+            dna.trunk_color = ColorGene.from_hsv(hue, 0.2 + rng.random() * 0.4, 0.4 + rng.random() * 0.4)
+            dna.leaf_color = dna.trunk_color
+            
+        elif plant_type == PlantType.MOSS_PAD:
+            # Thick, cushiony moss mounds
+            dna.height_gene = Gene(0.15 + rng.random() * 0.35, 0.05, 0.6, 0.15)
+            dna.width_gene = Gene(0.8 + rng.random() * 2.0, 0.3, 4.0, 0.2)
+            dna.trunk_segments = [SegmentGene(0.3, 0.6, 0.8, 0, 0)]  # Domed shape
+            dna.branch_count = 0  # Solid mound
+            dna.leaf_density = 1.0  # Fully covered
+            dna.leaf_size = 0.05 + rng.random() * 0.1  # Tiny leaves
+            dna.has_moss = True
+            dna.moss_density = 1.0
+            hue = rng.choice([0.25, 0.3, 0.35, 0.4])  # Rich greens
+            dna.trunk_color = ColorGene.from_hsv(hue, 0.4 + rng.random() * 0.3, 0.3 + rng.random() * 0.25)
+            dna.leaf_color = ColorGene.from_hsv(hue, 0.5 + rng.random() * 0.3, 0.35 + rng.random() * 0.3)
+            dna.moss_color = ColorGene.from_hsv(hue + 0.05, 0.5, 0.4)
+            
+        elif plant_type == PlantType.LILY_PAD:
+            # Floating water surface plants
+            dna.height_gene = Gene(0.02 + rng.random() * 0.05, 0.01, 0.1, 0.1)
+            dna.width_gene = Gene(0.5 + rng.random() * 1.5, 0.2, 3.0, 0.2)
+            dna.trunk_segments = [SegmentGene(0.02, 0.9, 0.95, 0, 0)]
+            dna.branch_count = 1 + rng.integers(0, 4)  # Multiple pads
+            dna.branch_angle = 0.9  # Flat on water
+            dna.leaf_shape = "round"
+            dna.leaf_size = 0.8 + rng.random() * 0.4
+            dna.leaf_density = 1.0
+            hue = 0.3 + rng.random() * 0.1  # Green
+            dna.trunk_color = ColorGene.from_hsv(hue, 0.4, 0.35)
+            dna.leaf_color = ColorGene.from_hsv(hue, 0.5 + rng.random() * 0.3, 0.4 + rng.random() * 0.3)
+            # Sometimes has a flower
+            if rng.random() < 0.4:
+                dna.has_flower = True
+                dna.flower_color = ColorGene.from_hsv(rng.choice([0.0, 0.1, 0.85, 0.95]), 0.6, 0.9)
         
         return dna
 
