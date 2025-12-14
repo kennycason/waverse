@@ -42,8 +42,8 @@ CHUNK_RENDER_DISTANCE = 20  # Massive view distance!
 PLAYER_HEIGHT = 2.5  # Eye height above ground (shorter = world feels bigger, fits through doors)
 WALK_SMOOTH_SPEED = 0.4  # Faster terrain following
 
-# Speed levels (1-5 keys)
-SPEED_LEVELS = [0.3, 0.6, 1.0, 2.0, 4.0]  # Slow to fast
+# Speed levels (keys: ` 1 2 3 4 5)
+SPEED_LEVELS = [0.05, 0.15, 0.3, 0.6, 1.0, 2.0, 4.0]  # Ultra-slow to fast
 
 # LOD settings - aggressive LOD for huge view distance
 LOD_FULL_DISTANCE = 5      # Full detail within this range
@@ -476,7 +476,7 @@ class Camera:
         self.pitch = -20
         self.flying = True
         self.target_y = 40
-        self.speed_level = 2  # Default speed (1.0x)
+        self.speed_level = 4  # Default speed (1.0x) - index into SPEED_LEVELS
         
         # Jump physics
         self.jumping = False
@@ -1684,7 +1684,7 @@ def run_explorer(config: WorldConfig = None):
     print("  KEYBOARD:")
     print("    Movement: WASD/Arrows | H/Space=Up F/Shift=Down")
     print("    Camera: IJKL or Right-Click+Mouse")
-    print("    Speed: 1=Slow 2 3=Normal 4 5=Fast | S=Save | ESC=Exit")
+    print("    Speed: `=Crawl 1=V.Slow 2=Slow 3=Med 4=Normal 5=Fast 6=V.Fast")
     if gamepad.is_connected():
         print(f"  GAMEPAD ({gamepad.name}):")
         print("    Left Stick=Move | Right Stick=Look")
@@ -1715,21 +1715,27 @@ def run_explorer(config: WorldConfig = None):
                 if event.key == pygame.K_ESCAPE:
                     running = False
                 # Speed controls: 1-5 keys
-                elif event.key == pygame.K_1:
+                elif event.key == pygame.K_BACKQUOTE:  # ` key
                     camera.set_speed(0)
-                    print("  Speed: 1 (Slow)")
-                elif event.key == pygame.K_2:
+                    print("  Speed: ` (Crawl - 0.05x)")
+                elif event.key == pygame.K_1:
                     camera.set_speed(1)
-                    print("  Speed: 2")
-                elif event.key == pygame.K_3:
+                    print("  Speed: 1 (Very Slow - 0.15x)")
+                elif event.key == pygame.K_2:
                     camera.set_speed(2)
-                    print("  Speed: 3 (Normal)")
-                elif event.key == pygame.K_4:
+                    print("  Speed: 2 (Slow - 0.3x)")
+                elif event.key == pygame.K_3:
                     camera.set_speed(3)
-                    print("  Speed: 4")
-                elif event.key == pygame.K_5:
+                    print("  Speed: 3 (Medium - 0.6x)")
+                elif event.key == pygame.K_4:
                     camera.set_speed(4)
-                    print("  Speed: 5 (Fast)")
+                    print("  Speed: 4 (Normal - 1.0x)")
+                elif event.key == pygame.K_5:
+                    camera.set_speed(5)
+                    print("  Speed: 5 (Fast - 2.0x)")
+                elif event.key == pygame.K_6:
+                    camera.set_speed(6)
+                    print("  Speed: 6 (Very Fast - 4.0x)")
                 elif event.key == pygame.K_s:
                     save_position(camera, config.seed)
                 elif event.key == pygame.K_g:
@@ -1831,10 +1837,10 @@ def run_explorer(config: WorldConfig = None):
                         new_level = max(0, camera.speed_level - 1)
                         if new_level != camera.speed_level:
                             camera.set_speed(new_level)
-                            print(f"  Speed: {new_level + 1}")
+                            print(f"  Speed: {new_level}")
                             gamepad_speed_cooldown = 20  # ~0.33 seconds
                     elif r2_val > 0.7:  # R2 = increase speed
-                        new_level = min(4, camera.speed_level + 1)
+                        new_level = min(6, camera.speed_level + 1)
                         if new_level != camera.speed_level:
                             camera.set_speed(new_level)
                             print(f"  Speed: {new_level + 1}")
