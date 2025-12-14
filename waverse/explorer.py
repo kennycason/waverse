@@ -356,6 +356,75 @@ def load_position(seed: int) -> dict:
     return None
 
 
+def warp_to_new_universe(camera, chunk_manager, chunk_renderer, flora_manager, 
+                         animal_manager, chunk_dna_manager, climate_manager,
+                         structure_manager, config):
+    """Warp to a far-away location with completely fresh DNA AND terrain - a new universe!"""
+    print("=" * 60)
+    print("  WARPING TO NEW UNIVERSE...")
+    print("=" * 60)
+    
+    # Pick a random far-away location (1000-5000 chunks away)
+    import random as rnd
+    angle = rnd.random() * 2 * math.pi
+    distance = rnd.randint(1000, 5000) * 32  # In world units (chunks * chunk_size)
+    
+    new_x = camera.x + math.cos(angle) * distance
+    new_z = camera.z + math.sin(angle) * distance
+    
+    # Generate a new random seed for this universe (terrain + DNA)
+    new_universe_seed = rnd.randint(0, 2**31)
+    
+    # Change the TERRAIN seed too for completely new world shape!
+    config.seed = new_universe_seed
+    chunk_manager.config.seed = new_universe_seed
+    
+    print(f"  Distance: {distance/32:.0f} chunks")
+    print(f"  New position: ({new_x:.0f}, {new_z:.0f})")
+    print(f"  Universe seed: {new_universe_seed}")
+    print(f"  (New terrain shape + new DNA!)")
+    
+    # Clear all caches to force fresh generation
+    chunk_manager.chunks.clear()
+    chunk_renderer.display_lists.clear()
+    flora_manager.chunk_plants.clear()
+    flora_manager.display_lists.clear()
+    animal_manager.animals.clear()
+    animal_manager.chunk_animals.clear()
+    structure_manager.structures.clear()
+    structure_manager.spawned_chunks.clear()
+    
+    # Reset DNA managers with new random base DNA
+    # This creates completely new evolutionary starting points
+    chunk_dna_manager.chunk_dna.clear()
+    chunk_dna_manager.seed = new_universe_seed
+    
+    climate_manager.biomes.clear()
+    climate_manager.regional_weather.clear()
+    climate_manager.seed = new_universe_seed
+    
+    # Reset flora DNA pool with new mutations
+    flora_manager.dna_pool.seed = new_universe_seed
+    flora_manager.dna_pool.rng = np.random.default_rng(new_universe_seed)
+    flora_manager.dna_pool.chunk_dna.clear()
+    flora_manager.dna_pool.templates = flora_manager.dna_pool._generate_templates()
+    flora_manager.world_seed = new_universe_seed
+    
+    # Reset animal species templates with new seed
+    animal_manager.world_seed = new_universe_seed
+    animal_manager.species_templates = animal_manager._generate_species()
+    
+    # Teleport camera
+    camera.x = new_x
+    camera.z = new_z
+    camera.y = 100  # Start high, will settle to terrain
+    camera.flying = True
+    
+    print("  Welcome to a new universe!")
+    print("  The DNA here evolved completely independently.")
+    print("=" * 60)
+
+
 def height_to_color(h: float) -> tuple:
     """Convert height to terrain color - adjusted for better distribution."""
     # Scale heights more reasonably (divide by height scale factor)
@@ -1368,6 +1437,14 @@ def run_explorer(config: WorldConfig = None):
                     print(f"  Gamepad debug: {'ON' if gamepad.debug_mode else 'OFF'}")
                 elif event.key == pygame.K_x:
                     camera.toggle_auto_fly()
+                elif event.key == pygame.K_w and not (keys[pygame.K_LCTRL] or keys[pygame.K_RCTRL]):
+                    # W key alone (not with ctrl) = warp to new universe
+                    # Only trigger on keydown, not when W is held for movement
+                    if not keys[pygame.K_w]:  # Fresh press check
+                        warp_to_new_universe(camera, chunk_manager, chunk_renderer, 
+                                            flora_manager, animal_manager,
+                                            chunk_dna_manager, climate_manager,
+                                            structure_manager, config)
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 3:
                     mouse_look = True

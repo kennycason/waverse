@@ -51,6 +51,14 @@ class PlantRenderer:
             PlantRenderer._draw_mushroom(dna)
         elif dna.plant_type == PlantType.CACTUS:
             PlantRenderer._draw_cactus(dna)
+        elif dna.plant_type in (PlantType.VINE, PlantType.SPINY_VINE, PlantType.SEAWEED):
+            PlantRenderer._draw_vine(dna)
+        elif dna.plant_type == PlantType.OCTOPUS:
+            PlantRenderer._draw_octopus(dna)
+        elif dna.plant_type == PlantType.TENTACLE:
+            PlantRenderer._draw_tentacle(dna)
+        elif dna.plant_type == PlantType.SPIRAL:
+            PlantRenderer._draw_spiral(dna)
         else:
             # Trees (TREE, TALL_TREE, PALM, ALIEN)
             PlantRenderer._draw_tree(dna)
@@ -106,6 +114,52 @@ class PlantRenderer:
             glVertex3f(0, height, 0)
             glVertex3f(-cap, height * 0.6, 0)
             glVertex3f(cap, height * 0.6, 0)
+            glEnd()
+        elif dna.plant_type in (PlantType.VINE, PlantType.SPINY_VINE, PlantType.SEAWEED):
+            # Simple vine - thin quad strip
+            glColor3f(*dna.trunk_color.rgb)
+            w = 0.05
+            glBegin(GL_QUAD_STRIP)
+            for i in range(6):
+                t = i / 5
+                sway = math.sin(t * math.pi * 2) * 0.2
+                glVertex3f(sway - w, t * height, 0)
+                glVertex3f(sway + w, t * height, 0)
+            glEnd()
+        elif dna.plant_type == PlantType.OCTOPUS:
+            # Simple octopus - triangles radiating out
+            glColor3f(*dna.trunk_color.rgb)
+            glBegin(GL_TRIANGLES)
+            for i in range(max(1, dna.branch_count)):
+                angle = (i / max(1, dna.branch_count)) * 2 * math.pi
+                a2 = angle + 0.1
+                glVertex3f(0, height * 0.3, 0)
+                glVertex3f(math.cos(angle) * height * 0.5, 0, math.sin(angle) * height * 0.5)
+                glVertex3f(math.cos(a2) * height * 0.4, 0, math.sin(a2) * height * 0.4)
+            glEnd()
+        elif dna.plant_type == PlantType.TENTACLE:
+            # Simple tentacle - drooping triangles
+            glColor3f(*dna.trunk_color.rgb)
+            glBegin(GL_TRIANGLES)
+            glVertex3f(0, height, 0)
+            glVertex3f(-0.1, height * 0.5, 0)
+            glVertex3f(0.1, height * 0.5, 0)
+            glVertex3f(0, height * 0.5, 0)
+            glVertex3f(-0.1, 0, 0)
+            glVertex3f(0.1, 0, 0)
+            glEnd()
+        elif dna.plant_type == PlantType.SPIRAL:
+            # Simple spiral - quad strip helix
+            glColor3f(*dna.trunk_color.rgb)
+            w = 0.05
+            glBegin(GL_QUAD_STRIP)
+            for i in range(12):
+                t = i / 11
+                angle = t * 4 * math.pi
+                r = 0.2 * (1 - t * 0.3)
+                x, z = math.cos(angle) * r, math.sin(angle) * r
+                glVertex3f(x - w, t * height, z)
+                glVertex3f(x + w, t * height, z)
             glEnd()
         else:
             # Trees - trunk + layered cone canopy (looks better than flat triangle)
@@ -398,6 +452,226 @@ class PlantRenderer:
                 z = math.sin(angle) * size
                 glVertex3f(x, flower_y, z)
             glEnd()
+    
+    @staticmethod
+    def _draw_vine(dna: PlantDNA):
+        """Draw vine with many curving segments."""
+        height = dna.height_gene.value
+        width = dna.width_gene.value
+        
+        glColor3f(*dna.trunk_color.rgb)
+        
+        # Draw main vine as connected quad strip (thicker than lines)
+        current_x, current_y, current_z = 0, 0, 0
+        direction = 0  # Yaw angle
+        vine_width = width * 0.1
+        
+        glBegin(GL_QUAD_STRIP)
+        glVertex3f(-vine_width, 0, 0)
+        glVertex3f(vine_width, 0, 0)
+        
+        for seg in dna.trunk_segments:
+            seg_len = seg.length * height / len(dna.trunk_segments)
+            direction += seg.curve * 0.5
+            
+            current_x += math.sin(direction) * seg_len * 0.3
+            current_y += seg_len
+            current_z += math.cos(direction) * seg_len * 0.3
+            
+            glVertex3f(current_x - vine_width, current_y, current_z)
+            glVertex3f(current_x + vine_width, current_y, current_z)
+        glEnd()
+        
+        # Draw leaves along vine
+        glColor3f(*dna.leaf_color.rgb)
+        leaf_y = 0
+        for seg in dna.trunk_segments:
+            seg_len = seg.length * height / len(dna.trunk_segments)
+            leaf_y += seg_len
+            
+            size = 0.2 + dna.leaf_density * 0.3
+            glBegin(GL_TRIANGLES)
+            glVertex3f(0, leaf_y, 0)
+            glVertex3f(-size, leaf_y - size * 0.5, -size * 0.3)
+            glVertex3f(size, leaf_y - size * 0.3, size * 0.3)
+            glEnd()
+        
+        # Spines for spiny vines
+        if dna.plant_type == PlantType.SPINY_VINE:
+            glColor3f(0.3, 0.25, 0.2)
+            spine_y = 0
+            glBegin(GL_TRIANGLES)
+            for i, seg in enumerate(dna.trunk_segments):
+                seg_len = seg.length * height / len(dna.trunk_segments)
+                spine_y += seg_len * 0.5
+                
+                for j in range(3):
+                    angle = (j / 3 + i * 0.33) * 2 * math.pi
+                    sx = math.cos(angle) * 0.3
+                    sz = math.sin(angle) * 0.3
+                    # Draw spine as thin triangle
+                    glVertex3f(0, spine_y, 0)
+                    glVertex3f(sx, spine_y + 0.05, sz)
+                    glVertex3f(sx * 0.9, spine_y - 0.05, sz * 0.9)
+                spine_y += seg_len * 0.5
+            glEnd()
+    
+    @staticmethod
+    def _draw_octopus(dna: PlantDNA):
+        """Draw octopus-like recursive branching plant."""
+        height = dna.height_gene.value
+        width = dna.width_gene.value
+        
+        glColor3f(*dna.trunk_color.rgb)
+        
+        # Central body/bulb
+        segments = 8
+        glBegin(GL_TRIANGLE_FAN)
+        glVertex3f(0, height * 0.3, 0)
+        for i in range(segments + 1):
+            angle = (i / segments) * 2 * math.pi
+            x = math.cos(angle) * width * 0.6
+            z = math.sin(angle) * width * 0.6
+            glVertex3f(x, 0, z)
+        glEnd()
+        
+        # Tentacles
+        num_tentacles = dna.branch_count
+        for t in range(num_tentacles):
+            base_angle = (t / num_tentacles) * 2 * math.pi
+            
+            glPushMatrix()
+            glRotatef(math.degrees(base_angle), 0, 1, 0)
+            glTranslatef(width * 0.4, height * 0.2, 0)
+            glRotatef(60 + dna.branch_angle * 30, 0, 0, 1)
+            
+            # Draw tentacle as tapering curve
+            tent_len = height * 0.8
+            tent_width = width * 0.15
+            
+            glBegin(GL_QUAD_STRIP)
+            for i in range(8):
+                t = i / 7
+                # Curve outward then down
+                curve = math.sin(t * math.pi * 0.8) * 0.5
+                y = t * tent_len * 0.7
+                x = curve * tent_len * 0.5
+                w = tent_width * (1 - t * 0.8)
+                
+                glVertex3f(x - w, y, 0)
+                glVertex3f(x + w, y, 0)
+            glEnd()
+            
+            glPopMatrix()
+        
+        # Glow effect
+        if dna.has_glow:
+            glColor4f(*dna.glow_color.rgb, 0.3)
+            glBegin(GL_TRIANGLE_FAN)
+            glVertex3f(0, height * 0.3, 0)
+            glow_r = width * 1.2
+            for i in range(segments + 1):
+                angle = (i / segments) * 2 * math.pi
+                glVertex3f(math.cos(angle) * glow_r, 0, math.sin(angle) * glow_r)
+            glEnd()
+    
+    @staticmethod
+    def _draw_tentacle(dna: PlantDNA):
+        """Draw upside-down dangling tentacle growth."""
+        height = dna.height_gene.value
+        width = dna.width_gene.value
+        
+        glColor3f(*dna.trunk_color.rgb)
+        
+        # Base attachment point (like it's hanging from something)
+        glBegin(GL_TRIANGLE_FAN)
+        glVertex3f(0, height, 0)
+        for i in range(7):
+            angle = (i / 6) * 2 * math.pi
+            glVertex3f(math.cos(angle) * width * 0.4, height * 0.9, math.sin(angle) * width * 0.4)
+        glEnd()
+        
+        # Dangling segments
+        current_y = height * 0.9
+        for i, seg in enumerate(dna.trunk_segments):
+            seg_len = seg.length * height / len(dna.trunk_segments)
+            next_y = current_y - seg_len
+            
+            # Curve adds sway
+            sway = seg.curve * 0.3
+            
+            w = width * (0.3 - i * 0.03)
+            glBegin(GL_QUAD_STRIP)
+            for j in range(5):
+                t = j / 4
+                y = current_y - t * seg_len
+                x_off = sway * math.sin(t * math.pi)
+                w_t = w * (1 - t * 0.2)
+                
+                glVertex3f(x_off - w_t, y, 0)
+                glVertex3f(x_off + w_t, y, 0)
+            glEnd()
+            
+            current_y = next_y
+        
+        # Tip
+        glBegin(GL_TRIANGLES)
+        glVertex3f(0, current_y - width * 0.5, 0)
+        glVertex3f(-width * 0.2, current_y, 0)
+        glVertex3f(width * 0.2, current_y, 0)
+        glEnd()
+        
+        # Glow
+        if dna.has_glow:
+            glColor4f(*dna.glow_color.rgb, 0.4)
+            glBegin(GL_TRIANGLE_FAN)
+            glVertex3f(0, current_y - width * 0.3, 0)
+            for i in range(7):
+                angle = (i / 6) * 2 * math.pi
+                glVertex3f(math.cos(angle) * width * 0.6, current_y, math.sin(angle) * width * 0.6)
+            glEnd()
+    
+    @staticmethod
+    def _draw_spiral(dna: PlantDNA):
+        """Draw spiraling growth pattern."""
+        height = dna.height_gene.value
+        width = dna.width_gene.value
+        
+        glColor3f(*dna.trunk_color.rgb)
+        
+        # Spiral up
+        total_rotation = len(dna.trunk_segments) * 2  # Number of full rotations
+        current_y = 0
+        radius = width * 0.8
+        
+        glBegin(GL_QUAD_STRIP)
+        steps = len(dna.trunk_segments) * 8
+        for i in range(steps + 1):
+            t = i / steps
+            angle = t * total_rotation * 2 * math.pi
+            y = t * height
+            r = radius * (1 - t * 0.3)  # Taper
+            
+            x = math.cos(angle) * r
+            z = math.sin(angle) * r
+            
+            # Inner and outer edge of spiral ribbon
+            inner_r = r * 0.7
+            glVertex3f(math.cos(angle) * inner_r, y, math.sin(angle) * inner_r)
+            glVertex3f(x, y, z)
+        glEnd()
+        
+        # Tip
+        glColor3f(*dna.leaf_color.rgb)
+        glBegin(GL_TRIANGLES)
+        glVertex3f(0, height + width * 0.5, 0)
+        tip_w = width * 0.3
+        for i in range(6):
+            a1 = (i / 6) * 2 * math.pi
+            a2 = ((i + 1) / 6) * 2 * math.pi
+            glVertex3f(math.cos(a1) * tip_w, height, math.sin(a1) * tip_w)
+            glVertex3f(math.cos(a2) * tip_w, height, math.sin(a2) * tip_w)
+        glEnd()
     
     @staticmethod
     def _draw_tree(dna: PlantDNA):

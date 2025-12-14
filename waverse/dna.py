@@ -158,8 +158,17 @@ class PlantType:
     CORAL = "coral"
     CRYSTAL = "crystal"
     ALIEN = "alien"
+    # New exotic types
+    VINE = "vine"                 # Climbing/trailing vines
+    SPINY_VINE = "spiny_vine"     # Thorny vines
+    OCTOPUS = "octopus"           # Recursive branching like octopus
+    TENTACLE = "tentacle"         # Upside-down dangling growths
+    SPIRAL = "spiral"             # Spiraling growth patterns
+    SEAWEED = "seaweed"           # Underwater swaying plants
     
-    ALL_TYPES = [GRASS, FLOWER, FERN, BUSH, SHRUB, TREE, TALL_TREE, PINE, PALM, WILLOW, CACTUS, MUSHROOM, CORAL, CRYSTAL, ALIEN]
+    ALL_TYPES = [GRASS, FLOWER, FERN, BUSH, SHRUB, TREE, TALL_TREE, PINE, PALM, WILLOW, 
+                 CACTUS, MUSHROOM, CORAL, CRYSTAL, ALIEN, VINE, SPINY_VINE, OCTOPUS, 
+                 TENTACLE, SPIRAL, SEAWEED]
 
 
 @dataclass
@@ -225,6 +234,36 @@ class PlantDNA:
     asymmetry: float = 0.1         # How asymmetric the growth is
     droop: float = 0.0             # How much branches droop
     wind_sway: float = 0.3         # Animation responsiveness (future)
+    
+    # Advanced growth patterns
+    recursive_depth: int = 1       # Levels of recursive branching (1-4)
+    growth_direction: float = 0.0  # -1 = droop down, 0 = up, 1 = spread horizontal
+    spiral_factor: float = 0.0     # Amount of spiral twist in growth
+    bulb_count: int = 0            # Number of bulbous growths
+    bulb_size: float = 0.0         # Size of bulbous growths
+    
+    # Surface details
+    bark_texture: str = "smooth"   # smooth, rough, scaly, peeling, ridged
+    surface_bumps: float = 0.0     # 0 = smooth, 1 = very bumpy
+    has_moss: bool = False         # Moss/lichen growth
+    moss_density: float = 0.0      # How much moss coverage
+    
+    # Additional colors
+    secondary_trunk_color: ColorGene = field(default_factory=lambda: ColorGene(0.3, 0.22, 0.12))
+    tip_color: ColorGene = field(default_factory=lambda: ColorGene(0.4, 0.6, 0.3))  # Tips of branches/leaves
+    fruit_color: ColorGene = field(default_factory=lambda: ColorGene(0.8, 0.2, 0.2))
+    moss_color: ColorGene = field(default_factory=lambda: ColorGene(0.2, 0.4, 0.15))
+    
+    # Special features
+    bioluminescent: bool = False   # Different from glow - more subtle
+    crystal_growth: bool = False   # Crystal formations on plant
+    spore_pods: bool = False       # Has spore pods
+    tendrils: int = 0              # Number of tendrils/vines
+    root_exposure: float = 0.0     # Visible above-ground roots (0-1)
+    
+    # Orientation
+    upside_down: bool = False      # Plant grows downward (hanging)
+    lean_angle: float = 0.0        # How much the plant leans (-1 to 1)
     
     def mutate(self, rng: np.random.Generator = None, strength: float = 0.5) -> "PlantDNA":
         """
@@ -293,6 +332,41 @@ class PlantDNA:
             new_dna.has_glow = not self.has_glow
             if new_dna.has_glow:
                 new_dna.glow_intensity = 0.3 + rng.random() * 0.5
+        
+        # Mutate new advanced parameters
+        new_dna.recursive_depth = max(1, min(4, self.recursive_depth + int(rng.normal(0, 0.5) * strength)))
+        new_dna.growth_direction = float(np.clip(self.growth_direction + rng.normal(0, rate), -1, 1))
+        new_dna.spiral_factor = float(np.clip(self.spiral_factor + rng.normal(0, rate), 0, 1))
+        new_dna.bulb_count = max(0, min(8, self.bulb_count + int(rng.normal(0, 0.5) * strength)))
+        new_dna.bulb_size = float(np.clip(self.bulb_size + rng.normal(0, rate), 0, 1))
+        
+        new_dna.surface_bumps = float(np.clip(self.surface_bumps + rng.normal(0, rate), 0, 1))
+        new_dna.moss_density = float(np.clip(self.moss_density + rng.normal(0, rate), 0, 1))
+        new_dna.root_exposure = float(np.clip(self.root_exposure + rng.normal(0, rate), 0, 1))
+        new_dna.lean_angle = float(np.clip(self.lean_angle + rng.normal(0, rate), -1, 1))
+        new_dna.tendrils = max(0, min(6, self.tendrils + int(rng.normal(0, 0.3) * strength)))
+        
+        # Mutate additional colors
+        new_dna.secondary_trunk_color = self.secondary_trunk_color.mutate(rng, strength)
+        new_dna.tip_color = self.tip_color.mutate(rng, strength)
+        new_dna.fruit_color = self.fruit_color.mutate(rng, strength)
+        new_dna.moss_color = self.moss_color.mutate(rng, strength)
+        
+        # Small chance to gain/lose new features
+        if rng.random() < 0.02 * strength:
+            new_dna.has_moss = not self.has_moss
+        if rng.random() < 0.02 * strength:
+            new_dna.bioluminescent = not self.bioluminescent
+        if rng.random() < 0.02 * strength:
+            new_dna.crystal_growth = not self.crystal_growth
+        if rng.random() < 0.02 * strength:
+            new_dna.spore_pods = not self.spore_pods
+        if rng.random() < 0.01 * strength:
+            new_dna.upside_down = not self.upside_down
+        
+        # Bark texture can mutate
+        if rng.random() < 0.03 * strength:
+            new_dna.bark_texture = rng.choice(["smooth", "rough", "scaly", "peeling", "ridged"])
         
         return new_dna
     
@@ -666,6 +740,150 @@ class PlantDNA:
                 )
             if dna.has_fruit:
                 dna.fruit_size = 0.1 + rng.random() * 0.3
+        
+        elif plant_type == PlantType.VINE:
+            # Climbing/trailing vines with many segments
+            dna.height_gene = Gene(3 + rng.random() * 8, 0.3, 15, 0.25)
+            dna.width_gene = Gene(0.05 + rng.random() * 0.1, 0.02, 0.2, 0.2)
+            # Many curved segments for vine growth
+            num_segments = 5 + rng.integers(0, 8)
+            dna.trunk_segments = [
+                SegmentGene(
+                    0.5 + rng.random() * 0.8,  # Length
+                    0.8 + rng.random() * 0.2,  # Width scale (thin)
+                    0.95,  # Minor taper
+                    (rng.random() - 0.5) * 1.0,  # Curve
+                    rng.random() * 0.4  # Twist
+                )
+                for _ in range(num_segments)
+            ]
+            dna.branch_count = 2 + rng.integers(0, 5)
+            dna.branch_angle = 0.3 + rng.random() * 0.5
+            dna.leaf_shape = "round"
+            dna.leaf_density = 0.4 + rng.random() * 0.4
+            dna.trunk_color = ColorGene.from_hsv(0.25 + rng.random() * 0.15, 0.4 + rng.random() * 0.3, 0.3 + rng.random() * 0.3)
+            dna.leaf_color = ColorGene.from_hsv(0.3 + rng.random() * 0.1, 0.5 + rng.random() * 0.3, 0.4 + rng.random() * 0.3)
+            
+        elif plant_type == PlantType.SPINY_VINE:
+            # Thorny vines - similar to vine but with spine features
+            dna.height_gene = Gene(2 + rng.random() * 6, 0.3, 12, 0.25)
+            dna.width_gene = Gene(0.08 + rng.random() * 0.12, 0.03, 0.25, 0.2)
+            num_segments = 4 + rng.integers(0, 6)
+            dna.trunk_segments = [
+                SegmentGene(
+                    0.4 + rng.random() * 0.6,
+                    0.85 + rng.random() * 0.15,
+                    0.9,
+                    (rng.random() - 0.5) * 0.8,
+                    rng.random() * 0.3
+                )
+                for _ in range(num_segments)
+            ]
+            dna.branch_count = 8 + rng.integers(0, 12)  # Many small spines
+            dna.branch_angle = 0.7 + rng.random() * 0.3  # Nearly perpendicular
+            dna.leaf_density = 0.1 + rng.random() * 0.2  # Few leaves
+            dna.trunk_color = ColorGene.from_hsv(0.08 + rng.random() * 0.1, 0.3 + rng.random() * 0.3, 0.25 + rng.random() * 0.25)
+            dna.leaf_color = ColorGene.from_hsv(0.1 + rng.random() * 0.05, 0.4 + rng.random() * 0.2, 0.3 + rng.random() * 0.2)
+            dna.has_flowers = rng.random() < 0.4
+            if dna.has_flowers:
+                dna.flower_color = ColorGene.from_hsv(rng.random(), 0.7 + rng.random() * 0.3, 0.8 + rng.random() * 0.2)
+            
+        elif plant_type == PlantType.OCTOPUS:
+            # Recursive branching like octopus tentacles
+            dna.height_gene = Gene(2 + rng.random() * 5, 0.4, 10, 0.3)
+            dna.width_gene = Gene(0.3 + rng.random() * 0.4, 0.1, 1.0, 0.25)
+            # Short central body, then branches
+            dna.trunk_segments = [
+                SegmentGene(0.3 + rng.random() * 0.3, 0.8, 0.7, 0, 0)
+            ]
+            dna.branch_count = 5 + rng.integers(0, 5)  # Tentacle count
+            dna.branch_angle = 0.4 + rng.random() * 0.3  # Spread out
+            dna.canopy_shape = "dome"
+            dna.asymmetry = 0.4 + rng.random() * 0.3  # Organic asymmetry
+            dna.leaf_density = 0
+            # Subdued ocean colors
+            hue = rng.choice([0.0, 0.05, 0.5, 0.55, 0.75])  # Reds, oranges, teals, purples
+            dna.trunk_color = ColorGene.from_hsv(hue, 0.4 + rng.random() * 0.4, 0.4 + rng.random() * 0.4)
+            dna.leaf_color = dna.trunk_color
+            dna.has_glow = rng.random() < 0.3
+            if dna.has_glow:
+                dna.glow_intensity = 0.3 + rng.random() * 0.4
+                dna.glow_color = ColorGene.from_hsv(hue, 0.5, 0.8)
+            
+        elif plant_type == PlantType.TENTACLE:
+            # Upside-down dangling growths (like hanging from ceiling)
+            dna.height_gene = Gene(3 + rng.random() * 7, 0.4, 12, 0.3)
+            dna.width_gene = Gene(0.1 + rng.random() * 0.15, 0.03, 0.3, 0.2)
+            # Many drooping segments
+            num_segments = 4 + rng.integers(0, 6)
+            dna.trunk_segments = [
+                SegmentGene(
+                    0.5 + rng.random() * 0.5,
+                    0.9 + rng.random() * 0.1,
+                    0.85,
+                    -0.2 - rng.random() * 0.3,  # Droop downward
+                    rng.random() * 0.2
+                )
+                for _ in range(num_segments)
+            ]
+            dna.branch_count = 3 + rng.integers(0, 4)
+            dna.branch_angle = 0.1 + rng.random() * 0.2  # Slight angle
+            dna.asymmetry = 0.2 + rng.random() * 0.2
+            # Pale/translucent colors
+            dna.trunk_color = ColorGene.from_hsv(rng.random(), 0.2 + rng.random() * 0.3, 0.6 + rng.random() * 0.3)
+            dna.leaf_color = dna.trunk_color
+            dna.has_glow = rng.random() < 0.5
+            if dna.has_glow:
+                dna.glow_intensity = 0.5 + rng.random() * 0.4
+                
+        elif plant_type == PlantType.SPIRAL:
+            # Spiraling growth patterns
+            dna.height_gene = Gene(2 + rng.random() * 6, 0.3, 10, 0.25)
+            dna.width_gene = Gene(0.15 + rng.random() * 0.2, 0.05, 0.5, 0.2)
+            # Many segments with consistent twist
+            num_segments = 6 + rng.integers(0, 8)
+            twist_dir = 1 if rng.random() > 0.5 else -1
+            dna.trunk_segments = [
+                SegmentGene(
+                    0.4 + rng.random() * 0.3,
+                    0.95,
+                    0.95,
+                    0.05 * i * twist_dir,  # Increasing curve
+                    0.15 * twist_dir  # Consistent twist
+                )
+                for i in range(num_segments)
+            ]
+            dna.branch_count = 0  # No branches, just spiral
+            dna.leaf_density = 0.3 + rng.random() * 0.3
+            dna.leaf_shape = "round"
+            hue = rng.random()
+            dna.trunk_color = ColorGene.from_hsv(hue, 0.5 + rng.random() * 0.3, 0.4 + rng.random() * 0.3)
+            dna.leaf_color = ColorGene.from_hsv((hue + 0.1) % 1.0, 0.6, 0.5)
+            
+        elif plant_type == PlantType.SEAWEED:
+            # Underwater swaying plants
+            dna.height_gene = Gene(2 + rng.random() * 8, 0.3, 12, 0.25)
+            dna.width_gene = Gene(0.05 + rng.random() * 0.1, 0.02, 0.2, 0.15)
+            # Long wavy segments
+            num_segments = 8 + rng.integers(0, 10)
+            dna.trunk_segments = [
+                SegmentGene(
+                    0.3 + rng.random() * 0.3,
+                    0.95,
+                    0.98,
+                    (rng.random() - 0.5) * 0.4,  # Gentle waves
+                    0
+                )
+                for _ in range(num_segments)
+            ]
+            dna.branch_count = 1 + rng.integers(0, 4)
+            dna.branch_angle = 0.1 + rng.random() * 0.2
+            dna.leaf_shape = "blade"
+            dna.leaf_density = 0.2 + rng.random() * 0.3
+            # Greens, browns, reds for seaweed
+            hue = rng.choice([0.25, 0.3, 0.35, 0.05, 0.95])
+            dna.trunk_color = ColorGene.from_hsv(hue, 0.3 + rng.random() * 0.4, 0.3 + rng.random() * 0.3)
+            dna.leaf_color = ColorGene.from_hsv(hue, 0.4 + rng.random() * 0.3, 0.4 + rng.random() * 0.3)
         
         return dna
 

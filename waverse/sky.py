@@ -223,8 +223,8 @@ class SkySystem:
     
     def get_sun_position(self) -> tuple:
         """Get sun position in sky (x, y, z) based on time and orbital shift."""
-        # Sun rises at 0.25 (dawn), peaks at 0.5 (noon), sets at 0.75 (dusk)
-        # Map time so sun is above horizon from 0.25 to 0.75
+        # Sun travels full circle: below horizon at night, above during day
+        # 0.0 = midnight (below), 0.25 = sunrise (horizon), 0.5 = noon (peak), 0.75 = sunset, 1.0 = midnight
         
         # Orbital tilt shifts over days (creates seasonal variation)
         orbit_phase = (self.day_count / self.ORBIT_SHIFT_PERIOD) * 2 * math.pi
@@ -233,14 +233,14 @@ class SkySystem:
         
         r = 600  # Distance to sun
         
-        # Sun arc: rises in east, peaks at noon, sets in west
-        # time 0.25 = sunrise (east), 0.5 = noon (top), 0.75 = sunset (west)
-        sun_progress = (self.time - 0.25) / 0.5  # 0 at sunrise, 1 at sunset
-        sun_angle = sun_progress * math.pi  # 0 to PI arc
+        # Full circular path: time 0->1 maps to angle 0->2π
+        # At time 0.5 (noon), sun is at top (angle = π/2)
+        # At time 0.0 (midnight), sun is at bottom (angle = -π/2)
+        sun_angle = (self.time - 0.25) * 2 * math.pi  # Shifted so 0.25 = horizon rising
         
-        # Position on arc
+        # Position on circular arc
         x = r * math.cos(sun_angle + azimuth_shift)  # East to West
-        y = r * math.sin(sun_angle)  # Up and down arc
+        y = r * math.sin(sun_angle)  # Up and down (negative = below horizon)
         
         # Apply tilt for north-south seasonal variation  
         z = y * math.sin(tilt) * 0.3 + r * 0.2
@@ -249,27 +249,17 @@ class SkySystem:
         return (x, y, z)
     
     def get_moon_position(self) -> tuple:
-        """Get moon position - visible at night (opposite of sun)."""
-        # Moon rises at 0.75 (dusk), peaks at 0.0 (midnight), sets at 0.25 (dawn)
-        # Moon has its own orbital shift
+        """Get moon position - opposite of sun, visible at night."""
+        # Moon is offset from sun by 0.5 (half day) - when sun is up, moon is down
         moon_orbit_phase = (self.day_count / (self.ORBIT_SHIFT_PERIOD * 1.3)) * 2 * math.pi
         moon_tilt = math.radians(self.BASE_ORBIT_TILT * 0.8) * math.cos(moon_orbit_phase)
         
         r = 500
         
-        # Moon arc: rises at dusk, peaks at midnight, sets at dawn
-        # Normalize time for moon: 0.75->0.25 maps to 0->1 (wrapping around midnight)
-        if self.time >= 0.75:
-            moon_progress = (self.time - 0.75) / 0.5  # 0.75 to 1.0 -> 0 to 0.5
-        elif self.time <= 0.25:
-            moon_progress = (self.time + 0.25) / 0.5  # 0 to 0.25 -> 0.5 to 1.0
-        else:
-            moon_progress = -1  # Moon below horizon during day
-        
-        if moon_progress < 0 or moon_progress > 1:
-            return (0, -500, 0)  # Below horizon
-        
-        moon_angle = moon_progress * math.pi
+        # Moon follows same circular path as sun, but offset by 0.5 (half cycle)
+        # At time 0.0 (midnight), moon is at top (angle = π/2)
+        # At time 0.5 (noon), moon is at bottom (angle = -π/2)
+        moon_angle = (self.time + 0.25) * 2 * math.pi  # Offset so 0.0 = moon at top
         
         x = -r * math.cos(moon_angle)  # Opposite direction from sun
         y = r * math.sin(moon_angle)
@@ -437,10 +427,9 @@ class SkySystem:
             glPopMatrix()
             glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
         
-        # Render sun (only during day: 0.20 to 0.80)
-        if 0.20 <= self.time <= 0.80:
-            sun_x, sun_y, sun_z = self.get_sun_position()
-            if sun_y > 0:  # Only when above horizon
+        # Render sun - show it rising from and setting below horizon
+        sun_x, sun_y, sun_z = self.get_sun_position()
+        if sun_y > -100:  # Show sun even slightly below horizon for rise/set effect
                 glPushMatrix()
                 glTranslatef(camera_x + sun_x, camera_y + sun_y, camera_z + sun_z)
                 # Scale sun based on DNA
@@ -450,10 +439,9 @@ class SkySystem:
                 self._render_sun_with_dna(sky_dna)
                 glPopMatrix()
         
-        # Render moon (only during night)
-        if self.time >= 0.70 or self.time <= 0.30:
-            moon_x, moon_y, moon_z = self.get_moon_position()
-            if moon_y > 0:  # Only when above horizon
+        # Render moon - show it rising from and setting below horizon
+        moon_x, moon_y, moon_z = self.get_moon_position()
+        if moon_y > -100:  # Show moon even slightly below horizon for rise/set effect
                 glPushMatrix()
                 glTranslatef(camera_x + moon_x, camera_y + moon_y, camera_z + moon_z)
                 # Scale moon based on DNA

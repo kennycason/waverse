@@ -25,6 +25,8 @@ import argparse
 import sys
 import os
 import shutil
+import random
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -46,7 +48,7 @@ def main():
         description="Waverse - Wave-Based World Explorer",
     )
     
-    parser.add_argument('--seed', '-s', type=int, default=42, help='World seed')
+    parser.add_argument('--seed', '-s', type=int, default=None, help='World seed (random if not specified)')
     parser.add_argument('--islands', action='store_true', help='Island world')
     parser.add_argument('--mountains', action='store_true', help='Mountain world')
     parser.add_argument('--psychedelic', '-p', action='store_true', help='Psychedelic world')
@@ -57,6 +59,14 @@ def main():
     if args.clear_cache:
         clear_cache()
         return
+    
+    # Generate random seed if not specified
+    if args.seed is None:
+        seed = int(time.time() * 1000) % (2**31)
+    else:
+        seed = args.seed
+    
+    print(f"  World seed: {seed}")
     
     # Choose world type
     if args.islands:
@@ -69,7 +79,7 @@ def main():
         config = WorldConfig.create_default()
     
     # Apply seed
-    config.seed = args.seed
+    config.seed = seed
     
     # Run!
     run_explorer(config)
