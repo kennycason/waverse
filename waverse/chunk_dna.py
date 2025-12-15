@@ -18,6 +18,38 @@ import copy
 Color = Tuple[float, float, float]
 
 
+# =============================================================================
+# MUTATION CONFIG - Easy to tweak! Future: these could evolve too! 
+# =============================================================================
+@dataclass
+class MutationConfig:
+    """Centralized mutation rates - tweak these to control evolution speed."""
+    # How often mutations happen (0.0 = never, 1.0 = always)
+    terrain_mutation_chance: float = 0.05   # 5% chance per chunk
+    sky_mutation_chance: float = 0.05       # 5% chance per chunk
+    
+    # How strong mutations are (higher = bigger color shifts)
+    terrain_mutation_strength: float = 0.06  # Noticeable but gradual
+    sky_mutation_strength: float = 0.05      # Slightly gentler for sky
+    
+    # Chance of "burst" mutations (sudden big changes)
+    burst_mutation_chance: float = 0.15      # 15% during a mutation
+    burst_mutation_strength: float = 0.25    # How big the burst is
+    
+    # Color range limits (wider = more psychedelic potential)
+    saturation_range: Tuple[float, float] = (0.3, 2.5)
+    brightness_range: Tuple[float, float] = (0.4, 1.8)
+    hue_shift_range: Tuple[float, float] = (-1.0, 1.0)  # Full rainbow
+    
+    # Sun/Moon size limits
+    sun_size_range: Tuple[float, float] = (0.5, 2.0)
+    moon_size_range: Tuple[float, float] = (0.5, 2.0)
+
+
+# Global config instance - import and modify to change behavior!
+MUTATION_CONFIG = MutationConfig()
+
+
 def _clamp(v: float, lo: float = 0.0, hi: float = 1.0) -> float:
     return max(lo, min(hi, v))
 
@@ -51,35 +83,42 @@ class TerrainPalette:
     brightness_mult: float = 1.0
     hue_shift: float = 0.0  # -0.1 to 0.1
     
-    def mutate(self, rng: np.random.Generator, strength: float = 0.02) -> "TerrainPalette":
-        """Create mutated copy. Very low strength for gradual change."""
-        # Only mutate sometimes
-        if rng.random() > 0.15:  # 85% chance of NO mutation
+    def mutate(self, rng: np.random.Generator, strength: float = None) -> "TerrainPalette":
+        """Create mutated copy using global MUTATION_CONFIG."""
+        cfg = MUTATION_CONFIG
+        strength = strength or cfg.terrain_mutation_strength
+        
+        # Check mutation chance
+        if rng.random() > cfg.terrain_mutation_chance:
             return copy.deepcopy(self)
         
         new_palette = copy.deepcopy(self)
         
-        # Very subtle color shifts
-        rate = strength * 0.5
-        new_palette.deep_water = _mutate_color(self.deep_water, rng, rate)
-        new_palette.shallow_water = _mutate_color(self.shallow_water, rng, rate)
-        new_palette.beach = _mutate_color(self.beach, rng, rate)
-        new_palette.grass = _mutate_color(self.grass, rng, rate)
-        new_palette.forest = _mutate_color(self.forest, rng, rate)
-        new_palette.hills = _mutate_color(self.hills, rng, rate)
-        new_palette.mountain = _mutate_color(self.mountain, rng, rate)
-        new_palette.snow = _mutate_color(self.snow, rng, rate)
+        # Apply color mutations
+        new_palette.deep_water = _mutate_color(self.deep_water, rng, strength)
+        new_palette.shallow_water = _mutate_color(self.shallow_water, rng, strength)
+        new_palette.beach = _mutate_color(self.beach, rng, strength)
+        new_palette.grass = _mutate_color(self.grass, rng, strength)
+        new_palette.forest = _mutate_color(self.forest, rng, strength)
+        new_palette.hills = _mutate_color(self.hills, rng, strength)
+        new_palette.mountain = _mutate_color(self.mountain, rng, strength)
+        new_palette.snow = _mutate_color(self.snow, rng, strength)
         
-        # Overall adjustments - allow wider ranges for psychedelic areas
-        new_palette.saturation_mult = _clamp(self.saturation_mult + rng.normal(0, 0.03), 0.5, 1.8)
-        new_palette.brightness_mult = _clamp(self.brightness_mult + rng.normal(0, 0.02), 0.6, 1.4)
-        # Hue shift can go full range for truly psychedelic colors
-        new_palette.hue_shift = _clamp(self.hue_shift + rng.normal(0, 0.015), -0.5, 0.5)
+        # Overall adjustments - use config ranges
+        new_palette.saturation_mult = _clamp(
+            self.saturation_mult + rng.normal(0, strength), 
+            cfg.saturation_range[0], cfg.saturation_range[1])
+        new_palette.brightness_mult = _clamp(
+            self.brightness_mult + rng.normal(0, strength * 0.8), 
+            cfg.brightness_range[0], cfg.brightness_range[1])
+        new_palette.hue_shift = _clamp(
+            self.hue_shift + rng.normal(0, strength * 0.5), 
+            cfg.hue_shift_range[0], cfg.hue_shift_range[1])
         
-        # Rare "burst" mutation - occasionally make a bigger color jump
-        if rng.random() < 0.05:  # 5% chance
-            burst_color = rng.choice(["grass", "forest", "hills", "mountain"])
-            burst_shift = rng.normal(0, 0.15)  # Larger shift
+        # Burst mutation - occasional bigger color jump
+        if rng.random() < cfg.burst_mutation_chance:
+            burst_color = rng.choice(["grass", "forest", "hills", "mountain", "water"])
+            burst_shift = rng.normal(0, cfg.burst_mutation_strength)
             if burst_color == "grass":
                 new_palette.grass = tuple(_clamp(c + burst_shift) for c in new_palette.grass)
             elif burst_color == "forest":
@@ -88,6 +127,8 @@ class TerrainPalette:
                 new_palette.hills = tuple(_clamp(c + burst_shift) for c in new_palette.hills)
             elif burst_color == "mountain":
                 new_palette.mountain = tuple(_clamp(c + burst_shift) for c in new_palette.mountain)
+            elif burst_color == "water":
+                new_palette.deep_water = tuple(_clamp(c + burst_shift) for c in new_palette.deep_water)
         
         return new_palette
     
@@ -192,13 +233,13 @@ class SkyDNA:
     fog_density: float = 1.0  # 0.7 to 1.3
     fog_color_shift: Color = (0.0, 0.0, 0.0)
     
-    def mutate(self, rng: np.random.Generator, strength: float = 0.01) -> "SkyDNA":
-        """
-        Create mutated copy. 
-        VERY low mutation rate - changes should span dozens of chunks.
-        """
-        # Only mutate 5% of the time for ultra-slow evolution
-        if rng.random() > 0.05:
+    def mutate(self, rng: np.random.Generator, strength: float = None) -> "SkyDNA":
+        """Create mutated copy using global MUTATION_CONFIG."""
+        cfg = MUTATION_CONFIG
+        strength = strength or cfg.sky_mutation_strength
+        
+        # Check mutation chance
+        if rng.random() > cfg.sky_mutation_chance:
             return copy.deepcopy(self)
         
         new_dna = copy.deepcopy(self)
@@ -207,32 +248,32 @@ class SkyDNA:
         mutation_type = rng.choice(["sun", "moon", "stars", "sky", "fog"], 
                                     p=[0.2, 0.2, 0.3, 0.2, 0.1])
         
-        tiny = strength * 0.3  # Even smaller for astral bodies
-        
         if mutation_type == "sun":
-            new_dna.sun_size = _clamp(self.sun_size + rng.normal(0, tiny), 0.5, 2.0)
-            new_dna.sun_color = _mutate_color(self.sun_color, rng, tiny)
-            new_dna.sun_glow_color = _mutate_color(self.sun_glow_color, rng, tiny)
-            new_dna.sun_intensity = _clamp(self.sun_intensity + rng.normal(0, tiny), 0.7, 1.3)
+            new_dna.sun_size = _clamp(self.sun_size + rng.normal(0, strength), 
+                                       cfg.sun_size_range[0], cfg.sun_size_range[1])
+            new_dna.sun_color = _mutate_color(self.sun_color, rng, strength)
+            new_dna.sun_glow_color = _mutate_color(self.sun_glow_color, rng, strength)
+            new_dna.sun_intensity = _clamp(self.sun_intensity + rng.normal(0, strength), 0.7, 1.3)
         
         elif mutation_type == "moon":
-            new_dna.moon_size = _clamp(self.moon_size + rng.normal(0, tiny), 0.5, 2.0)
-            new_dna.moon_color = _mutate_color(self.moon_color, rng, tiny)
-            new_dna.moon_glow = _clamp(self.moon_glow + rng.normal(0, tiny), 0.1, 0.6)
+            new_dna.moon_size = _clamp(self.moon_size + rng.normal(0, strength), 
+                                        cfg.moon_size_range[0], cfg.moon_size_range[1])
+            new_dna.moon_color = _mutate_color(self.moon_color, rng, strength)
+            new_dna.moon_glow = _clamp(self.moon_glow + rng.normal(0, strength), 0.1, 0.6)
         
         elif mutation_type == "stars":
-            new_dna.star_count_mult = _clamp(self.star_count_mult + rng.normal(0, tiny * 2), 0.5, 2.5)
-            new_dna.star_brightness = _clamp(self.star_brightness + rng.normal(0, tiny), 0.5, 1.5)
-            new_dna.star_color_variance = _clamp(self.star_color_variance + rng.normal(0, tiny), 0.1, 0.6)
-            new_dna.star_twinkle_speed = _clamp(self.star_twinkle_speed + rng.normal(0, tiny), 0.3, 2.0)
+            new_dna.star_count_mult = _clamp(self.star_count_mult + rng.normal(0, strength * 2), 0.5, 2.5)
+            new_dna.star_brightness = _clamp(self.star_brightness + rng.normal(0, strength), 0.5, 1.5)
+            new_dna.star_color_variance = _clamp(self.star_color_variance + rng.normal(0, strength), 0.1, 0.6)
+            new_dna.star_twinkle_speed = _clamp(self.star_twinkle_speed + rng.normal(0, strength), 0.3, 2.0)
         
         elif mutation_type == "sky":
-            new_dna.sky_day_tint = _mutate_color(self.sky_day_tint, rng, tiny)
-            new_dna.sky_night_tint = _mutate_color(self.sky_night_tint, rng, tiny)
+            new_dna.sky_day_tint = _mutate_color(self.sky_day_tint, rng, strength)
+            new_dna.sky_night_tint = _mutate_color(self.sky_night_tint, rng, strength)
         
         elif mutation_type == "fog":
-            new_dna.fog_density = _clamp(self.fog_density + rng.normal(0, tiny), 0.6, 1.5)
-            new_dna.fog_color_shift = _mutate_color(self.fog_color_shift, rng, tiny)
+            new_dna.fog_density = _clamp(self.fog_density + rng.normal(0, strength), 0.6, 1.5)
+            new_dna.fog_color_shift = _mutate_color(self.fog_color_shift, rng, strength)
         
         return new_dna
     
