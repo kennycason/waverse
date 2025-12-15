@@ -2517,6 +2517,7 @@ def run_explorer(config: WorldConfig = None):
                 elif event.key == pygame.K_p:  # P for Picture/Screenshot
                     take_screenshot(camera)
                 elif event.key == pygame.K_TAB:  # Tab = toggle menu
+                    print("  [KEYDOWN] Tab pressed")
                     camera.toggle_menu()
                 elif event.key == pygame.K_b:  # B = use current tool
                     if camera.current_tool == ToolType.SCAN:
@@ -2565,9 +2566,9 @@ def run_explorer(config: WorldConfig = None):
                 camera.rotate(*event.rel)
             elif event.type == pygame.JOYBUTTONDOWN:
                 # Handle joystick button press events (more reliable than polling)
+                print(f"  [JOYBUTTONDOWN] button={event.button} (START is {GamepadConfig.START})")
                 if event.button == GamepadConfig.START:
                     camera.toggle_menu()
-                    print(f"  [JOYBUTTONDOWN] START button pressed")
         
         # Keyboard input
         keys = pygame.key.get_pressed()
