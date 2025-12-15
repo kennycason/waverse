@@ -553,11 +553,11 @@ class PlantDNA:
                 )
                 for i in range(2 + rng.integers(0, 2))
             ]
-            dna.branch_count = 5 + rng.integers(0, 7)
+            dna.branch_count = 3 + rng.integers(0, 5)  # Reduced for perf
             dna.branch_angle = 0.25 + rng.random() * 0.4
             dna.branch_height = 0.4 + rng.random() * 0.35
-            dna.sub_branch_chance = 0.4 + rng.random() * 0.4  # 40-80% chance
-            dna.recursive_depth = 2 + rng.integers(0, 2)  # 2-3 levels of branching
+            dna.sub_branch_chance = 0.3 + rng.random() * 0.35  # 30-65% chance
+            dna.recursive_depth = 1 + rng.integers(0, 2)  # 1-2 levels of branching
             dna.canopy_shape = rng.choice(["dome", "cone", "umbrella", "weeping"])
             dna.canopy_spread = 0.4 + rng.random() * 0.5
             dna.droop = rng.random() * 0.4  # Some droop variation
@@ -578,11 +578,11 @@ class PlantDNA:
                 )
                 for i in range(3 + rng.integers(0, 3))
             ]
-            dna.branch_count = 6 + rng.integers(0, 8)
+            dna.branch_count = 4 + rng.integers(0, 5)  # Reduced for perf
             dna.branch_angle = 0.2 + rng.random() * 0.35
             dna.branch_height = 0.5 + rng.random() * 0.25
-            dna.sub_branch_chance = 0.5 + rng.random() * 0.35  # 50-85% chance
-            dna.recursive_depth = 2 + rng.integers(0, 3)  # 2-4 levels of branching
+            dna.sub_branch_chance = 0.35 + rng.random() * 0.35  # 35-70% chance
+            dna.recursive_depth = 1 + rng.integers(0, 2)  # 1-2 levels of branching
             dna.canopy_shape = rng.choice(["dome", "cone", "weeping"])
             dna.canopy_spread = 0.5 + rng.random() * 0.6
             dna.droop = rng.random() * 0.35
@@ -732,10 +732,10 @@ class PlantDNA:
                 )
                 for _ in range(1 + rng.integers(0, 5))
             ]
-            dna.branch_count = 3 + rng.integers(0, 12)
+            dna.branch_count = 2 + rng.integers(0, 6)  # Reduced for perf
             dna.branch_angle = rng.random()
-            dna.sub_branch_chance = 0.3 + rng.random() * 0.6  # High variance
-            dna.recursive_depth = 1 + rng.integers(0, 4)  # 1-4 levels - can be very complex
+            dna.sub_branch_chance = 0.25 + rng.random() * 0.4  # Reduced variance
+            dna.recursive_depth = 1 + rng.integers(0, 2)  # 1-2 levels max
             dna.droop = rng.random() * 0.8 - 0.3  # Can droop or reach up
             dna.leaf_shape = rng.choice(["round", "pointed", "frond", "needle", "blade"])
             dna.canopy_shape = rng.choice(["dome", "cone", "umbrella", "weeping", "columnar"])

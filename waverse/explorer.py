@@ -779,7 +779,7 @@ def warp_to_new_universe(camera, chunk_manager, chunk_renderer, flora_manager,
     camera.x = new_x
     camera.z = new_z
     camera.y = 100  # Start high, will settle to terrain
-    camera.flying = True
+    # Preserve current fly/walk mode - don't change camera.flying
     
     # Set status message
     camera.set_status(f"WARPED to ({new_x:.0f}, {new_z:.0f}) - New Waverse!", 4.0)
@@ -847,7 +847,7 @@ class Camera:
         self.z = 0
         self.yaw = 0
         self.pitch = -20
-        self.flying = True
+        self.flying = False  # Start in walking mode
         self.target_y = 40
         self.speed_level = 4  # Default speed (1.0x) - index into SPEED_LEVELS
         
@@ -873,6 +873,20 @@ class Camera:
         # Status message display
         self.status_message = ""
         self.status_timer = 0.0  # Seconds remaining to show message
+        
+        # Tool system
+        self.current_tool_index = 0  # Index into ToolType.ALL_TOOLS
+        self.current_tool = ToolType.SCAN
+        
+        # Markers for compass (list of (x, z, color, name) tuples)
+        self.markers = []
+        self.max_markers = 10
+        
+        # Menu state
+        self.menu_open = False
+        self.menu_tab = 0  # 0 = Inventory, 1 = Log, 2 = Controls
+        self.log_index = 0  # Currently selected log item
+        self.log_items = []  # List of logged DNA files
     
     def set_status(self, message: str, duration: float = 3.0):
         """Set a status message to display at bottom of screen."""
@@ -885,19 +899,6 @@ class Camera:
             self.status_timer -= dt
             if self.status_timer <= 0:
                 self.status_message = ""
-        
-        # Tool system
-        self.current_tool_index = 0  # Index into ToolType.ALL_TOOLS
-        self.current_tool = ToolType.SCAN
-        
-        # Markers for compass (list of (x, z, color, name) tuples)
-        self.markers = []
-        
-        # Menu state
-        self.menu_open = False
-        self.menu_tab = 0  # 0 = Inventory, 1 = Log
-        self.log_index = 0  # Currently selected log item
-        self.log_items = []  # List of logged DNA files
     
     def toggle_menu(self):
         """Toggle menu open/closed."""
@@ -928,19 +929,6 @@ class Camera:
         """Switch menu tab (direction: -1 = left, 1 = right)."""
         self.menu_tab = (self.menu_tab + direction) % 3  # 3 tabs: Inventory, Log, Controls
     
-    def add_marker(self):
-        """Add a marker at current position."""
-        colors = [(0.2, 0.6, 1.0), (0.2, 1.0, 0.4), (1.0, 0.8, 0.2), 
-                  (1.0, 0.4, 0.4), (0.8, 0.4, 1.0), (1.0, 0.6, 0.2)]
-        color = colors[len(self.markers) % len(colors)]
-        name = chr(ord('A') + len(self.markers))
-        self.markers.append((self.x, self.z, color, name))
-        print(f"  Marker {name} set at ({self.x:.1f}, {self.z:.1f})")
-    
-    def clear_markers(self):
-        """Clear all markers."""
-        self.markers.clear()
-        print("  Markers cleared")
     
     def next_tool(self):
         """Switch to next tool (R1)."""
@@ -953,10 +941,6 @@ class Camera:
         self.current_tool_index = (self.current_tool_index - 1) % len(ToolType.ALL_TOOLS)
         self.current_tool = ToolType.ALL_TOOLS[self.current_tool_index]
         print(f"  Tool: {self.current_tool}")
-        
-        # Waypoint markers (for compass)
-        self.markers = []  # List of (x, z, color, name) tuples
-        self.max_markers = 10  # Limit markers
     
     def rotate(self, dx, dy):
         if self.auto_fly_mode > 0:
@@ -1095,7 +1079,7 @@ class Camera:
             self.jump_velocity = self.jump_strength
     
     def add_marker(self):
-        """Add a marker at current position."""
+        """Add a marker at current position, using next available letter."""
         # Cycle through colors for different markers
         colors = [
             (0.2, 0.6, 1.0),   # Blue
@@ -1107,11 +1091,18 @@ class Camera:
             (1.0, 0.6, 0.6),   # Light red
         ]
         
-        # Use letters A, B, C...
+        # Find first unused letter
         labels = "ABCDEFGHIJ"
-        marker_idx = len(self.markers)
-        label = labels[marker_idx] if marker_idx < len(labels) else "?"
-        color = colors[marker_idx % len(colors)]
+        used_labels = {m[3] for m in self.markers}  # Get labels from existing markers
+        label = "?"
+        for l in labels:
+            if l not in used_labels:
+                label = l
+                break
+        
+        # Color based on letter index
+        label_idx = labels.index(label) if label in labels else 0
+        color = colors[label_idx % len(colors)]
         
         self.markers.append((self.x, self.z, color, label))
         
@@ -2334,12 +2325,12 @@ def draw_hud(display: tuple, camera: Camera, sky: SkySystem = None, climate: Cli
     if hud_font:
         _draw_text(hud_font, camera.current_tool, tool_x + 10, 26, (255, 255, 255))
     
-    # Draw status message at bottom of screen
+    # Draw status message at bottom-left of screen
     if camera.status_message and camera.status_timer > 0 and hud_font:
         # Fade out in last 0.5 seconds
         alpha = min(1.0, camera.status_timer / 0.5) if camera.status_timer < 0.5 else 1.0
         msg_color = (255, 255, 255)
-        msg_x = display[0] / 2 - len(camera.status_message) * 4  # Rough center
+        msg_x = 20  # Bottom-left
         msg_y = display[1] - 40
         _draw_text(hud_font, camera.status_message, msg_x, msg_y, msg_color)
     
