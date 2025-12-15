@@ -42,8 +42,8 @@ CHUNK_RENDER_DISTANCE = 20  # Massive view distance!
 PLAYER_HEIGHT = 2.5  # Eye height above ground (shorter = world feels bigger, fits through doors)
 WALK_SMOOTH_SPEED = 0.4  # Faster terrain following
 
-# Speed levels (keys: ` 1 2 3 4 5)
-SPEED_LEVELS = [0.05, 0.15, 0.3, 0.6, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0]  # Ultra-slow to insane
+# Speed levels (keys: ` 1 2 3 4 5) - extended for faster flight
+SPEED_LEVELS = [0.05, 0.15, 0.3, 0.6, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0, 256.0]  # Ultra-slow to ludicrous
 
 # LOD settings - aggressive LOD for huge view distance
 LOD_FULL_DISTANCE = 5      # Full detail within this range
@@ -420,6 +420,11 @@ def render_entity_to_png(entity, entity_type: str, filename: str, size: int = 51
     if entity_type == "plant":
         entity_height = entity.dna.height_gene.value * entity.scale
         entity_width = max(entity.dna.width_gene.value * entity.scale * 2, entity_height * 0.5)
+        # Plants grow UP from ground, so center is at height/2
+        center_y = entity_height * 0.4
+        # Bias view upward for plants
+        view_bottom_mult = 0.3
+        view_top_mult = 1.7
     else:
         # Animals - estimate size from body segments
         entity_height = 3.0
@@ -428,15 +433,20 @@ def render_entity_to_png(entity, entity_type: str, filename: str, size: int = 51
             # size is a tuple (width, height, depth), sum the max dimensions
             total_size = sum(max(seg.size) if isinstance(seg.size, tuple) else seg.size 
                            for seg in entity.dna.body_segments)
-            entity_height = total_size * 1.5
-            entity_width = total_size * 2
+            entity_height = total_size * 2.0  # More generous height estimate
+            entity_width = total_size * 2.5
+        # Animals are centered at origin, legs go down
+        center_y = 0.0  # Center on origin
+        # Use symmetric view for animals (centered)
+        view_bottom_mult = 1.2  # More room below for legs/tentacles
+        view_top_mult = 1.2    # Symmetric
     
     # Add padding - make view big enough
     view_size = max(entity_height, entity_width, 5.0) * 2.0
     half_size = view_size / 2
     
-    # Orthographic projection - center the view
-    glOrtho(-half_size, half_size, -half_size * 0.3, half_size * 1.7, -100, 100)
+    # Orthographic projection - different for plants vs animals
+    glOrtho(-half_size, half_size, -half_size * view_bottom_mult, half_size * view_top_mult, -100, 100)
     
     glMatrixMode(GL_MODELVIEW)
     glPushMatrix()
@@ -444,8 +454,8 @@ def render_entity_to_png(entity, entity_type: str, filename: str, size: int = 51
     
     # Look at entity from the front-right, slightly above
     gluLookAt(
-        half_size * 0.7, half_size * 0.5, half_size * 0.7,  # Eye position
-        0, entity_height * 0.4, 0,  # Look at center of entity
+        half_size * 0.7, half_size * 0.4, half_size * 0.7,  # Eye position
+        0, center_y, 0,  # Look at center of entity (different for plants vs animals)
         0, 1, 0   # Up vector
     )
     
@@ -883,8 +893,8 @@ class Camera:
         # Jump physics
         self.jumping = False
         self.jump_velocity = 0.0
-        self.gravity = 2.5  # Gravity acceleration (faster fall)
-        self.jump_strength = 0.5  # Initial jump velocity
+        self.gravity = 6.0  # Faster gravity for snappier falls
+        self.jump_strength = 0.85  # Higher jump - can reach ~1 story (5.5 units)
         
         # Auto-fly / Tour mode: 0=off, 1=wander
         self.auto_fly_mode = 0
@@ -1023,11 +1033,18 @@ class Camera:
         new_x = self.x + (forward * forward_x + right * right_x) * speed
         new_z = self.z + (forward * forward_z + right * right_z) * speed
         
+        # Player collision box: ~1m wide, PLAYER_HEIGHT tall (like a rod)
+        PLAYER_RADIUS = 1.0  # ~2ft wide collision box
+        
         # Check structure collision at new position
         blocked = False
         structure_floor = None
         if structure_manager:
-            blocked, structure_floor = structure_manager.check_collision(new_x, self.y, new_z)
+            blocked, structure_floor = structure_manager.check_collision(
+                new_x, self.y, new_z, 
+                radius=PLAYER_RADIUS, 
+                player_height=PLAYER_HEIGHT
+            )
         
         # Apply horizontal movement if not blocked
         if not blocked:
@@ -1048,17 +1065,31 @@ class Camera:
             # Calculate new Y position
             new_y = self.y + forward * forward_y * speed + up * speed
             
-            # Check for ceiling collision at new height
-            ceiling_blocked = False
-            if structure_manager and up > 0:
-                ceiling_blocked, _ = structure_manager.check_collision(self.x, new_y, self.z)
+            # Check for collision at new height (both UP and DOWN movement)
+            vertical_blocked = False
+            if structure_manager and up != 0:
+                vertical_blocked, floor_at_new = structure_manager.check_collision(
+                    self.x, new_y, self.z,
+                    radius=PLAYER_RADIUS,
+                    player_height=PLAYER_HEIGHT
+                )
+                # Also check if we're trying to go through a floor
+                if up < 0 and floor_at_new is not None:
+                    # Going down - don't go below the floor we're standing on
+                    if new_y < floor_at_new + PLAYER_HEIGHT:
+                        new_y = floor_at_new + PLAYER_HEIGHT
+                        vertical_blocked = False  # Not blocked, just clamped
             
-            if not ceiling_blocked:
+            if not vertical_blocked:
                 self.y = new_y
             
             # Recheck floor at new position
             if structure_manager:
-                _, new_floor = structure_manager.check_collision(self.x, self.y, self.z)
+                _, new_floor = structure_manager.check_collision(
+                    self.x, self.y, self.z,
+                    radius=PLAYER_RADIUS,
+                    player_height=PLAYER_HEIGHT
+                )
                 if new_floor is not None:
                     effective_ground = max(terrain_ground, new_floor + PLAYER_HEIGHT)
             
@@ -1078,7 +1109,22 @@ class Camera:
             if self.jumping:
                 # Apply jump physics
                 self.jump_velocity -= self.gravity * 0.016  # Gravity
-                self.y += self.jump_velocity
+                new_y = self.y + self.jump_velocity
+                
+                # Check for ceiling collision when jumping UP
+                ceiling_hit = False
+                if self.jump_velocity > 0 and structure_manager:
+                    ceiling_hit, _ = structure_manager.check_collision(
+                        self.x, new_y, self.z,
+                        radius=PLAYER_RADIUS,
+                        player_height=PLAYER_HEIGHT
+                    )
+                
+                if ceiling_hit:
+                    # Hit head on ceiling - stop upward momentum
+                    self.jump_velocity = 0.0
+                else:
+                    self.y = new_y
                 
                 # Landed?
                 if self.y <= effective_ground:

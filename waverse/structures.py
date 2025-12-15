@@ -49,11 +49,24 @@ class Wall:
                 corners.append((wx, wz))
         return corners
     
-    def check_collision(self, px: float, py: float, pz: float, radius: float = 0.5) -> bool:
-        """Check if a point collides with this wall."""
-        # Quick height check first
-        if py < self.y or py > self.y + self.height:
-            return False
+    def check_collision(self, px: float, py: float, pz: float, radius: float = 0.5, 
+                        player_height: float = 3.0) -> bool:
+        """Check if player body collides with this wall.
+        
+        Args:
+            px, py, pz: Player position (py is HEAD/camera height)
+            radius: Player collision radius
+            player_height: Height from feet to head
+        """
+        # Height overlap check: player body (feet to head) vs wall (base to top)
+        player_feet = py - player_height
+        player_head = py
+        wall_base = self.y
+        wall_top = self.y + self.height
+        
+        # Two ranges overlap if: start1 < end2 AND start2 < end1
+        if not (player_feet < wall_top and wall_base < player_head):
+            return False  # No vertical overlap
         
         # Transform player position to wall's local space
         rad = math.radians(self.rotation)
@@ -240,17 +253,19 @@ class Structure:
 def generate_tile_building(x: float, y: float, z: float, 
                            tiles_x: int = 3, tiles_z: int = 3,
                            floors: int = 2, 
-                           tile_size: float = 5.0,  # Bigger tiles for player scale
-                           floor_height: float = 5.5,  # Taller floors
+                           tile_size: float = 10.0,  # Large tiles for player scale
+                           floor_height: float = 14.0,  # Very tall floors - lots of headroom
                            seed: int = 42,
                            terrain_heights: List[float] = None) -> Structure:
     """
-    Generate a tile-based building like NMS.
-    - Grid of tiles (e.g. 3x3)
-    - Each tile has floor/ceiling panels
-    - Stair openings cut through floor tiles
-    - Walls around perimeter with door opening
-    - Various roof styles, window patterns, and wall decorations
+    Generate a tile-based building with proper doors, ramps, and varied designs.
+    
+    Features:
+    - Full-height door openings (truly empty, no header)
+    - Simple 45° ramps with landing space
+    - Pillars at tile joints extending to ground
+    - Windows, open walls, balconies for variety
+    - Multi-floor structures with proper stair openings
     """
     rng = np.random.default_rng(seed)
     
@@ -258,110 +273,132 @@ def generate_tile_building(x: float, y: float, z: float,
     
     width = tiles_x * tile_size
     depth = tiles_z * tile_size
-    
-    # Building style variations
-    building_style = rng.choice(["rustic", "modern", "alien", "ancient", "industrial"])
-    roof_style = rng.choice(["flat", "peaked", "dome", "terraced"])
-    has_windows = rng.random() < 0.7  # 70% have windows
-    window_style = rng.choice(["square", "tall", "round", "slit"])
-    has_balcony = floors > 1 and rng.random() < 0.3  # 30% chance per multi-story
-    has_pillars = rng.random() < 0.2  # 20% have exterior pillars
-    
-    # Colors with style-based variation
-    if building_style == "rustic":
-        wall_color = (0.5 + rng.random() * 0.2, 
-                      0.4 + rng.random() * 0.15, 
-                      0.3 + rng.random() * 0.1)
-        roof_color = (0.35, 0.28, 0.2)
-    elif building_style == "modern":
-        gray = 0.5 + rng.random() * 0.3
-        wall_color = (gray, gray, gray + 0.05)
-        roof_color = (0.3, 0.3, 0.32)
-    elif building_style == "alien":
-        wall_color = (0.3 + rng.random() * 0.3, 
-                      0.4 + rng.random() * 0.4, 
-                      0.5 + rng.random() * 0.3)
-        roof_color = (0.2, 0.3, 0.4)
-    elif building_style == "ancient":
-        wall_color = (0.65 + rng.random() * 0.15, 
-                      0.6 + rng.random() * 0.1, 
-                      0.5 + rng.random() * 0.1)
-        roof_color = (0.5, 0.45, 0.35)
-    else:  # industrial
-        wall_color = (0.4 + rng.random() * 0.1, 
-                      0.35 + rng.random() * 0.1, 
-                      0.3 + rng.random() * 0.1)
-        roof_color = (0.25, 0.25, 0.28)
-    
-    floor_color = (wall_color[0] * 0.7, wall_color[1] * 0.7, wall_color[2] * 0.7)
-    stair_color = (0.5, 0.45, 0.4)
-    window_color = (0.3, 0.4, 0.6)  # Bluish glass
-    
-    wall_thickness = 0.35
     hw = width / 2
     hd = depth / 2
-    pillar_color = (wall_color[0] * 0.6, wall_color[1] * 0.6, wall_color[2] * 0.6)
     
-    # Generate support pillars if building is on a slope
+    # Structure DNA - controls variety
+    building_style = rng.choice(["rustic", "modern", "alien", "ancient", "industrial", "tower", "warehouse"])
+    has_windows = rng.random() < 0.6  # 60% have windows
+    window_chance = 0.3 if has_windows else 0.0  # Per-wall segment
+    open_wall_chance = 0.15  # 15% chance of fully open wall segment (balcony/porch)
+    has_interior_pillars = floors > 1 and rng.random() < 0.4  # 40% multi-story have interior pillars
+    
+    # Colors based on style
+    style_colors = {
+        "rustic": ((0.55, 0.45, 0.35), (0.4, 0.32, 0.25)),
+        "modern": ((0.7, 0.7, 0.72), (0.35, 0.35, 0.38)),
+        "alien": ((0.35, 0.55, 0.65), (0.25, 0.4, 0.5)),
+        "ancient": ((0.7, 0.65, 0.55), (0.55, 0.5, 0.4)),
+        "industrial": ((0.45, 0.42, 0.38), (0.3, 0.28, 0.25)),
+        "tower": ((0.5, 0.5, 0.55), (0.4, 0.4, 0.45)),
+        "warehouse": ((0.6, 0.55, 0.5), (0.45, 0.4, 0.35)),
+    }
+    base_wall, base_roof = style_colors.get(building_style, style_colors["rustic"])
+    
+    # Add some random variation to colors
+    wall_color = tuple(max(0, min(1, c + rng.uniform(-0.1, 0.1))) for c in base_wall)
+    roof_color = tuple(max(0, min(1, c + rng.uniform(-0.05, 0.05))) for c in base_roof)
+    floor_color = tuple(c * 0.75 for c in wall_color)
+    pillar_color = tuple(c * 0.65 for c in wall_color)
+    ramp_color = tuple(c * 0.85 for c in wall_color)
+    
+    wall_thickness = 0.4
+    pillar_width = 0.5 + rng.random() * 0.3  # 0.5-0.8 width variation
+    
+    # =========================================================================
+    # SUPPORT PILLARS - At tile corners, extending to ground
+    # =========================================================================
+    min_ground = y  # Default to building base
     if terrain_heights is not None:
-        min_terrain = min(terrain_heights)
-        
-        # Add pillars at corners if there's a height difference
-        corner_positions = [
-            (x - hw + tile_size * 0.3, z - hd + tile_size * 0.3),  # -X -Z corner
-            (x + hw - tile_size * 0.3, z - hd + tile_size * 0.3),  # +X -Z corner
-            (x - hw + tile_size * 0.3, z + hd - tile_size * 0.3),  # -X +Z corner
-            (x + hw - tile_size * 0.3, z + hd - tile_size * 0.3),  # +X +Z corner
-        ]
-        
-        for idx, (px, pz) in enumerate(corner_positions):
-            corner_terrain = terrain_heights[idx]
-            pillar_height = y - corner_terrain
-            
-            # Only add pillar if there's significant height difference
-            if pillar_height > 0.5:
-                structure.pillars.append(Pillar(
-                    x=px, y_bottom=corner_terrain, y_top=y, z=pz,
-                    width=0.8, color=pillar_color
-                ))
-        
-        # Add middle pillars along edges for larger buildings
-        if tiles_x > 3 or tiles_z > 3:
-            edge_pillars = [
-                (x, z - hd + tile_size * 0.3),  # Mid front
-                (x, z + hd - tile_size * 0.3),  # Mid back
-                (x - hw + tile_size * 0.3, z),  # Mid left
-                (x + hw - tile_size * 0.3, z),  # Mid right
-            ]
-            avg_terrain = sum(terrain_heights) / 4
-            for px, pz in edge_pillars:
-                pillar_height = y - avg_terrain
-                if pillar_height > 0.5:
-                    structure.pillars.append(Pillar(
-                        x=px, y_bottom=avg_terrain, y_top=y, z=pz,
-                        width=0.6, color=pillar_color
-                    ))
+        min_ground = min(terrain_heights)
     
-    # Pick door wall (0=+Z, 1=-Z, 2=-X, 3=+X) and door tile
-    door_wall = rng.integers(0, 4)
+    # Pillars at each tile corner (joint positions)
+    for tx in range(tiles_x + 1):
+        for tz in range(tiles_z + 1):
+            # Skip some interior pillars for variety (keep corners always)
+            is_corner = (tx in [0, tiles_x]) and (tz in [0, tiles_z])
+            is_edge = (tx in [0, tiles_x]) or (tz in [0, tiles_z])
+            
+            if not is_corner and not is_edge:
+                # Interior pillar - only if has_interior_pillars
+                if not has_interior_pillars:
+                    continue
+                if rng.random() > 0.5:  # Skip some interior pillars
+                    continue
+            
+            px = x - hw + tx * tile_size
+            pz = z - hd + tz * tile_size
+            
+            # Calculate ground height at this position
+            if terrain_heights is not None:
+                # Interpolate from corner heights
+                tx_frac = tx / tiles_x
+                tz_frac = tz / tiles_z
+                h00, h10, h01, h11 = terrain_heights
+                ground_h = (h00 * (1-tx_frac) * (1-tz_frac) +
+                           h10 * tx_frac * (1-tz_frac) +
+                           h01 * (1-tx_frac) * tz_frac +
+                           h11 * tx_frac * tz_frac)
+            else:
+                ground_h = y
+            
+            pillar_height = y - ground_h
+            
+            # Add pillar at edges/corners - always extend to ground (with extra below for safety)
+            if is_edge or is_corner:
+                # Extend 2 units below ground to prevent visual gaps
+                safe_bottom = ground_h - 2.0
+                structure.pillars.append(Pillar(
+                    x=px, y_bottom=safe_bottom, y_top=y, z=pz,
+                    width=pillar_width if is_corner else pillar_width * 0.7,
+                    color=pillar_color
+                ))
+    
+    # =========================================================================
+    # DOOR SELECTION - Full height opening, truly empty
+    # =========================================================================
+    door_wall = rng.integers(0, 4)  # 0=+Z, 1=-Z, 2=-X, 3=+X
     if door_wall in [0, 1]:
         door_tile = rng.integers(0, tiles_x)
     else:
         door_tile = rng.integers(0, tiles_z)
     
-    # Pick stair tile (corner, not door tile on ground)
-    stair_tile_x = 0 if rng.random() < 0.5 else tiles_x - 1
-    stair_tile_z = 0 if rng.random() < 0.5 else tiles_z - 1
+    # =========================================================================
+    # RAMP SELECTION - 45° ramp with landing space
+    # =========================================================================
+    # Ramp needs 2 tiles: one for ramp, one for landing at top
+    # Place ramp along one wall, not in corner
+    if floors > 1:
+        if tiles_x >= 2:
+            ramp_tile_x = rng.integers(0, tiles_x - 1)  # Leave space for landing
+            ramp_tile_z = 0 if rng.random() < 0.5 else tiles_z - 1
+            ramp_direction = "x"  # Ramp goes along X axis
+        else:
+            ramp_tile_x = 0 if rng.random() < 0.5 else tiles_x - 1
+            ramp_tile_z = rng.integers(0, max(1, tiles_z - 1))
+            ramp_direction = "z"
+    else:
+        ramp_tile_x = ramp_tile_z = -1  # No ramp needed
+        ramp_direction = None
     
+    # =========================================================================
+    # GENERATE FLOORS
+    # =========================================================================
     for floor_idx in range(floors):
         floor_y = y + floor_idx * floor_height
         
-        # Floor tiles (except ground floor, and skip stair opening from below)
+        # --- Floor tiles (except ground floor) ---
         if floor_idx > 0:
             for tx in range(tiles_x):
                 for tz in range(tiles_z):
-                    # Skip stair opening (stair comes up from floor below)
-                    if tx == stair_tile_x and tz == stair_tile_z:
+                    # Skip ramp opening from below
+                    is_ramp_opening = False
+                    if ramp_direction == "x" and tx in [ramp_tile_x, ramp_tile_x + 1] and tz == ramp_tile_z:
+                        is_ramp_opening = True
+                    elif ramp_direction == "z" and tz in [ramp_tile_z, ramp_tile_z + 1] and tx == ramp_tile_x:
+                        is_ramp_opening = True
+                    
+                    if is_ramp_opening:
                         continue
                     
                     tile_x = x - hw + (tx + 0.5) * tile_size
@@ -369,118 +406,122 @@ def generate_tile_building(x: float, y: float, z: float,
                     
                     structure.floors.append(Floor(
                         x=tile_x, y=floor_y, z=tile_z,
-                        width=tile_size - 0.1,
-                        depth=tile_size - 0.1,
-                        thickness=0.25,
+                        width=tile_size - 0.15,
+                        depth=tile_size - 0.15,
+                        thickness=0.3,
                         color=floor_color
                     ))
         
-        # Perimeter walls as tile segments
-        door_height = 4.5  # Even taller doors to fit player (PLAYER_HEIGHT=2.5 + buffer)
+        # --- Walls ---
         wall_height = floor_height
+        
+        def add_wall_segment(wx, wz, rotation, is_door_pos):
+            """Add a wall segment, handling doors, windows, and open walls."""
+            # DOOR: Completely skip this wall segment (full height opening)
+            if is_door_pos and floor_idx == 0:
+                return  # No wall at all = empty door
+            
+            # OPEN WALL (balcony/porch): Skip on upper floors sometimes
+            if floor_idx > 0 and rng.random() < open_wall_chance:
+                # Add a railing instead (half-height wall)
+                structure.walls.append(Wall(
+                    x=wx, y=floor_y, z=wz,
+                    width=tile_size - 0.2, height=1.2,  # Railing height
+                    thickness=0.15, rotation=rotation, 
+                    color=(wall_color[0]*0.8, wall_color[1]*0.8, wall_color[2]*0.8)
+                ))
+                return
+            
+            # WINDOW: Add wall with gap in middle
+            if rng.random() < window_chance:
+                window_bottom = 1.5
+                window_height = 2.0
+                # Wall below window
+                structure.walls.append(Wall(
+                    x=wx, y=floor_y, z=wz,
+                    width=tile_size - 0.2, height=window_bottom,
+                    thickness=wall_thickness, rotation=rotation, color=wall_color
+                ))
+                # Wall above window
+                structure.walls.append(Wall(
+                    x=wx, y=floor_y + window_bottom + window_height, z=wz,
+                    width=tile_size - 0.2, height=wall_height - window_bottom - window_height,
+                    thickness=wall_thickness, rotation=rotation, color=wall_color
+                ))
+                return
+            
+            # SOLID WALL
+            structure.walls.append(Wall(
+                x=wx, y=floor_y, z=wz,
+                width=tile_size - 0.2, height=wall_height,
+                thickness=wall_thickness, rotation=rotation, color=wall_color
+            ))
         
         # Front wall (+Z side)
         for tx in range(tiles_x):
             wx = x - hw + (tx + 0.5) * tile_size
             wz = z + hd
-            is_door = (door_wall == 0 and tx == door_tile and floor_idx == 0)
-            
-            if is_door:
-                # Wall above door
-                structure.walls.append(Wall(
-                    x=wx, y=floor_y + door_height, z=wz,
-                    width=tile_size, height=wall_height - door_height,
-                    thickness=wall_thickness, rotation=0, color=wall_color
-                ))
-            else:
-                structure.walls.append(Wall(
-                    x=wx, y=floor_y, z=wz,
-                    width=tile_size, height=wall_height,
-                    thickness=wall_thickness, rotation=0, color=wall_color
-                ))
+            is_door = (door_wall == 0 and tx == door_tile)
+            add_wall_segment(wx, wz, 0, is_door)
         
         # Back wall (-Z side)
         for tx in range(tiles_x):
             wx = x - hw + (tx + 0.5) * tile_size
             wz = z - hd
-            is_door = (door_wall == 1 and tx == door_tile and floor_idx == 0)
-            
-            if is_door:
-                structure.walls.append(Wall(
-                    x=wx, y=floor_y + door_height, z=wz,
-                    width=tile_size, height=wall_height - door_height,
-                    thickness=wall_thickness, rotation=180, color=wall_color
-                ))
-            else:
-                structure.walls.append(Wall(
-                    x=wx, y=floor_y, z=wz,
-                    width=tile_size, height=wall_height,
-                    thickness=wall_thickness, rotation=180, color=wall_color
-                ))
+            is_door = (door_wall == 1 and tx == door_tile)
+            add_wall_segment(wx, wz, 180, is_door)
         
         # Left wall (-X side)
         for tz in range(tiles_z):
             wx = x - hw
             wz = z - hd + (tz + 0.5) * tile_size
-            is_door = (door_wall == 2 and tz == door_tile and floor_idx == 0)
-            
-            if is_door:
-                structure.walls.append(Wall(
-                    x=wx, y=floor_y + door_height, z=wz,
-                    width=tile_size, height=wall_height - door_height,
-                    thickness=wall_thickness, rotation=90, color=wall_color
-                ))
-            else:
-                structure.walls.append(Wall(
-                    x=wx, y=floor_y, z=wz,
-                    width=tile_size, height=wall_height,
-                    thickness=wall_thickness, rotation=90, color=wall_color
-                ))
+            is_door = (door_wall == 2 and tz == door_tile)
+            add_wall_segment(wx, wz, 90, is_door)
         
         # Right wall (+X side)
         for tz in range(tiles_z):
             wx = x + hw
             wz = z - hd + (tz + 0.5) * tile_size
-            is_door = (door_wall == 3 and tz == door_tile and floor_idx == 0)
-            
-            if is_door:
-                structure.walls.append(Wall(
-                    x=wx, y=floor_y + door_height, z=wz,
-                    width=tile_size, height=wall_height - door_height,
-                    thickness=wall_thickness, rotation=-90, color=wall_color
-                ))
-            else:
-                structure.walls.append(Wall(
-                    x=wx, y=floor_y, z=wz,
-                    width=tile_size, height=wall_height,
-                    thickness=wall_thickness, rotation=-90, color=wall_color
-                ))
+            is_door = (door_wall == 3 and tz == door_tile)
+            add_wall_segment(wx, wz, -90, is_door)
         
-        # Stairs to next floor (if not top floor)
-        if floor_idx < floors - 1:
-            stair_x = x - hw + (stair_tile_x + 0.5) * tile_size
-            stair_z = z - hd + (stair_tile_z + 0.5) * tile_size
-            
-            # Determine stair direction (toward center)
-            if stair_tile_x == 0:
-                stair_rot = 0  # Stairs go +X
-                stair_start_x = stair_x - tile_size * 0.35
-            else:
-                stair_rot = 180  # Stairs go -X
-                stair_start_x = stair_x + tile_size * 0.35
-            
-            structure.ramps.append(Ramp(
-                x=stair_start_x,
-                y_bottom=floor_y,
-                z=stair_z,
-                length=tile_size * 0.9,
-                height=floor_height,
-                width=tile_size * 0.7,
-                rotation=stair_rot,
-                color=stair_color
-            ))
+        # --- Ramp to next floor (if not top floor) ---
+        if floor_idx < floors - 1 and ramp_direction is not None:
+            if ramp_direction == "x":
+                ramp_start_x = x - hw + ramp_tile_x * tile_size
+                ramp_z = z - hd + (ramp_tile_z + 0.5) * tile_size
+                ramp_length = tile_size * 2 - 0.5  # Spans 2 tiles with margin
+                ramp_rot = 0 if ramp_tile_z == 0 else 0  # Along X axis
+                
+                structure.ramps.append(Ramp(
+                    x=ramp_start_x + 0.25,
+                    y_bottom=floor_y + 0.3,  # Slight step up
+                    z=ramp_z,
+                    length=ramp_length,
+                    height=floor_height - 0.3,
+                    width=tile_size * 0.8,
+                    rotation=ramp_rot,
+                    color=ramp_color
+                ))
+            else:  # ramp_direction == "z"
+                ramp_x = x - hw + (ramp_tile_x + 0.5) * tile_size
+                ramp_start_z = z - hd + ramp_tile_z * tile_size
+                ramp_length = tile_size * 2 - 0.5
+                
+                structure.ramps.append(Ramp(
+                    x=ramp_x,
+                    y_bottom=floor_y + 0.3,
+                    z=ramp_start_z + 0.25,
+                    length=ramp_length,
+                    height=floor_height - 0.3,
+                    width=tile_size * 0.8,
+                    rotation=90,  # Along Z axis
+                    color=ramp_color
+                ))
     
-    # Roof tiles (solid ceiling on top)
+    # =========================================================================
+    # ROOF
+    # =========================================================================
     roof_y = y + floors * floor_height
     for tx in range(tiles_x):
         for tz in range(tiles_z):
@@ -491,7 +532,7 @@ def generate_tile_building(x: float, y: float, z: float,
                 x=tile_x, y=roof_y, z=tile_z,
                 width=tile_size,
                 depth=tile_size,
-                thickness=0.35,
+                thickness=0.4,
                 color=roof_color
             ))
     
@@ -602,7 +643,7 @@ class StructureRenderer:
     
     @staticmethod
     def _draw_ramp(ramp: Ramp):
-        """Draw a ramp/stairs."""
+        """Draw a simple flat ramp/slope - just the walking surface, no side walls."""
         glPushMatrix()
         glTranslatef(ramp.x, ramp.y_bottom, ramp.z)
         glRotatef(ramp.rotation, 0, 1, 0)
@@ -610,42 +651,57 @@ class StructureRenderer:
         hw = ramp.width / 2
         length = ramp.length
         height = ramp.height
+        thickness = 0.3  # Thin platform
         
         glColor3f(*ramp.color)
         
+        # Calculate normal for the slope
+        # Slope goes from (0, 0) to (length, height)
+        slope_len = math.sqrt(length*length + height*height)
+        nx = -height / slope_len
+        ny = length / slope_len
+        
         glBegin(GL_QUADS)
-        # Ramp surface
-        glNormal3f(-height, length, 0)  # Perpendicular to slope
+        # Top surface (the walking surface)
+        glNormal3f(nx, ny, 0)
         glVertex3f(0, 0, -hw)
         glVertex3f(0, 0, hw)
         glVertex3f(length, height, hw)
         glVertex3f(length, height, -hw)
         
-        # Bottom
-        glNormal3f(0, -1, 0)
+        # Bottom surface (underneath the ramp)
+        glNormal3f(-nx, -ny, 0)
+        glVertex3f(0, -thickness, hw)
+        glVertex3f(0, -thickness, -hw)
+        glVertex3f(length, height - thickness, -hw)
+        glVertex3f(length, height - thickness, hw)
+        
+        # Front edge (at bottom of ramp)
+        glNormal3f(-1, 0, 0)
+        glVertex3f(0, -thickness, -hw)
+        glVertex3f(0, -thickness, hw)
         glVertex3f(0, 0, hw)
         glVertex3f(0, 0, -hw)
-        glVertex3f(length, 0, -hw)
-        glVertex3f(length, 0, hw)
         
-        # Sides
+        # Back edge (at top of ramp)
+        glNormal3f(1, 0, 0)
+        glVertex3f(length, height - thickness, hw)
+        glVertex3f(length, height - thickness, -hw)
+        glVertex3f(length, height, -hw)
+        glVertex3f(length, height, hw)
+        
+        # Side edges
         glNormal3f(0, 0, 1)
         glVertex3f(0, 0, hw)
-        glVertex3f(length, 0, hw)
+        glVertex3f(0, -thickness, hw)
+        glVertex3f(length, height - thickness, hw)
         glVertex3f(length, height, hw)
         
         glNormal3f(0, 0, -1)
-        glVertex3f(length, 0, -hw)
+        glVertex3f(0, -thickness, -hw)
         glVertex3f(0, 0, -hw)
         glVertex3f(length, height, -hw)
-        glEnd()
-        
-        # Back triangle
-        glBegin(GL_TRIANGLES)
-        glNormal3f(1, 0, 0)
-        glVertex3f(length, 0, -hw)
-        glVertex3f(length, 0, hw)
-        glVertex3f(length, height, 0)
+        glVertex3f(length, height - thickness, -hw)
         glEnd()
         
         glPopMatrix()
@@ -753,19 +809,32 @@ class StructureManager:
         if center_h < 3 or center_h > 50:  # Not underwater or extreme peaks
             return
         
-        # Sample terrain at corners (for slope support calculation)
-        # Use larger sampling area for bigger buildings
-        sample_radius = 4
+        # Pre-calculate building size to sample correct terrain positions
+        tiles_x_temp = 2 + rng.integers(0, 3)  # Same as below
+        tiles_z_temp = 2 + rng.integers(0, 3)
+        tile_size_temp = 10.0 + rng.random() * 4.0
+        
+        # Sample terrain at actual building corners (in heightmap coords)
+        building_half_width = int((tiles_x_temp * tile_size_temp / 2) / tile_scale)
+        building_half_depth = int((tiles_z_temp * tile_size_temp / 2) / tile_scale)
+        
+        # Clamp to valid heightmap range
+        h, w = heightmap.shape
+        x_min = max(0, local_x - building_half_width)
+        x_max = min(w - 1, local_x + building_half_width)
+        z_min = max(0, local_z - building_half_depth)
+        z_max = min(h - 1, local_z + building_half_depth)
+        
         corner_heights = [
-            heightmap[local_z-sample_radius, local_x-sample_radius] * height_scale,
-            heightmap[local_z-sample_radius, local_x+sample_radius] * height_scale,
-            heightmap[local_z+sample_radius, local_x-sample_radius] * height_scale,
-            heightmap[local_z+sample_radius, local_x+sample_radius] * height_scale,
+            heightmap[z_min, x_min] * height_scale,  # -X -Z corner
+            heightmap[z_min, x_max] * height_scale,  # +X -Z corner
+            heightmap[z_max, x_min] * height_scale,  # -X +Z corner
+            heightmap[z_max, x_max] * height_scale,  # +X +Z corner
         ]
         max_slope = max(corner_heights) - min(corner_heights)
         
-        # Allow buildings on steeper slopes now (pillars will handle it)
-        if max_slope > 12:  # But not too extreme
+        # Allow buildings on steeper slopes (pillars will handle it)
+        if max_slope > 20:  # But not too extreme
             return
         
         # IMPORTANT: Scale local coordinates by tile_scale to get world coords
@@ -774,10 +843,21 @@ class StructureManager:
         # Use the maximum height as the floor level (building sits on top)
         world_y = max(corner_heights)
         
-        floors = 1 + rng.integers(0, 4)  # 1-4 floors
-        tiles_x = 2 + rng.integers(0, 5)  # 2-6 tiles wide (bigger!)
-        tiles_z = 2 + rng.integers(0, 5)  # 2-6 tiles deep
-        tile_size = 4.5 + rng.random() * 2.0  # 4.5-6.5 per tile (bigger!)
+        # Building size with bias toward multi-floor and larger structures
+        floor_roll = rng.random()
+        if floor_roll < 0.2:
+            floors = 1  # 20% single floor
+        elif floor_roll < 0.5:
+            floors = 2  # 30% two floors
+        elif floor_roll < 0.8:
+            floors = 3  # 30% three floors
+        else:
+            floors = 4 + rng.integers(0, 3)  # 20% tall (4-6 floors)
+        
+        # Use pre-calculated values from terrain sampling above
+        tiles_x = tiles_x_temp
+        tiles_z = tiles_z_temp
+        tile_size = tile_size_temp
         
         building = generate_tile_building(
             world_x, world_y, world_z,
@@ -805,9 +885,9 @@ class StructureManager:
             if not structure.is_nearby(px, pz, 60):
                 continue
             
-            # Check walls
+            # Check walls - use player body height for proper collision
             for wall in structure.walls:
-                if wall.check_collision(px, py, pz, radius):
+                if wall.check_collision(px, py, pz, radius, player_height):
                     blocked = True
             
             # Check floors (walking on) and ceilings (head hits)
