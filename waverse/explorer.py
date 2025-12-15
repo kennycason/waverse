@@ -586,10 +586,37 @@ def log_dna_at_cursor(camera, flora_manager, animal_manager):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = os.path.join(dna_log_dir, f"{best_type}_dna_{timestamp}.json")
     
-    # Convert DNA to dict and save
+    # Convert DNA to dict and save with location info
     try:
         dna_dict = asdict(best_entity.dna)
-        dna_string = json.dumps(dna_dict, indent=2, default=str)
+        
+        # Calculate chunk ID from entity position
+        entity_cx = int(best_entity.x // 32)
+        entity_cz = int(best_entity.z // 32)
+        
+        # Create full log entry with location context
+        log_entry = {
+            "entity_type": best_type,
+            "position": {
+                "x": round(best_entity.x, 2),
+                "y": round(best_entity.y, 2),
+                "z": round(best_entity.z, 2)
+            },
+            "chunk": {
+                "cx": entity_cx,
+                "cz": entity_cz,
+                "id": f"({entity_cx}, {entity_cz})"
+            },
+            "camera_position": {
+                "x": round(camera.x, 2),
+                "y": round(camera.y, 2),
+                "z": round(camera.z, 2)
+            },
+            "distance": round(best_ray_dist, 2),
+            "dna": dna_dict
+        }
+        
+        dna_string = json.dumps(log_entry, indent=2, default=str)
         
         with open(filename, "w") as f:
             f.write(dna_string)
@@ -607,6 +634,8 @@ def log_dna_at_cursor(camera, flora_manager, animal_manager):
         # Print full info
         print(f"\n  ========== LOG {best_type.upper()} DNA ==========")
         print(f"  Type: {type_name}")
+        print(f"  Position: ({best_entity.x:.1f}, {best_entity.y:.1f}, {best_entity.z:.1f})")
+        print(f"  Chunk: ({entity_cx}, {entity_cz})")
         print(f"  Distance: {best_ray_dist:.1f} units")
         print(f"  Accuracy: {best_perp_dist:.2f} (0 = perfect aim)")
         print(f"  Saved: {filename}")
@@ -1065,6 +1094,11 @@ class Camera:
                     self.y += diff * 0.5  # Fast snap
                 else:
                     self.y += diff * WALK_SMOOTH_SPEED  # Smooth follow
+            
+            # HARD FLOOR: Never let camera go below terrain on steep hills
+            min_height = terrain_h + PLAYER_HEIGHT + 0.5  # Extra 0.5 buffer
+            if self.y < min_height:
+                self.y = min_height
             
             # Fly when pressing up (H key or R3)
             if up > 0:
@@ -2398,7 +2432,7 @@ def run_explorer(config: WorldConfig = None):
     setup_opengl()
     
     glMatrixMode(GL_PROJECTION)
-    gluPerspective(75, display[0]/display[1], 0.5, 2000)  # Wide FOV, horizon-level clip plane
+    gluPerspective(75, display[0]/display[1], 1.0, 2000)  # Wide FOV, near clip at 1.0 to prevent terrain clipping
     glMatrixMode(GL_MODELVIEW)
     
     # Create world with background chunk worker

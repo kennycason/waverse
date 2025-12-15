@@ -159,14 +159,26 @@ class Ramp:
 
 
 @dataclass
+class Pillar:
+    """A vertical support pillar/leg for buildings on slopes."""
+    x: float          # Center X
+    y_bottom: float   # Bottom Y (ground level)
+    y_top: float      # Top Y (connects to floor)
+    z: float          # Center Z
+    width: float = 0.6  # Square pillar width
+    color: Tuple[float, float, float] = (0.4, 0.38, 0.35)
+
+
+@dataclass
 class Structure:
-    """A complete structure made of walls, floors, and ramps."""
+    """A complete structure made of walls, floors, ramps, and pillars."""
     x: float          # World X center
     y: float          # World Y base
     z: float          # World Z center
     walls: List[Wall] = field(default_factory=list)
     floors: List[Floor] = field(default_factory=list)
     ramps: List[Ramp] = field(default_factory=list)
+    pillars: List[Pillar] = field(default_factory=list)
     
     # Bounding box for quick culling
     bbox_min: Tuple[float, float, float] = (0, 0, 0)
@@ -204,6 +216,15 @@ class Structure:
             min_z = min(min_z, ramp.z - ramp.width/2)
             max_z = max(max_z, ramp.z + ramp.width/2)
         
+        for pillar in self.pillars:
+            hw = pillar.width / 2
+            min_x = min(min_x, pillar.x - hw)
+            max_x = max(max_x, pillar.x + hw)
+            min_y = min(min_y, pillar.y_bottom)
+            max_y = max(max_y, pillar.y_top)
+            min_z = min(min_z, pillar.z - hw)
+            max_z = max(max_z, pillar.z + hw)
+        
         self.bbox_min = (min_x, min_y, min_z)
         self.bbox_max = (max_x, max_y, max_z)
     
@@ -219,9 +240,10 @@ class Structure:
 def generate_tile_building(x: float, y: float, z: float, 
                            tiles_x: int = 3, tiles_z: int = 3,
                            floors: int = 2, 
-                           tile_size: float = 4.0,
-                           floor_height: float = 4.5,
-                           seed: int = 42) -> Structure:
+                           tile_size: float = 5.0,  # Bigger tiles for player scale
+                           floor_height: float = 5.5,  # Taller floors
+                           seed: int = 42,
+                           terrain_heights: List[float] = None) -> Structure:
     """
     Generate a tile-based building like NMS.
     - Grid of tiles (e.g. 3x3)
@@ -278,6 +300,47 @@ def generate_tile_building(x: float, y: float, z: float,
     wall_thickness = 0.35
     hw = width / 2
     hd = depth / 2
+    pillar_color = (wall_color[0] * 0.6, wall_color[1] * 0.6, wall_color[2] * 0.6)
+    
+    # Generate support pillars if building is on a slope
+    if terrain_heights is not None:
+        min_terrain = min(terrain_heights)
+        
+        # Add pillars at corners if there's a height difference
+        corner_positions = [
+            (x - hw + tile_size * 0.3, z - hd + tile_size * 0.3),  # -X -Z corner
+            (x + hw - tile_size * 0.3, z - hd + tile_size * 0.3),  # +X -Z corner
+            (x - hw + tile_size * 0.3, z + hd - tile_size * 0.3),  # -X +Z corner
+            (x + hw - tile_size * 0.3, z + hd - tile_size * 0.3),  # +X +Z corner
+        ]
+        
+        for idx, (px, pz) in enumerate(corner_positions):
+            corner_terrain = terrain_heights[idx]
+            pillar_height = y - corner_terrain
+            
+            # Only add pillar if there's significant height difference
+            if pillar_height > 0.5:
+                structure.pillars.append(Pillar(
+                    x=px, y_bottom=corner_terrain, y_top=y, z=pz,
+                    width=0.8, color=pillar_color
+                ))
+        
+        # Add middle pillars along edges for larger buildings
+        if tiles_x > 3 or tiles_z > 3:
+            edge_pillars = [
+                (x, z - hd + tile_size * 0.3),  # Mid front
+                (x, z + hd - tile_size * 0.3),  # Mid back
+                (x - hw + tile_size * 0.3, z),  # Mid left
+                (x + hw - tile_size * 0.3, z),  # Mid right
+            ]
+            avg_terrain = sum(terrain_heights) / 4
+            for px, pz in edge_pillars:
+                pillar_height = y - avg_terrain
+                if pillar_height > 0.5:
+                    structure.pillars.append(Pillar(
+                        x=px, y_bottom=avg_terrain, y_top=y, z=pz,
+                        width=0.6, color=pillar_color
+                    ))
     
     # Pick door wall (0=+Z, 1=-Z, 2=-X, 3=+X) and door tile
     door_wall = rng.integers(0, 4)
@@ -313,7 +376,7 @@ def generate_tile_building(x: float, y: float, z: float,
                     ))
         
         # Perimeter walls as tile segments
-        door_height = 3.5  # Taller doors to fit player comfortably
+        door_height = 4.5  # Even taller doors to fit player (PLAYER_HEIGHT=2.5 + buffer)
         wall_height = floor_height
         
         # Front wall (+Z side)
@@ -588,6 +651,46 @@ class StructureRenderer:
         glPopMatrix()
     
     @staticmethod
+    def _draw_pillar(pillar: Pillar):
+        """Draw a vertical support pillar."""
+        glPushMatrix()
+        glTranslatef(pillar.x, pillar.y_bottom, pillar.z)
+        
+        hw = pillar.width / 2
+        h = pillar.y_top - pillar.y_bottom
+        
+        glColor3f(*pillar.color)
+        
+        glBegin(GL_QUADS)
+        # Front
+        glNormal3f(0, 0, 1)
+        glVertex3f(-hw, 0, hw)
+        glVertex3f(hw, 0, hw)
+        glVertex3f(hw, h, hw)
+        glVertex3f(-hw, h, hw)
+        # Back
+        glNormal3f(0, 0, -1)
+        glVertex3f(hw, 0, -hw)
+        glVertex3f(-hw, 0, -hw)
+        glVertex3f(-hw, h, -hw)
+        glVertex3f(hw, h, -hw)
+        # Left
+        glNormal3f(-1, 0, 0)
+        glVertex3f(-hw, 0, -hw)
+        glVertex3f(-hw, 0, hw)
+        glVertex3f(-hw, h, hw)
+        glVertex3f(-hw, h, -hw)
+        # Right
+        glNormal3f(1, 0, 0)
+        glVertex3f(hw, 0, hw)
+        glVertex3f(hw, 0, -hw)
+        glVertex3f(hw, h, -hw)
+        glVertex3f(hw, h, hw)
+        glEnd()
+        
+        glPopMatrix()
+    
+    @staticmethod
     def render_structure(structure: Structure, cam_x: float, cam_z: float):
         """Render a structure with LOD."""
         # Distance check
@@ -606,6 +709,9 @@ class StructureRenderer:
         
         for ramp in structure.ramps:
             StructureRenderer._draw_ramp(ramp)
+        
+        for pillar in structure.pillars:
+            StructureRenderer._draw_pillar(pillar)
 
 
 class StructureManager:
@@ -634,38 +740,44 @@ class StructureManager:
         rng = np.random.default_rng(chunk_seed)
         
         # Low chance of building per chunk
-        if rng.random() > 0.02:  # 2% chance
+        if rng.random() > 0.03:  # 3% chance (slightly more buildings)
             return
         
-        # Find a flat spot
+        # Find a spot
         h, w = heightmap.shape
         local_x = rng.integers(8, w - 8)
         local_z = rng.integers(8, h - 8)
         
-        # Check if reasonably flat
+        # Check height range
         center_h = heightmap[local_z, local_x]
-        if center_h < 5 or center_h > 40:  # Not in water or on mountains
+        if center_h < 3 or center_h > 50:  # Not underwater or extreme peaks
             return
         
-        # Check flatness
-        heights = [
-            heightmap[local_z-2, local_x-2],
-            heightmap[local_z-2, local_x+2],
-            heightmap[local_z+2, local_x-2],
-            heightmap[local_z+2, local_x+2],
+        # Sample terrain at corners (for slope support calculation)
+        # Use larger sampling area for bigger buildings
+        sample_radius = 4
+        corner_heights = [
+            heightmap[local_z-sample_radius, local_x-sample_radius] * height_scale,
+            heightmap[local_z-sample_radius, local_x+sample_radius] * height_scale,
+            heightmap[local_z+sample_radius, local_x-sample_radius] * height_scale,
+            heightmap[local_z+sample_radius, local_x+sample_radius] * height_scale,
         ]
-        if max(heights) - min(heights) > 3:  # Too hilly
+        max_slope = max(corner_heights) - min(corner_heights)
+        
+        # Allow buildings on steeper slopes now (pillars will handle it)
+        if max_slope > 12:  # But not too extreme
             return
         
         # IMPORTANT: Scale local coordinates by tile_scale to get world coords
         world_x = chunk_world_x + local_x * tile_scale
         world_z = chunk_world_z + local_z * tile_scale
-        world_y = center_h * height_scale
+        # Use the maximum height as the floor level (building sits on top)
+        world_y = max(corner_heights)
         
         floors = 1 + rng.integers(0, 4)  # 1-4 floors
-        tiles_x = 2 + rng.integers(0, 4)  # 2-5 tiles wide
-        tiles_z = 2 + rng.integers(0, 4)  # 2-5 tiles deep
-        tile_size = 3.5 + rng.random() * 1.5  # 3.5-5.0 per tile
+        tiles_x = 2 + rng.integers(0, 5)  # 2-6 tiles wide (bigger!)
+        tiles_z = 2 + rng.integers(0, 5)  # 2-6 tiles deep
+        tile_size = 4.5 + rng.random() * 2.0  # 4.5-6.5 per tile (bigger!)
         
         building = generate_tile_building(
             world_x, world_y, world_z,
@@ -673,7 +785,8 @@ class StructureManager:
             tiles_z=tiles_z,
             floors=floors,
             tile_size=tile_size,
-            seed=chunk_seed
+            seed=chunk_seed,
+            terrain_heights=corner_heights  # Pass terrain heights for pillar generation
         )
         self.add_structure(building)
     
