@@ -352,7 +352,7 @@ def save_position(camera, seed: int):
         print(f"  Error saving: {e}")
 
 
-def take_screenshot():
+def take_screenshot(camera=None):
     """Take a screenshot of the current view including HUD."""
     import os
     from datetime import datetime
@@ -385,6 +385,10 @@ def take_screenshot():
     # Save the screenshot
     pygame.image.save(surface, filename)
     print(f"  [Screenshot] Saved: {filename}")
+    
+    # Set status message if camera provided
+    if camera:
+        camera.set_status(f"Saved: {filename}", 3.0)
     
     return filename
 
@@ -421,7 +425,9 @@ def render_entity_to_png(entity, entity_type: str, filename: str, size: int = 51
         entity_height = 3.0
         entity_width = 3.0
         if hasattr(entity.dna, 'body_segments') and entity.dna.body_segments:
-            total_size = sum(seg.size for seg in entity.dna.body_segments)
+            # size is a tuple (width, height, depth), sum the max dimensions
+            total_size = sum(max(seg.size) if isinstance(seg.size, tuple) else seg.size 
+                           for seg in entity.dna.body_segments)
             entity_height = total_size * 1.5
             entity_width = total_size * 2
     
@@ -614,13 +620,16 @@ def log_dna_at_cursor(camera, flora_manager, animal_manager):
             print(f"  DNA: {compact_dna}")
         print(f"  ==========================================\n")
         
+        # Set status message
+        camera.set_status(f"SCANNED {best_type.upper()} DNA - saved to log", 3.0)
+        
         return filename
     except Exception as e:
         print(f"  Error logging DNA: {e}")
         return None
 
 
-def modify_terrain_at_cursor(camera, chunk_manager, mode: str = "MINE", amount: float = 2.0):
+def modify_terrain_at_cursor(camera, chunk_manager, mode: str = "MINE", amount: float = 2.0, set_status: bool = True):
     """Modify terrain at cursor position (MINE = lower, FILL = raise).
     
     Args:
@@ -628,6 +637,7 @@ def modify_terrain_at_cursor(camera, chunk_manager, mode: str = "MINE", amount: 
         chunk_manager: ChunkManager for terrain access
         mode: "MINE" to lower terrain, "FILL" to raise terrain
         amount: How much to modify (default 2.0 units)
+        set_status: Whether to show status message
     """
     # Get look direction
     look_x, look_y, look_z = camera.get_forward_vector()
@@ -651,8 +661,8 @@ def modify_terrain_at_cursor(camera, chunk_manager, mode: str = "MINE", amount: 
             continue
         
         # Local coordinates within chunk
-        local_x = int((px - chunk.world_x) / chunk.tile_size)
-        local_z = int((pz - chunk.world_z) / chunk.tile_size)
+        local_x = int((px - chunk.world_x) / TILE_SCALE)
+        local_z = int((pz - chunk.world_z) / TILE_SCALE)
         
         # Bounds check
         h, w = chunk.heightmap.shape
@@ -661,34 +671,26 @@ def modify_terrain_at_cursor(camera, chunk_manager, mode: str = "MINE", amount: 
             
             # Check if ray is at or below terrain
             if py <= terrain_height:
-                # Found intersection! Modify terrain
-                if mode == "MINE":
-                    # Lower terrain
-                    delta = -amount / HEIGHT_SCALE
-                    chunk.heightmap[local_z, local_x] += delta
-                    
-                    # Also affect neighbors slightly for smoother result
-                    for dz in [-1, 0, 1]:
-                        for dx in [-1, 0, 1]:
-                            nx, nz = local_x + dx, local_z + dz
-                            if 0 <= nx < w and 0 <= nz < h and (dx != 0 or dz != 0):
-                                chunk.heightmap[nz, nx] += delta * 0.3
-                    
-                    print(f"  [MINE] Lowered terrain at ({px:.1f}, {pz:.1f})")
-                    
-                elif mode == "FILL":
-                    # Raise terrain
-                    delta = amount / HEIGHT_SCALE
-                    chunk.heightmap[local_z, local_x] += delta
-                    
-                    # Also affect neighbors slightly
-                    for dz in [-1, 0, 1]:
-                        for dx in [-1, 0, 1]:
-                            nx, nz = local_x + dx, local_z + dz
-                            if 0 <= nx < w and 0 <= nz < h and (dx != 0 or dz != 0):
-                                chunk.heightmap[nz, nx] += delta * 0.3
-                    
-                    print(f"  [FILL] Raised terrain at ({px:.1f}, {pz:.1f})")
+                # Found intersection! Modify terrain with smooth falloff
+                brush_radius = 3  # Larger brush for smoother dents
+                delta_base = (-amount if mode == "MINE" else amount) / HEIGHT_SCALE
+                
+                # Apply Gaussian-like falloff over brush area
+                for dz in range(-brush_radius, brush_radius + 1):
+                    for dx in range(-brush_radius, brush_radius + 1):
+                        nx, nz = local_x + dx, local_z + dz
+                        if 0 <= nx < w and 0 <= nz < h:
+                            # Calculate distance-based falloff (smooth Gaussian-like)
+                            dist = math.sqrt(dx * dx + dz * dz)
+                            if dist <= brush_radius:
+                                # Smooth falloff: 1.0 at center, 0 at edge
+                                falloff = (1.0 - (dist / brush_radius)) ** 2
+                                chunk.heightmap[nz, nx] += delta_base * falloff
+                
+                action = "MINE" if mode == "MINE" else "FILL"
+                print(f"  [{action}] Modified terrain at ({px:.1f}, {pz:.1f})")
+                if set_status:
+                    camera.set_status(f"{action} at ({px:.0f}, {pz:.0f})", 1.5)
                 
                 # Mark chunk as needing re-render
                 chunk_key = (cx, cz)
@@ -718,9 +720,9 @@ def load_position(seed: int) -> dict:
 def warp_to_new_universe(camera, chunk_manager, chunk_renderer, flora_manager, 
                          animal_manager, chunk_dna_manager, climate_manager,
                          structure_manager, config):
-    """Warp to a far-away location with completely fresh DNA AND terrain - a new universe!"""
+    """Warp to a far-away location with completely fresh DNA AND terrain - a new waverse!"""
     print("=" * 60)
-    print("  WARPING TO NEW UNIVERSE...")
+    print("  WARPING TO NEW WAVERSE...")
     print("=" * 60)
     
     # Pick a random far-away location (1000-5000 chunks away)
@@ -779,7 +781,10 @@ def warp_to_new_universe(camera, chunk_manager, chunk_renderer, flora_manager,
     camera.y = 100  # Start high, will settle to terrain
     camera.flying = True
     
-    print("  Welcome to a new universe!")
+    # Set status message
+    camera.set_status(f"WARPED to ({new_x:.0f}, {new_z:.0f}) - New Waverse!", 4.0)
+    
+    print("  Welcome to a new waverse!")
     print("  The DNA here evolved completely independently.")
     print("=" * 60)
 
@@ -865,6 +870,22 @@ class Camera:
         self.view_pitch = -5.0       # View pitch (default slight down)
         self.view_return_timer = 0.0 # Timer for returning to forward
         
+        # Status message display
+        self.status_message = ""
+        self.status_timer = 0.0  # Seconds remaining to show message
+    
+    def set_status(self, message: str, duration: float = 3.0):
+        """Set a status message to display at bottom of screen."""
+        self.status_message = message
+        self.status_timer = duration
+    
+    def update_status(self, dt: float):
+        """Update status message timer."""
+        if self.status_timer > 0:
+            self.status_timer -= dt
+            if self.status_timer <= 0:
+                self.status_message = ""
+        
         # Tool system
         self.current_tool_index = 0  # Index into ToolType.ALL_TOOLS
         self.current_tool = ToolType.SCAN
@@ -880,13 +901,14 @@ class Camera:
     
     def toggle_menu(self):
         """Toggle menu open/closed."""
+        was_open = self.menu_open
         self.menu_open = not self.menu_open
         if self.menu_open:
             # Refresh log items when opening menu
             self.refresh_log_items()
-            print("  [Menu] Opened")
+            print(f"  [Menu] Opened (was: {was_open})")
         else:
-            print("  [Menu] Closed")
+            print(f"  [Menu] Closed (was: {was_open})")
     
     def refresh_log_items(self):
         """Refresh list of logged DNA items."""
@@ -904,7 +926,7 @@ class Camera:
     
     def menu_switch_tab(self, direction: int):
         """Switch menu tab (direction: -1 = left, 1 = right)."""
-        self.menu_tab = (self.menu_tab + direction) % 2  # 2 tabs: Inventory, Log
+        self.menu_tab = (self.menu_tab + direction) % 3  # 3 tabs: Inventory, Log, Controls
     
     def add_marker(self):
         """Add a marker at current position."""
@@ -1562,6 +1584,76 @@ def draw_crosshair(display: tuple):
 # Text rendering cache for OpenGL
 _text_textures = {}
 
+# Image texture cache for log preview
+_log_image_textures = {}
+
+def _draw_log_image(png_path: str, x: float, y: float, size: float, camera: Camera):
+    """Load and draw a PNG image from the log directory."""
+    global _log_image_textures
+    
+    # Use path as cache key
+    cache_key = png_path
+    
+    # Check if we need to load/reload (also check if file is newer than cache)
+    if cache_key not in _log_image_textures:
+        try:
+            # Load image with pygame
+            image_surface = pygame.image.load(png_path)
+            
+            # Convert to RGBA
+            image_surface = image_surface.convert_alpha()
+            width, height = image_surface.get_size()
+            
+            # Flip vertically for correct display
+            image_surface = pygame.transform.flip(image_surface, False, True)
+            image_data = pygame.image.tostring(image_surface, "RGBA", True)
+            
+            # Create OpenGL texture
+            texture_id = glGenTextures(1)
+            glBindTexture(GL_TEXTURE_2D, texture_id)
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, image_data)
+            
+            _log_image_textures[cache_key] = (texture_id, width, height)
+        except Exception as e:
+            print(f"Error loading log image: {e}")
+            return
+    
+    texture_id, img_width, img_height = _log_image_textures[cache_key]
+    
+    # Calculate display dimensions (maintain aspect ratio)
+    aspect = img_width / max(img_height, 1)
+    if aspect > 1:
+        draw_w = size
+        draw_h = size / aspect
+    else:
+        draw_h = size
+        draw_w = size * aspect
+    
+    # Draw border/background
+    glColor4f(0.1, 0.1, 0.15, 1.0)
+    glBegin(GL_QUADS)
+    glVertex2f(x - 5, y - 5)
+    glVertex2f(x + draw_w + 5, y - 5)
+    glVertex2f(x + draw_w + 5, y + draw_h + 5)
+    glVertex2f(x - 5, y + draw_h + 5)
+    glEnd()
+    
+    # Draw textured quad
+    glEnable(GL_TEXTURE_2D)
+    glBindTexture(GL_TEXTURE_2D, texture_id)
+    glColor4f(1, 1, 1, 1)
+    
+    glBegin(GL_QUADS)
+    glTexCoord2f(0, 1); glVertex2f(x, y + draw_h)
+    glTexCoord2f(1, 1); glVertex2f(x + draw_w, y + draw_h)
+    glTexCoord2f(1, 0); glVertex2f(x + draw_w, y)
+    glTexCoord2f(0, 0); glVertex2f(x, y)
+    glEnd()
+    
+    glDisable(GL_TEXTURE_2D)
+
 def _draw_text(font, text: str, x: float, y: float, color: tuple):
     """Draw text at position using pygame font and OpenGL texture."""
     global _text_textures
@@ -1670,9 +1762,9 @@ def draw_menu(display: tuple, camera: Camera, hud_font=None):
     glVertex2f(0, display[1])
     glEnd()
     
-    # Menu box
-    menu_w = min(600, display[0] - 100)
-    menu_h = min(400, display[1] - 100)
+    # Menu box - wider to show images
+    menu_w = min(800, display[0] - 50)
+    menu_h = min(500, display[1] - 50)
     menu_x = (display[0] - menu_w) / 2
     menu_y = (display[1] - menu_h) / 2
     
@@ -1697,7 +1789,7 @@ def draw_menu(display: tuple, camera: Camera, hud_font=None):
     
     # Tab bar
     tab_h = 35
-    tab_names = ["INVENTORY", "LOG"]
+    tab_names = ["INVENTORY", "LOG", "CONTROLS"]
     tab_w = menu_w / len(tab_names)
     
     for i, name in enumerate(tab_names):
@@ -1734,7 +1826,12 @@ def draw_menu(display: tuple, camera: Camera, hud_font=None):
                 _draw_text(hud_font, "No DNA logs yet. Use SCAN tool to log creatures!", 
                           menu_x + 20, content_y, (200, 200, 200))
         else:
-            # Show list of log items
+            # Split: list on left, image preview on right
+            list_width = menu_w * 0.5
+            image_x = menu_x + list_width + 20
+            image_size = min(content_h - 20, menu_w * 0.4)
+            
+            # Show list of log items on left
             item_h = 24
             visible_items = int(content_h / item_h)
             start_idx = max(0, camera.log_index - visible_items // 2)
@@ -1747,17 +1844,16 @@ def draw_menu(display: tuple, camera: Camera, hud_font=None):
                     glColor4f(0.3, 0.5, 0.7, 0.8)
                     glBegin(GL_QUADS)
                     glVertex2f(menu_x + 10, iy - 2)
-                    glVertex2f(menu_x + menu_w - 10, iy - 2)
-                    glVertex2f(menu_x + menu_w - 10, iy + item_h - 4)
+                    glVertex2f(menu_x + list_width - 10, iy - 2)
+                    glVertex2f(menu_x + list_width - 10, iy + item_h - 4)
                     glVertex2f(menu_x + 10, iy + item_h - 4)
                     glEnd()
                 
                 # Item text
                 if hud_font:
-                    # Parse filename for type and timestamp
                     parts = item.replace('.json', '').split('_')
                     if len(parts) >= 3:
-                        entity_type = parts[0]  # plant or animal
+                        entity_type = parts[0]
                         date = parts[2] if len(parts) > 2 else ""
                         time = parts[3] if len(parts) > 3 else ""
                         display_text = f"{entity_type.upper()} - {date} {time}"
@@ -1766,6 +1862,72 @@ def draw_menu(display: tuple, camera: Camera, hud_font=None):
                     
                     color = (100, 200, 255) if start_idx + i == camera.log_index else (180, 180, 180)
                     _draw_text(hud_font, display_text, menu_x + 20, iy, color)
+            
+            # Draw image preview on right side
+            if 0 <= camera.log_index < len(camera.log_items):
+                selected_item = camera.log_items[camera.log_index]
+                png_file = selected_item.replace('.json', '.png')
+                png_path = os.path.join(DNA_LOGS_DIR, png_file)
+                
+                if os.path.exists(png_path):
+                    _draw_log_image(png_path, image_x, content_y, image_size, camera)
+    
+    elif camera.menu_tab == 2:  # Controls
+        if hud_font:
+            line_h = 20
+            left_col = menu_x + 20
+            right_col = menu_x + menu_w / 2 + 20
+            y = content_y
+            
+            # Keyboard controls (left column)
+            _draw_text(hud_font, "=== KEYBOARD ===", left_col, y, (100, 200, 255))
+            y += line_h + 5
+            
+            controls_kb = [
+                ("WASD / Arrows", "Move"),
+                ("IJKL", "Look around"),
+                ("H / Space", "Go up / Jump"),
+                ("F / Shift", "Go down"),
+                ("[ / -", "Slower speed"),
+                ("] / =", "Faster speed"),
+                ("P", "Screenshot"),
+                ("B", "Use tool"),
+                (", / .", "Switch tool"),
+                ("Tab", "Menu"),
+                ("X", "Tour mode"),
+                ("N", "Warp to new world"),
+                ("M", "Set marker"),
+                ("C", "Clear markers"),
+                ("S", "Save position"),
+            ]
+            
+            for key, action in controls_kb:
+                _draw_text(hud_font, f"{key}: {action}", left_col, y, (200, 200, 200))
+                y += line_h
+            
+            # Gamepad controls (right column)
+            y = content_y
+            _draw_text(hud_font, "=== GAMEPAD ===", right_col, y, (100, 200, 255))
+            y += line_h + 5
+            
+            controls_gp = [
+                ("Left Stick", "Move"),
+                ("Right Stick", "Look around"),
+                ("L3", "Go down"),
+                ("R3", "Go up"),
+                ("L2 / R2", "Speed down/up"),
+                ("A", "Jump"),
+                ("B", "Use tool"),
+                ("L1 / R1", "Switch tool"),
+                ("Y", "Screenshot"),
+                ("START", "Menu"),
+                ("SELECT", "Warp to new world"),
+                ("X", "Tour mode"),
+            ]
+            
+            for btn, action in controls_gp:
+                _draw_text(hud_font, f"{btn}: {action}", right_col, y, (200, 200, 200))
+                y += line_h
     
     # Help text at bottom
     if hud_font:
@@ -2172,6 +2334,15 @@ def draw_hud(display: tuple, camera: Camera, sky: SkySystem = None, climate: Cli
     if hud_font:
         _draw_text(hud_font, camera.current_tool, tool_x + 10, 26, (255, 255, 255))
     
+    # Draw status message at bottom of screen
+    if camera.status_message and camera.status_timer > 0 and hud_font:
+        # Fade out in last 0.5 seconds
+        alpha = min(1.0, camera.status_timer / 0.5) if camera.status_timer < 0.5 else 1.0
+        msg_color = (255, 255, 255)
+        msg_x = display[0] / 2 - len(camera.status_message) * 4  # Rough center
+        msg_y = display[1] - 40
+        _draw_text(hud_font, camera.status_message, msg_x, msg_y, msg_color)
+    
     glDisable(GL_BLEND)
     glEnable(GL_DEPTH_TEST)
     glEnable(GL_LIGHTING)
@@ -2311,6 +2482,8 @@ def run_explorer(config: WorldConfig = None):
     # Gamepad speed change cooldown
     gamepad_speed_cooldown = 0
     
+    # Menu toggle handled via JOYBUTTONDOWN event
+    
     while running:
         frame_count += 1
         dt = clock.tick(60) / 16.67
@@ -2318,6 +2491,9 @@ def run_explorer(config: WorldConfig = None):
         # Update gamepad speed cooldown
         if gamepad_speed_cooldown > 0:
             gamepad_speed_cooldown -= dt
+        
+        # Update status message timer
+        camera.update_status(dt / 60.0)  # Convert frame-time to seconds
         
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -2339,7 +2515,7 @@ def run_explorer(config: WorldConfig = None):
                 elif event.key == pygame.K_s:
                     save_position(camera, config.seed)
                 elif event.key == pygame.K_p:  # P for Picture/Screenshot
-                    take_screenshot()
+                    take_screenshot(camera)
                 elif event.key == pygame.K_TAB:  # Tab = toggle menu
                     camera.toggle_menu()
                 elif event.key == pygame.K_b:  # B = use current tool
@@ -2370,7 +2546,7 @@ def run_explorer(config: WorldConfig = None):
                 elif event.key == pygame.K_c:
                     camera.clear_markers()
                 elif event.key == pygame.K_n:
-                    # N = New location (warp to new universe)
+                    # N = New location (warp to new waverse)
                     warp_to_new_universe(camera, chunk_manager, chunk_renderer, 
                                         flora_manager, animal_manager,
                                         chunk_dna_manager, climate_manager,
@@ -2387,33 +2563,47 @@ def run_explorer(config: WorldConfig = None):
                     pygame.event.set_grab(False)
             elif event.type == pygame.MOUSEMOTION and mouse_look:
                 camera.rotate(*event.rel)
+            elif event.type == pygame.JOYBUTTONDOWN:
+                # Handle joystick button press events (more reliable than polling)
+                if event.button == GamepadConfig.START:
+                    camera.toggle_menu()
+                    print(f"  [JOYBUTTONDOWN] START button pressed")
         
         # Keyboard input
         keys = pygame.key.get_pressed()
         forward = right = up = 0
-        speed = 2.5 if keys[pygame.K_LALT] else 1.0
         
-        if keys[pygame.K_w] or keys[pygame.K_UP]: forward += dt * speed
-        if keys[pygame.K_s] or keys[pygame.K_DOWN]: forward -= dt * speed
-        if keys[pygame.K_a] or keys[pygame.K_LEFT]: right -= dt * speed
-        if keys[pygame.K_d] or keys[pygame.K_RIGHT]: right += dt * speed
-        
-        # H/F for height - in tour mode adjusts target height, otherwise moves up/down
-        if camera.auto_fly_mode > 0:
-            if keys[pygame.K_h]:
-                camera.auto_fly_height = min(100, camera.auto_fly_height + 0.3)
-            if keys[pygame.K_f]:
-                camera.auto_fly_height = max(15, camera.auto_fly_height - 0.3)
+        # Only allow world movement/look when menu is closed
+        if not camera.menu_open:
+            speed = 2.5 if keys[pygame.K_LALT] else 1.0
+            
+            if keys[pygame.K_w] or keys[pygame.K_UP]: forward += dt * speed
+            if keys[pygame.K_s] or keys[pygame.K_DOWN]: forward -= dt * speed
+            if keys[pygame.K_a] or keys[pygame.K_LEFT]: right -= dt * speed
+            if keys[pygame.K_d] or keys[pygame.K_RIGHT]: right += dt * speed
+            
+            # H/F for height - in tour mode adjusts target height, otherwise moves up/down
+            if camera.auto_fly_mode > 0:
+                if keys[pygame.K_h]:
+                    camera.auto_fly_height = min(100, camera.auto_fly_height + 0.3)
+                if keys[pygame.K_f]:
+                    camera.auto_fly_height = max(15, camera.auto_fly_height - 0.3)
+            else:
+                if keys[pygame.K_h]: up += dt * speed
+                if keys[pygame.K_f]: up -= dt * speed
+            
+            # Keyboard look
+            look_speed = dt * 0.8
+            if keys[pygame.K_i]: camera.rotate_keyboard(0, look_speed * 1.2)
+            if keys[pygame.K_k]: camera.rotate_keyboard(0, -look_speed * 1.2)
+            if keys[pygame.K_j]: camera.rotate_keyboard(look_speed * 1.5, 0)
+            if keys[pygame.K_l]: camera.rotate_keyboard(-look_speed * 1.5, 0)
         else:
-            if keys[pygame.K_h]: up += dt * speed
-            if keys[pygame.K_f]: up -= dt * speed
-        
-        # Keyboard look
-        look_speed = dt * 0.8
-        if keys[pygame.K_i]: camera.rotate_keyboard(0, look_speed * 1.2)
-        if keys[pygame.K_k]: camera.rotate_keyboard(0, -look_speed * 1.2)
-        if keys[pygame.K_j]: camera.rotate_keyboard(look_speed * 1.5, 0)
-        if keys[pygame.K_l]: camera.rotate_keyboard(-look_speed * 1.5, 0)
+            # Menu keyboard navigation
+            if keys[pygame.K_UP]: camera.menu_navigate(-1)
+            if keys[pygame.K_DOWN]: camera.menu_navigate(1)
+            if keys[pygame.K_LEFT]: camera.menu_switch_tab(-1)
+            if keys[pygame.K_RIGHT]: camera.menu_switch_tab(1)
         
         # Gamepad input (check for hotplug every 60 frames)
         if frame_count % 60 == 0:
@@ -2425,19 +2615,38 @@ def run_explorer(config: WorldConfig = None):
                 gamepad.debug_cooldown = max(0, gamepad.debug_cooldown - 1)
                 gamepad.print_debug()
             
-            # Left stick = movement (WASD)
-            gp_move = gamepad.get_movement()
-            forward += gp_move[0] * dt * speed
-            right += gp_move[1] * dt * speed
+            # Menu navigation when menu is open
+            if camera.menu_open:
+                gp_move = gamepad.get_movement()
+                if gamepad_speed_cooldown <= 0:
+                    if gp_move[0] < -0.5 or gamepad.get_dpad(GamepadConfig.DPAD_UP):
+                        camera.menu_navigate(-1)
+                        gamepad_speed_cooldown = 10
+                    elif gp_move[0] > 0.5 or gamepad.get_dpad(GamepadConfig.DPAD_DOWN):
+                        camera.menu_navigate(1)
+                        gamepad_speed_cooldown = 10
+                    if gp_move[1] < -0.5 or gamepad.get_dpad(GamepadConfig.DPAD_LEFT):
+                        camera.menu_switch_tab(-1)
+                        gamepad_speed_cooldown = 15
+                    elif gp_move[1] > 0.5 or gamepad.get_dpad(GamepadConfig.DPAD_RIGHT):
+                        camera.menu_switch_tab(1)
+                        gamepad_speed_cooldown = 15
             
-            # Right stick = look (IJKL)
-            # gp_look returns (yaw, pitch) with proper signs
-            gp_look = gamepad.get_look()
-            gamepad_look_speed = dt * 2.5
-            camera.rotate_keyboard(gp_look[0] * gamepad_look_speed, gp_look[1] * gamepad_look_speed)
+            # Left stick = movement (WASD) - only when menu closed
+            if not camera.menu_open:
+                gp_move = gamepad.get_movement()
+                gp_speed = SPEED_LEVELS[camera.speed_level]
+                forward += gp_move[0] * dt * gp_speed
+                right += gp_move[1] * dt * gp_speed
             
-            # L3 = go down, R3 = go up
-            up += gamepad.get_vertical() * dt * speed
+            # Right stick = look (IJKL) - only when menu closed
+            if not camera.menu_open:
+                gp_look = gamepad.get_look()
+                gamepad_look_speed = dt * 2.5
+                camera.rotate_keyboard(gp_look[0] * gamepad_look_speed, gp_look[1] * gamepad_look_speed)
+                
+                # L3 = go down, R3 = go up
+                up += gamepad.get_vertical() * dt * speed
             
             # L2/R2 behavior depends on mode
             l2_val, r2_val = gamepad.get_triggers()
@@ -2466,12 +2675,12 @@ def run_explorer(config: WorldConfig = None):
                             print(f"  Speed: {SPEED_LEVELS[new_level]:.2f}x")
                             gamepad_speed_cooldown = 20
             
-            # A button = jump (in walk mode)
-            if gamepad.get_button(GamepadConfig.A):
+            # A button = jump (in walk mode) - only when menu closed
+            if not camera.menu_open and gamepad.get_button(GamepadConfig.A):
                 camera.jump()
             
-            # B button = use current tool
-            if gamepad.get_button(GamepadConfig.B) and gamepad_speed_cooldown <= 0:
+            # B button = use current tool - only when menu closed
+            if not camera.menu_open and gamepad.get_button(GamepadConfig.B) and gamepad_speed_cooldown <= 0:
                 if camera.current_tool == ToolType.SCAN:
                     log_dna_at_cursor(camera, flora_manager, animal_manager)
                 elif camera.current_tool == ToolType.MINE:
@@ -2484,25 +2693,22 @@ def run_explorer(config: WorldConfig = None):
                         del chunk_renderer.display_lists[result]
                 gamepad_speed_cooldown = 20  # Faster for terrain tools
             
-            # L1 = previous tool, R1 = next tool
-            if gamepad.get_button(GamepadConfig.L1) and gamepad_speed_cooldown <= 0:
+            # L1 = previous tool, R1 = next tool - only when menu closed
+            if not camera.menu_open and gamepad.get_button(GamepadConfig.L1) and gamepad_speed_cooldown <= 0:
                 camera.prev_tool()
                 gamepad_speed_cooldown = 15
-            if gamepad.get_button(GamepadConfig.R1) and gamepad_speed_cooldown <= 0:
+            if not camera.menu_open and gamepad.get_button(GamepadConfig.R1) and gamepad_speed_cooldown <= 0:
                 camera.next_tool()
                 gamepad_speed_cooldown = 15
             
             # Y button = screenshot
             if gamepad.get_button(GamepadConfig.Y) and gamepad_speed_cooldown <= 0:
-                take_screenshot()
+                take_screenshot(camera)
                 gamepad_speed_cooldown = 30
             
-            # START button = toggle menu
-            if gamepad.get_button(GamepadConfig.START) and gamepad_speed_cooldown <= 0:
-                camera.toggle_menu()
-                gamepad_speed_cooldown = 20
+            # START button handled via JOYBUTTONDOWN event for reliability
             
-            # SELECT button = warp to new universe
+            # SELECT button = warp to new waverse
             if gamepad.get_button(GamepadConfig.SELECT) and gamepad_speed_cooldown <= 0:
                 warp_to_new_universe(camera, chunk_manager, chunk_renderer, 
                                     flora_manager, animal_manager,
@@ -2510,33 +2716,9 @@ def run_explorer(config: WorldConfig = None):
                                     structure_manager, config)
                 gamepad_speed_cooldown = 60  # Longer cooldown for warp
             
-            # Menu navigation with D-pad or left stick when menu is open
-            if camera.menu_open and gamepad_speed_cooldown <= 0:
-                # D-pad left/right = switch tabs
-                if gamepad.get_dpad(GamepadConfig.DPAD_LEFT):
-                    camera.menu_switch_tab(-1)
-                    gamepad_speed_cooldown = 15
-                elif gamepad.get_dpad(GamepadConfig.DPAD_RIGHT):
-                    camera.menu_switch_tab(1)
-                    gamepad_speed_cooldown = 15
-                # D-pad up/down = navigate items
-                elif gamepad.get_dpad(GamepadConfig.DPAD_UP):
-                    camera.menu_navigate(-1)
-                    gamepad_speed_cooldown = 10
-                elif gamepad.get_dpad(GamepadConfig.DPAD_DOWN):
-                    camera.menu_navigate(1)
-                    gamepad_speed_cooldown = 10
-                # Left stick also works for navigation
-                gp_move = gamepad.get_movement()
-                if abs(gp_move[0]) > 0.5:  # Forward/back = up/down
-                    camera.menu_navigate(-1 if gp_move[0] > 0 else 1)
-                    gamepad_speed_cooldown = 10
-                if abs(gp_move[1]) > 0.5:  # Left/right = switch tabs
-                    camera.menu_switch_tab(1 if gp_move[1] > 0 else -1)
-                    gamepad_speed_cooldown = 15
         
-        # Keyboard space = jump (in walk mode)
-        if keys[pygame.K_SPACE] and not camera.flying:
+        # Keyboard space = jump (in walk mode) - only when menu closed
+        if not camera.menu_open and keys[pygame.K_SPACE] and not camera.flying:
             camera.jump()
         
         # Auto-fly mode - overrides manual movement

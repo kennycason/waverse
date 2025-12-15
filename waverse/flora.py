@@ -921,32 +921,116 @@ class PlantRenderer:
     
     @staticmethod
     def _draw_branches(dna: PlantDNA, start_height: float):
-        """Draw branches from DNA specification."""
+        """Draw branches with recursive sub-branching from DNA specification."""
+        # Use a seeded RNG for consistent randomness per plant
+        branch_rng = np.random.default_rng(int(dna.species_id) & 0xFFFFFFFF)
+        
         for i in range(dna.branch_count):
-            angle = (i / dna.branch_count) * 360 * dna.branch_spread
+            angle = (i / max(1, dna.branch_count)) * 360 * dna.branch_spread
             angle += dna.asymmetry * 30 * math.sin(i * 2.5)
             
             glPushMatrix()
-            glTranslatef(0, start_height + i * 0.3, 0)
+            # Vary branch height along trunk
+            branch_y = start_height + (i / max(1, dna.branch_count)) * (dna.height_gene.value * 0.4)
+            glTranslatef(0, branch_y, 0)
             glRotatef(angle, 0, 1, 0)
             glRotatef(dna.branch_angle * 75 + dna.droop * 20, 1, 0, 0)
             
-            # Draw branch segments
-            branch_len = dna.height_gene.value * 0.25
-            branch_w = dna.width_gene.value * 0.25
-            
-            glColor3f(*dna.trunk_color.rgb)
-            for seg in dna.branch_segments:
-                seg_len = seg.length * branch_len
-                glBegin(GL_QUADS)
-                glVertex3f(-branch_w, 0, 0)
-                glVertex3f(branch_w, 0, 0)
-                glVertex3f(branch_w * seg.taper, seg_len, 0)
-                glVertex3f(-branch_w * seg.taper, seg_len, 0)
-                glEnd()
-                branch_w *= seg.taper
+            # Draw this branch with recursive sub-branches
+            branch_len = dna.height_gene.value * 0.3
+            branch_w = dna.width_gene.value * 0.3
+            PlantRenderer._draw_branch_recursive(
+                dna, branch_len, branch_w, 
+                depth=0, max_depth=dna.recursive_depth, 
+                rng=branch_rng
+            )
             
             glPopMatrix()
+    
+    @staticmethod
+    def _draw_branch_recursive(dna: PlantDNA, length: float, width: float, 
+                                depth: int, max_depth: int, rng: np.random.Generator):
+        """Recursively draw a branch with potential sub-branches."""
+        if width < 0.01 or length < 0.05:
+            return
+        
+        # Draw this branch segment
+        glColor3f(*dna.trunk_color.rgb)
+        
+        # Add some natural variation
+        curve = (rng.random() - 0.5) * 0.3 * (1 + depth * 0.5)
+        
+        # Draw the branch as a tapered cylinder approximation
+        segments = 4
+        taper = 0.7 if depth < max_depth else 0.5
+        
+        glBegin(GL_QUAD_STRIP)
+        for i in range(segments + 1):
+            t = i / segments
+            # Current position along branch
+            y = t * length
+            w = width * (1.0 - t * (1 - taper))
+            # Add curve
+            x_offset = curve * t * t * length
+            
+            glVertex3f(-w + x_offset, y, 0)
+            glVertex3f(w + x_offset, y, 0)
+        glEnd()
+        
+        # Move to end of this segment for sub-branches
+        glTranslatef(curve * length, length, 0)
+        
+        # Maybe spawn sub-branches if we haven't hit max depth
+        if depth < max_depth:
+            # Determine number of sub-branches based on DNA
+            sub_branch_count = 0
+            for _ in range(3):  # Up to 3 potential sub-branches per branch
+                if rng.random() < dna.sub_branch_chance:
+                    sub_branch_count += 1
+            
+            for j in range(sub_branch_count):
+                glPushMatrix()
+                
+                # Rotate around the branch axis
+                sub_angle = (j / max(1, sub_branch_count)) * 360 + rng.random() * 60 - 30
+                glRotatef(sub_angle, 0, 1, 0)
+                
+                # Angle away from parent branch
+                spread_angle = 25 + rng.random() * 35 + dna.droop * 15
+                glRotatef(spread_angle, 1, 0, 0)
+                
+                # Sub-branches are smaller
+                sub_length = length * (0.5 + rng.random() * 0.3)
+                sub_width = width * taper * (0.6 + rng.random() * 0.2)
+                
+                # Recurse
+                PlantRenderer._draw_branch_recursive(
+                    dna, sub_length, sub_width,
+                    depth + 1, max_depth, rng
+                )
+                
+                glPopMatrix()
+        
+        # Draw leaves at branch tips
+        if depth >= max_depth - 1 or (depth > 0 and rng.random() < 0.3):
+            glColor3f(*dna.leaf_color.rgb)
+            leaf_size = dna.leaf_size * 0.15 * (1.0 + rng.random() * 0.5)
+            
+            # Draw a few leaves
+            num_leaves = 2 + int(rng.random() * 3)
+            for k in range(num_leaves):
+                glPushMatrix()
+                glRotatef(k * 120 + rng.random() * 30, 0, 1, 0)
+                glRotatef(30 + rng.random() * 40, 1, 0, 0)
+                
+                # Simple leaf shape
+                glBegin(GL_TRIANGLES)
+                glVertex3f(0, 0, 0)
+                glVertex3f(leaf_size * 0.3, leaf_size, 0)
+                glVertex3f(-leaf_size * 0.3, leaf_size, 0)
+                glEnd()
+                
+                glPopMatrix()
     
     @staticmethod
     def _draw_canopy(dna: PlantDNA, height: float):

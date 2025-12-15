@@ -553,13 +553,17 @@ class PlantDNA:
                 )
                 for i in range(2 + rng.integers(0, 2))
             ]
-            dna.branch_count = 4 + rng.integers(0, 5)
-            dna.branch_angle = 0.3 + rng.random() * 0.35
-            dna.branch_height = 0.5 + rng.random() * 0.3
-            dna.canopy_shape = rng.choice(["dome", "cone", "umbrella"])
-            dna.canopy_spread = 0.4 + rng.random() * 0.4
-            dna.trunk_color = ColorGene(0.3 + rng.random() * 0.15, 0.2 + rng.random() * 0.1, 0.1)
-            dna.leaf_color = ColorGene(0.15 + rng.random() * 0.1, 0.35 + rng.random() * 0.35, 0.1)
+            dna.branch_count = 5 + rng.integers(0, 7)
+            dna.branch_angle = 0.25 + rng.random() * 0.4
+            dna.branch_height = 0.4 + rng.random() * 0.35
+            dna.sub_branch_chance = 0.4 + rng.random() * 0.4  # 40-80% chance
+            dna.recursive_depth = 2 + rng.integers(0, 2)  # 2-3 levels of branching
+            dna.canopy_shape = rng.choice(["dome", "cone", "umbrella", "weeping"])
+            dna.canopy_spread = 0.4 + rng.random() * 0.5
+            dna.droop = rng.random() * 0.4  # Some droop variation
+            dna.asymmetry = 0.1 + rng.random() * 0.3  # Natural asymmetry
+            dna.trunk_color = ColorGene(0.25 + rng.random() * 0.2, 0.15 + rng.random() * 0.12, 0.08 + rng.random() * 0.05)
+            dna.leaf_color = ColorGene(0.1 + rng.random() * 0.15, 0.3 + rng.random() * 0.4, 0.08 + rng.random() * 0.1)
             
         elif plant_type == PlantType.TALL_TREE:
             dna.height_gene = Gene(12 + rng.random() * 12, 8, 30, 0.3)
@@ -574,14 +578,17 @@ class PlantDNA:
                 )
                 for i in range(3 + rng.integers(0, 3))
             ]
-            dna.branch_count = 5 + rng.integers(0, 6)
-            dna.branch_angle = 0.25 + rng.random() * 0.3
-            dna.branch_height = 0.6 + rng.random() * 0.2
-            dna.sub_branch_chance = 0.4 + rng.random() * 0.3
-            dna.canopy_shape = rng.choice(["dome", "cone"])
-            dna.canopy_spread = 0.5 + rng.random() * 0.5
-            dna.trunk_color = ColorGene(0.25 + rng.random() * 0.15, 0.18, 0.08)
-            dna.leaf_color = ColorGene(0.1, 0.3 + rng.random() * 0.25, 0.08)
+            dna.branch_count = 6 + rng.integers(0, 8)
+            dna.branch_angle = 0.2 + rng.random() * 0.35
+            dna.branch_height = 0.5 + rng.random() * 0.25
+            dna.sub_branch_chance = 0.5 + rng.random() * 0.35  # 50-85% chance
+            dna.recursive_depth = 2 + rng.integers(0, 3)  # 2-4 levels of branching
+            dna.canopy_shape = rng.choice(["dome", "cone", "weeping"])
+            dna.canopy_spread = 0.5 + rng.random() * 0.6
+            dna.droop = rng.random() * 0.35
+            dna.asymmetry = 0.1 + rng.random() * 0.25
+            dna.trunk_color = ColorGene(0.2 + rng.random() * 0.18, 0.12 + rng.random() * 0.1, 0.06 + rng.random() * 0.05)
+            dna.leaf_color = ColorGene(0.08 + rng.random() * 0.12, 0.25 + rng.random() * 0.35, 0.05 + rng.random() * 0.1)
             
         elif plant_type == PlantType.PALM:
             dna.height_gene = Gene(6 + rng.random() * 10, 4, 18, 0.25)
@@ -712,7 +719,7 @@ class PlantDNA:
                 )
             
         elif plant_type == PlantType.ALIEN:
-            # Truly random/weird
+            # Truly random/weird with high potential for complex branching
             dna.height_gene = Gene(1 + rng.random() * 15, 0.5, 20, 0.35)
             dna.width_gene = Gene(0.1 + rng.random() * 0.5, 0.05, 1.0, 0.25)
             dna.trunk_segments = [
@@ -725,11 +732,15 @@ class PlantDNA:
                 )
                 for _ in range(1 + rng.integers(0, 5))
             ]
-            dna.branch_count = rng.integers(0, 10)
+            dna.branch_count = 3 + rng.integers(0, 12)
             dna.branch_angle = rng.random()
+            dna.sub_branch_chance = 0.3 + rng.random() * 0.6  # High variance
+            dna.recursive_depth = 1 + rng.integers(0, 4)  # 1-4 levels - can be very complex
+            dna.droop = rng.random() * 0.8 - 0.3  # Can droop or reach up
             dna.leaf_shape = rng.choice(["round", "pointed", "frond", "needle", "blade"])
             dna.canopy_shape = rng.choice(["dome", "cone", "umbrella", "weeping", "columnar"])
-            dna.asymmetry = 0.2 + rng.random() * 0.3
+            dna.asymmetry = 0.2 + rng.random() * 0.4
+            dna.spiral_factor = rng.random() * 0.5
             
             # Alien colors
             dna.trunk_color = ColorGene.from_hsv(rng.random(), 0.3 + rng.random() * 0.5, 0.3 + rng.random() * 0.4)
