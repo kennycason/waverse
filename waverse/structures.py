@@ -302,7 +302,7 @@ def generate_tile_building(x: float, y: float, z: float,
     pillar_color = tuple(c * 0.65 for c in wall_color)
     ramp_color = tuple(c * 0.85 for c in wall_color)
     
-    wall_thickness = 0.4
+    wall_thickness = 1.5  # Thick walls for reliable collision
     pillar_width = 0.5 + rng.random() * 0.3  # 0.5-0.8 width variation
     
     # =========================================================================
@@ -406,9 +406,9 @@ def generate_tile_building(x: float, y: float, z: float,
                     
                     structure.floors.append(Floor(
                         x=tile_x, y=floor_y, z=tile_z,
-                        width=tile_size - 0.15,
-                        depth=tile_size - 0.15,
-                        thickness=0.3,
+                        width=tile_size + 0.5,  # Overlap to prevent seam gaps
+                        depth=tile_size + 0.5,  # Overlap to prevent seam gaps
+                        thickness=0.5,  # Thicker for better collision
                         color=floor_color
                     ))
         
@@ -494,12 +494,12 @@ def generate_tile_building(x: float, y: float, z: float,
                 ramp_rot = 0 if ramp_tile_z == 0 else 0  # Along X axis
                 
                 structure.ramps.append(Ramp(
-                    x=ramp_start_x + 0.25,
-                    y_bottom=floor_y + 0.3,  # Slight step up
+                    x=ramp_start_x,
+                    y_bottom=floor_y,  # Start at floor level
                     z=ramp_z,
-                    length=ramp_length,
-                    height=floor_height - 0.3,
-                    width=tile_size * 0.8,
+                    length=ramp_length + 1.0,  # Extend past floor edge
+                    height=floor_height + 0.5,  # Extend above floor for overlap
+                    width=tile_size,  # Full tile width
                     rotation=ramp_rot,
                     color=ramp_color
                 ))
@@ -510,11 +510,11 @@ def generate_tile_building(x: float, y: float, z: float,
                 
                 structure.ramps.append(Ramp(
                     x=ramp_x,
-                    y_bottom=floor_y + 0.3,
-                    z=ramp_start_z + 0.25,
-                    length=ramp_length,
-                    height=floor_height - 0.3,
-                    width=tile_size * 0.8,
+                    y_bottom=floor_y,  # Start at floor level
+                    z=ramp_start_z,
+                    length=ramp_length + 1.0,  # Extend past floor edge
+                    height=floor_height + 0.5,  # Extend above floor for overlap
+                    width=tile_size,  # Full tile width
                     rotation=90,  # Along Z axis
                     color=ramp_color
                 ))
@@ -530,9 +530,9 @@ def generate_tile_building(x: float, y: float, z: float,
             
             structure.floors.append(Floor(
                 x=tile_x, y=roof_y, z=tile_z,
-                width=tile_size,
-                depth=tile_size,
-                thickness=0.4,
+                width=tile_size + 0.5,  # Overlap
+                depth=tile_size + 0.5,  # Overlap
+                thickness=0.5,  # Thicker
                 color=roof_color
             ))
     
