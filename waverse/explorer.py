@@ -896,7 +896,7 @@ class Camera:
         self.gravity = 6.0  # Faster gravity for snappier falls
         self.jump_strength = 1.7  # 2x higher jump - can reach ~2 stories
         
-        # Auto-fly / Tour mode: 0=off, 1=wander
+        # Auto-fly / Tour mode: 0=off, 1=wander, 2=showcase
         self.auto_fly_mode = 0
         
         # Wander mode state - movement direction (independent of view)
@@ -908,6 +908,14 @@ class Camera:
         self.view_yaw_offset = 0.0   # Look offset from movement direction
         self.view_pitch = -5.0       # View pitch (default slight down)
         self.view_return_timer = 0.0 # Timer for returning to forward
+        
+        # Showcase mode state - fly to interesting items
+        self.showcase_target = None       # (x, y, z, entity_type, entity)
+        self.showcase_phase = 0           # 0=traveling, 1=viewing
+        self.showcase_view_timer = 0.0    # Time to view current target
+        self.showcase_arc_progress = 0.0  # 0.0 to 1.0 along arc
+        self.showcase_start_pos = None    # (x, y, z) starting position
+        self.showcase_arc_height = 0.0    # Peak height of arc
         
         # Status message display
         self.status_message = ""
@@ -991,7 +999,9 @@ class Camera:
         else:
             self.yaw += dx * MOUSE_SENSITIVITY
             self.pitch -= dy * MOUSE_SENSITIVITY
-            self.pitch = max(-89, min(89, self.pitch))
+            # Allow full vertical loops (like a fighter jet loop-de-loop)
+            while self.pitch > 180: self.pitch -= 360
+            while self.pitch < -180: self.pitch += 360
     
     def rotate_keyboard(self, dyaw, dpitch):
         if self.auto_fly_mode > 0:
@@ -1003,7 +1013,9 @@ class Camera:
         else:
             self.yaw += dyaw
             self.pitch += dpitch
-            self.pitch = max(-89, min(89, self.pitch))
+            # Allow full vertical loops (like a fighter jet loop-de-loop)
+            while self.pitch > 180: self.pitch -= 360
+            while self.pitch < -180: self.pitch += 360
     
     def get_terrain_height(self, chunk_manager: ChunkManager) -> float:
         """Get terrain height at current position."""
@@ -1199,20 +1211,22 @@ class Camera:
         print("  All markers cleared")
     
     def toggle_auto_fly(self):
-        """Toggle tour/wander mode on/off."""
-        self.auto_fly_mode = 1 - self.auto_fly_mode  # Toggle 0 <-> 1
+        """Cycle tour modes: off -> wander -> showcase -> off."""
+        self.auto_fly_mode = (self.auto_fly_mode + 1) % 3  # Cycle 0 -> 1 -> 2 -> 0
         
         if self.auto_fly_mode == 0:
             print("=" * 40)
             print("  TOUR MODE: OFF")
             print("=" * 40)
-        else:
+            self.set_status("Tour mode: OFF")
+        elif self.auto_fly_mode == 1:
             print("=" * 40)
-            print("  TOUR MODE: ON")
+            print("  TOUR MODE: WANDER")
             print("  Auto-flying, random exploration")
             print("  Look around freely - returns to forward")
-            print("  Press X to turn OFF")
+            print("  Press X for SHOWCASE mode")
             print("=" * 40)
+            self.set_status("Tour mode: WANDER")
             # Start wandering in current facing direction
             self.wander_direction = math.radians(self.yaw)
             self.wander_timer = 30 + random.random() * 30
@@ -1221,8 +1235,21 @@ class Camera:
             self.view_yaw_offset = 0.0
             self.view_pitch = -5.0
             self.view_return_timer = 0.0
+        else:  # mode == 2 (showcase)
+            print("=" * 40)
+            print("  TOUR MODE: SHOWCASE")
+            print("  Flying to interesting plants/animals/structures")
+            print("  Watch the world's creations!")
+            print("  Press X to turn OFF")
+            print("=" * 40)
+            self.set_status("Tour mode: SHOWCASE")
+            self.flying = True
+            self.showcase_target = None  # Will be set on first update
+            self.showcase_phase = 0
+            self.showcase_arc_progress = 0.0
     
-    def update_auto_fly(self, dt: float, chunk_manager: ChunkManager):
+    def update_auto_fly(self, dt: float, chunk_manager: ChunkManager, 
+                        flora_manager=None, animal_manager=None, structure_manager=None):
         """Update tour mode - movement and view are independent."""
         if self.auto_fly_mode == 0:
             return 0, 0, 0
@@ -1230,6 +1257,16 @@ class Camera:
         dt_seconds = dt / 60.0
         speed_mult = SPEED_LEVELS[self.speed_level] * 3.0
         
+        if self.auto_fly_mode == 1:
+            # === WANDER MODE ===
+            return self._update_wander_mode(dt_seconds, speed_mult)
+        else:
+            # === SHOWCASE MODE ===
+            return self._update_showcase_mode(dt_seconds, speed_mult, chunk_manager,
+                                              flora_manager, animal_manager, structure_manager)
+    
+    def _update_wander_mode(self, dt_seconds: float, speed_mult: float):
+        """Wander mode - random direction changes."""
         # === MOVEMENT (independent of view) ===
         # Random direction changes
         self.wander_timer -= dt_seconds
@@ -1269,9 +1306,145 @@ class Camera:
         
         return 0, 0, 0  # We moved directly, don't use forward/right/up
     
+    def _update_showcase_mode(self, dt_seconds: float, speed_mult: float, chunk_manager: ChunkManager,
+                              flora_manager, animal_manager, structure_manager):
+        """Showcase mode - fly to interesting items in arcs."""
+        
+        # === PICK A NEW TARGET if needed ===
+        if self.showcase_target is None or self.showcase_phase > 1:
+            self._pick_showcase_target(chunk_manager, flora_manager, animal_manager, structure_manager)
+            if self.showcase_target is None:
+                # No targets found, fall back to wander
+                return self._update_wander_mode(dt_seconds, speed_mult)
+        
+        target_x, target_y, target_z, entity_type, entity = self.showcase_target
+        
+        if self.showcase_phase == 0:
+            # === TRAVELING PHASE - fly in arc toward target ===
+            self.showcase_arc_progress += dt_seconds * 0.15 * speed_mult  # Speed of travel
+            
+            if self.showcase_arc_progress >= 1.0:
+                # Arrived! Switch to viewing
+                self.showcase_phase = 1
+                self.showcase_view_timer = 2.5 + random.random() * 1.5  # 2.5-4 seconds viewing
+                self.showcase_arc_progress = 1.0
+                print(f"  Showcase: viewing {entity_type}...")
+            
+            # Calculate position along arc (parabolic)
+            t = self.showcase_arc_progress
+            start_x, start_y, start_z = self.showcase_start_pos
+            
+            # Horizontal: linear interpolation
+            self.x = start_x + (target_x - start_x) * t
+            self.z = start_z + (target_z - start_z) * t
+            
+            # Vertical: parabolic arc (peaks at t=0.5)
+            base_y = start_y + (target_y - start_y) * t
+            arc_offset = self.showcase_arc_height * 4 * t * (1 - t)  # Parabola: 0 at t=0,1; max at t=0.5
+            self.y = base_y + arc_offset
+            
+            # Look toward target
+            dx = target_x - self.x
+            dy = target_y - self.y
+            dz = target_z - self.z
+            dist = math.sqrt(dx*dx + dz*dz)
+            
+            self.yaw = math.degrees(math.atan2(-dx, -dz))
+            self.pitch = math.degrees(math.atan2(dy, dist)) if dist > 0.1 else 0
+            
+        elif self.showcase_phase == 1:
+            # === VIEWING PHASE - hover and look at target ===
+            self.showcase_view_timer -= dt_seconds
+            
+            if self.showcase_view_timer <= 0:
+                # Done viewing, pick new target
+                self.showcase_phase = 2  # Will trigger new target on next update
+                print(f"  Showcase: moving to next...")
+            
+            # Stay at viewing position, slowly orbit
+            orbit_speed = 10.0  # degrees per second
+            self.yaw += orbit_speed * dt_seconds
+            
+            # Keep looking at target
+            dx = target_x - self.x
+            dy = target_y - self.y
+            dz = target_z - self.z
+            dist = math.sqrt(dx*dx + dz*dz)
+            self.pitch = math.degrees(math.atan2(dy, dist)) if dist > 0.1 else -10
+        
+        return 0, 0, 0
+    
+    def _pick_showcase_target(self, chunk_manager: ChunkManager, 
+                              flora_manager, animal_manager, structure_manager):
+        """Pick a random interesting target (plant/animal/structure) nearby."""
+        candidates = []
+        
+        cx, cz = self.get_chunk_pos()
+        search_range = 3  # Search in nearby chunks
+        
+        # Collect plants
+        if flora_manager:
+            for dcx in range(-search_range, search_range + 1):
+                for dcz in range(-search_range, search_range + 1):
+                    key = (cx + dcx, cz + dcz)
+                    if key in flora_manager.chunk_plants:
+                        for plant in flora_manager.chunk_plants[key]:
+                            # Skip tiny plants
+                            if hasattr(plant, 'dna') and plant.dna.height > 2.0:
+                                dist = math.sqrt((plant.x - self.x)**2 + (plant.z - self.z)**2)
+                                if 30 < dist < 200:  # Not too close, not too far
+                                    candidates.append((plant.x, plant.y + plant.dna.height * 0.5, plant.z, 
+                                                      "plant", plant))
+        
+        # Collect animals
+        if animal_manager:
+            for dcx in range(-search_range, search_range + 1):
+                for dcz in range(-search_range, search_range + 1):
+                    key = (cx + dcx, cz + dcz)
+                    if key in animal_manager.chunk_animals:
+                        for animal in animal_manager.chunk_animals[key]:
+                            dist = math.sqrt((animal.x - self.x)**2 + (animal.z - self.z)**2)
+                            if 30 < dist < 200:
+                                candidates.append((animal.x, animal.y + 2.0, animal.z, 
+                                                  "animal", animal))
+        
+        # Collect structures
+        if structure_manager:
+            for structure in structure_manager.structures:
+                # Find center of structure
+                if structure.floors:
+                    floor = structure.floors[0]
+                    struct_x = floor.x
+                    struct_z = floor.z
+                    struct_y = floor.y + 10  # Above the structure
+                    dist = math.sqrt((struct_x - self.x)**2 + (struct_z - self.z)**2)
+                    if 30 < dist < 250:
+                        candidates.append((struct_x, struct_y, struct_z, "structure", structure))
+        
+        if not candidates:
+            self.showcase_target = None
+            return
+        
+        # Pick random target
+        target = random.choice(candidates)
+        self.showcase_target = target
+        self.showcase_start_pos = (self.x, self.y, self.z)
+        self.showcase_phase = 0
+        self.showcase_arc_progress = 0.0
+        
+        # Calculate arc height based on distance and height difference
+        target_x, target_y, target_z, entity_type, entity = target
+        horiz_dist = math.sqrt((target_x - self.x)**2 + (target_z - self.z)**2)
+        height_diff = abs(target_y - self.y)
+        self.showcase_arc_height = max(15.0, horiz_dist * 0.3, height_diff * 0.5)
+        
+        print(f"  Showcase: flying to {entity_type} ({horiz_dist:.0f}m away)")
+        self.set_status(f"Flying to {entity_type}...")
+    
     def maintain_auto_fly_height(self, chunk_manager: ChunkManager):
-        """Keep camera at consistent height above terrain during tour mode."""
-        if self.auto_fly_mode == 0:
+        """Keep camera at consistent height above terrain during tour mode (wander only)."""
+        # Only maintain height in wander mode (mode 1), showcase handles its own height
+        if self.auto_fly_mode != 1:
             return
         
         terrain_h = self.get_terrain_height(chunk_manager)
@@ -2795,7 +2968,8 @@ def run_explorer(config: WorldConfig = None):
         
         # Auto-fly mode - overrides manual movement
         if camera.auto_fly_mode > 0:
-            auto_forward, auto_right, auto_up = camera.update_auto_fly(dt, chunk_manager)
+            auto_forward, auto_right, auto_up = camera.update_auto_fly(
+                dt, chunk_manager, flora_manager, animal_manager, structure_manager)
             forward += auto_forward
             right += auto_right
             up += auto_up
