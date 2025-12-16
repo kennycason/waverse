@@ -203,6 +203,9 @@ class GamepadManager:
             if not self.config_loaded:
                 print("    Run 'python calibrate_gamepad.py' to calibrate!")
             
+            # Print axis info
+            num_axes = self.gamepad.get_numaxes()
+            print(f"    Axes: {num_axes} | L-Stick: {GamepadConfig.L_STICK_X},{GamepadConfig.L_STICK_Y}")
             print("    Press G to toggle gamepad debug mode")
             return True
         else:
@@ -215,7 +218,10 @@ class GamepadManager:
     def check_hotplug(self):
         """Check for newly connected gamepads (call periodically)."""
         if self.gamepad is None:
-            return self._detect_gamepad()
+            found = self._detect_gamepad()
+            if found:
+                print(f"  [Gamepad] Hotplug detected: {self.name}")
+            return found
         return True
     
     def is_connected(self) -> bool:
@@ -250,6 +256,8 @@ class GamepadManager:
     
     def get_movement(self) -> tuple:
         """Get movement from left stick (forward, right)."""
+        if not self.gamepad:
+            return (0.0, 0.0)
         x = self.get_axis(GamepadConfig.L_STICK_X, GamepadConfig.L_STICK_X_INV)
         y = self.get_axis(GamepadConfig.L_STICK_Y, GamepadConfig.L_STICK_Y_INV)
         # Forward is -Y on stick (up = negative Y), right is +X
@@ -888,13 +896,15 @@ class Camera:
         self.pitch = -20
         self.flying = False  # Start in walking mode
         self.target_y = 40
-        self.speed_level = 4  # Default speed (1.0x) - index into SPEED_LEVELS
+        self.speed_level = 3  # Default speed (0.6x) - index into SPEED_LEVELS
         
-        # Jump physics
+        # Jump/fall physics
         self.jumping = False
+        self.falling = False  # Triggered by steep drops (cliff/building edge)
         self.jump_velocity = 0.0
-        self.gravity = 6.0  # Faster gravity for snappier falls
+        self.gravity = 12.0  # Faster gravity for snappier falls
         self.jump_strength = 1.7  # 2x higher jump - can reach ~2 stories
+        self.last_ground_y = 0.0  # Track previous ground height for cliff detection
         
         # Auto-fly / Tour mode: 0=off, 1=wander, 2=showcase
         self.auto_fly_mode = 0
@@ -916,6 +926,15 @@ class Camera:
         self.showcase_arc_progress = 0.0  # 0.0 to 1.0 along arc
         self.showcase_start_pos = None    # (x, y, z) starting position
         self.showcase_arc_height = 0.0    # Peak height of arc
+        self.showcase_view_distance = 15.0  # Distance to stay from target
+        self.showcase_orbit_angle = 0.0   # Current angle orbiting target
+        self.showcase_target_yaw = 0.0    # For smooth camera transitions
+        self.showcase_target_pitch = 0.0
+        self.showcase_explore_dir = 0.0   # Direction to bias exploration (radians)
+        self.showcase_is_structure = False  # Track if current target is a building
+        self.showcase_pan_direction = 1   # -1 = pan left, +1 = pan right
+        self.showcase_pan_speed = 8.0     # degrees per second
+        self.showcase_pan_total = 30.0    # total degrees to pan
         
         # Status message display
         self.status_message = ""
@@ -1115,11 +1134,11 @@ class Camera:
             if self.y < effective_ground:
                 self.y = effective_ground
         else:
-            # Walking/jumping mode
+            # Walking/jumping/falling mode
             self.target_y = effective_ground
             
-            if self.jumping:
-                # Apply jump physics
+            if self.jumping or self.falling:
+                # Apply physics (same for jumping and falling)
                 self.jump_velocity -= self.gravity * 0.016  # Gravity
                 new_y = self.y + self.jump_velocity
                 
@@ -1142,21 +1161,51 @@ class Camera:
                 if self.y <= effective_ground:
                     self.y = effective_ground
                     self.jumping = False
+                    self.falling = False
                     self.jump_velocity = 0.0
+                    self.last_ground_y = effective_ground
             else:
-                # Follow terrain/floor smoothly
+                # Walking - follow terrain/floor smoothly
                 diff = self.target_y - self.y
                 
-                # Fast catch-up if far from terrain, smooth otherwise
-                if abs(diff) > 2:
-                    self.y += diff * 0.5  # Fast snap
+                # Check for steep drop (cliff/building edge)
+                # If ground dropped significantly below our feet, trigger falling
+                ground_drop = self.last_ground_y - effective_ground
+                CLIFF_THRESHOLD = 4.0  # Must be a significant drop (forgiving)
+                
+                if ground_drop > CLIFF_THRESHOLD and self.y > effective_ground + 1.0:
+                    # We walked off something steep! Start falling naturally
+                    self.falling = True
+                    self.jump_velocity = 0.0  # Start with no upward velocity
+                elif diff < 0:
+                    # Going UP - snap/smooth follow (hills)
+                    if abs(diff) > 2:
+                        self.y += diff * 0.5  # Fast snap up
+                    else:
+                        self.y += diff * WALK_SMOOTH_SPEED  # Smooth follow up
+                    self.last_ground_y = effective_ground
                 else:
-                    self.y += diff * WALK_SMOOTH_SPEED  # Smooth follow
+                    # Going DOWN - gentle slopes follow terrain, steep drops fall
+                    if diff < 2.0:
+                        # Gentle slope - smooth follow
+                        self.y += diff * WALK_SMOOTH_SPEED
+                        self.last_ground_y = effective_ground
+                    elif diff < CLIFF_THRESHOLD:
+                        # Moderate slope - faster follow
+                        self.y += diff * 0.3
+                        self.last_ground_y = effective_ground
+                    else:
+                        # Very steep - we're above ground, trigger falling
+                        self.falling = True
+                        self.jump_velocity = 0.0
             
             # HARD FLOOR: Never let camera go below terrain on steep hills
             min_height = terrain_h + PLAYER_HEIGHT + 0.5  # Extra 0.5 buffer
             if self.y < min_height:
                 self.y = min_height
+                self.falling = False
+                self.jumping = False
+                self.jump_velocity = 0.0
             
             # Fly when pressing up (H key or R3)
             if up > 0:
@@ -1165,9 +1214,10 @@ class Camera:
                 self.y += speed
     
     def jump(self):
-        """Start a jump if on the ground and not already jumping."""
-        if not self.flying and not self.jumping:
+        """Start a jump if on the ground and not already jumping/falling."""
+        if not self.flying and not self.jumping and not self.falling:
             self.jumping = True
+            self.falling = False
             self.jump_velocity = self.jump_strength
     
     def add_marker(self):
@@ -1219,6 +1269,16 @@ class Camera:
             print("  TOUR MODE: OFF")
             print("=" * 40)
             self.set_status("Tour mode: OFF")
+            # Reset states that tour mode may have modified
+            self.view_yaw_offset = 0.0
+            self.view_pitch = -5.0
+            self.view_return_timer = 0.0
+            self.showcase_target = None
+            self.showcase_phase = 0
+            # Reset pitch to a reasonable value (extreme pitch causes no horizontal movement in flying mode)
+            if abs(self.pitch) > 60:
+                self.pitch = -10.0
+            # Note: keep flying state as-is (user can land with F)
         elif self.auto_fly_mode == 1:
             print("=" * 40)
             print("  TOUR MODE: WANDER")
@@ -1239,7 +1299,7 @@ class Camera:
             print("=" * 40)
             print("  TOUR MODE: SHOWCASE")
             print("  Flying to interesting plants/animals/structures")
-            print("  Watch the world's creations!")
+            print("  Exploring in consistent direction!")
             print("  Press X to turn OFF")
             print("=" * 40)
             self.set_status("Tour mode: SHOWCASE")
@@ -1247,6 +1307,9 @@ class Camera:
             self.showcase_target = None  # Will be set on first update
             self.showcase_phase = 0
             self.showcase_arc_progress = 0.0
+            # Start exploring in current facing direction
+            self.showcase_explore_dir = math.radians(self.yaw)
+            self.showcase_is_structure = False
     
     def update_auto_fly(self, dt: float, chunk_manager: ChunkManager, 
                         flora_manager=None, animal_manager=None, structure_manager=None):
@@ -1300,7 +1363,7 @@ class Camera:
         move_x = -math.sin(self.wander_direction)
         move_z = -math.cos(self.wander_direction)
         
-        move_speed = speed_mult * 0.5 * dt_seconds * 60  # Convert back to per-frame
+        move_speed = speed_mult * 0.25 * dt_seconds * 60  # Slower for chunk gen to keep up
         self.x += move_x * move_speed
         self.z += move_z * move_speed
         
@@ -1320,40 +1383,66 @@ class Camera:
         target_x, target_y, target_z, entity_type, entity = self.showcase_target
         
         if self.showcase_phase == 0:
-            # === TRAVELING PHASE - fly in arc toward target ===
-            self.showcase_arc_progress += dt_seconds * 0.15 * speed_mult  # Speed of travel
+            # === TRAVELING PHASE - fly in arc toward viewing position (not target itself) ===
+            self.showcase_arc_progress += dt_seconds * 0.08 * speed_mult  # Slower for chunk gen
+            
+            # Calculate viewing position (offset from target)
+            # We orbit at showcase_view_distance from target
+            view_x = target_x + math.sin(self.showcase_orbit_angle) * self.showcase_view_distance
+            view_z = target_z + math.cos(self.showcase_orbit_angle) * self.showcase_view_distance
+            view_y = target_y + 3.0  # Slightly above target
             
             if self.showcase_arc_progress >= 1.0:
-                # Arrived! Switch to viewing
+                # Arrived! Switch to viewing with pan
                 self.showcase_phase = 1
-                self.showcase_view_timer = 2.5 + random.random() * 1.5  # 2.5-4 seconds viewing
                 self.showcase_arc_progress = 1.0
-                print(f"  Showcase: viewing {entity_type}...")
+                
+                # Set up pan: random direction, random angle (5-30 degrees)
+                self.showcase_pan_direction = random.choice([-1, 1])
+                self.showcase_pan_total = 5.0 + random.random() * 25.0  # 5-30 degrees
+                view_time = 3.0 + random.random() * 2.0  # 3-5 seconds viewing
+                self.showcase_view_timer = view_time
+                # Slower pan for smaller angles (same view time)
+                self.showcase_pan_speed = self.showcase_pan_total / view_time
+                
+                print(f"  Showcase: viewing {entity_type} (pan {self.showcase_pan_total:.0f}°)")
             
             # Calculate position along arc (parabolic)
             t = self.showcase_arc_progress
             start_x, start_y, start_z = self.showcase_start_pos
             
-            # Horizontal: linear interpolation
-            self.x = start_x + (target_x - start_x) * t
-            self.z = start_z + (target_z - start_z) * t
+            # Horizontal: linear interpolation toward viewing position
+            self.x = start_x + (view_x - start_x) * t
+            self.z = start_z + (view_z - start_z) * t
             
             # Vertical: parabolic arc (peaks at t=0.5)
-            base_y = start_y + (target_y - start_y) * t
+            base_y = start_y + (view_y - start_y) * t
             arc_offset = self.showcase_arc_height * 4 * t * (1 - t)  # Parabola: 0 at t=0,1; max at t=0.5
             self.y = base_y + arc_offset
             
-            # Look toward target
+            # Look toward target (not viewing position) - SMOOTH transition
             dx = target_x - self.x
             dy = target_y - self.y
             dz = target_z - self.z
             dist = math.sqrt(dx*dx + dz*dz)
             
-            self.yaw = math.degrees(math.atan2(-dx, -dz))
-            self.pitch = math.degrees(math.atan2(dy, dist)) if dist > 0.1 else 0
+            # Calculate target camera angles
+            self.showcase_target_yaw = math.degrees(math.atan2(-dx, -dz))
+            raw_pitch = math.degrees(math.atan2(dy, dist)) if dist > 0.1 else 0
+            # Clamp pitch to avoid looking too far up/down
+            self.showcase_target_pitch = max(-25, min(15, raw_pitch))
+            
+            # Smooth interpolation toward target angles
+            # Handle yaw wraparound
+            yaw_diff = self.showcase_target_yaw - self.yaw
+            while yaw_diff > 180: yaw_diff -= 360
+            while yaw_diff < -180: yaw_diff += 360
+            self.yaw += yaw_diff * 0.08  # Smooth factor
+            
+            self.pitch += (self.showcase_target_pitch - self.pitch) * 0.08
             
         elif self.showcase_phase == 1:
-            # === VIEWING PHASE - hover and look at target ===
+            # === VIEWING PHASE - stay in place, pan camera left or right ===
             self.showcase_view_timer -= dt_seconds
             
             if self.showcase_view_timer <= 0:
@@ -1361,26 +1450,27 @@ class Camera:
                 self.showcase_phase = 2  # Will trigger new target on next update
                 print(f"  Showcase: moving to next...")
             
-            # Stay at viewing position, slowly orbit
-            orbit_speed = 10.0  # degrees per second
-            self.yaw += orbit_speed * dt_seconds
+            # Pan the camera (rotate yaw) - direction and speed set when arrived
+            # showcase_pan_direction: -1 = left, +1 = right
+            # showcase_pan_speed: degrees per second (slower for smaller angles)
+            self.yaw += self.showcase_pan_direction * self.showcase_pan_speed * dt_seconds
             
-            # Keep looking at target
-            dx = target_x - self.x
-            dy = target_y - self.y
-            dz = target_z - self.z
-            dist = math.sqrt(dx*dx + dz*dz)
-            self.pitch = math.degrees(math.atan2(dy, dist)) if dist > 0.1 else -10
+            # Smoothly level out pitch while viewing
+            target_pitch = -5.0  # Slight downward look
+            self.pitch += (target_pitch - self.pitch) * 0.05
         
         return 0, 0, 0
     
     def _pick_showcase_target(self, chunk_manager: ChunkManager, 
                               flora_manager, animal_manager, structure_manager):
-        """Pick a random interesting target (plant/animal/structure) nearby."""
+        """Pick a target in the direction we're currently facing (after pan)."""
         candidates = []
         
+        # Use current yaw as exploration direction (we're facing this way after pan)
+        self.showcase_explore_dir = math.radians(self.yaw)
+        
         cx, cz = self.get_chunk_pos()
-        search_range = 3  # Search in nearby chunks
+        search_range = 15  # Search much further for distant targets
         
         # Collect plants
         if flora_manager:
@@ -1390,11 +1480,13 @@ class Camera:
                     if key in flora_manager.chunk_plants:
                         for plant in flora_manager.chunk_plants[key]:
                             # Skip tiny plants
-                            if hasattr(plant, 'dna') and plant.dna.height > 2.0:
+                            plant_height = getattr(plant.dna, 'height_gene', None)
+                            if plant_height and plant_height.value > 2.0:
                                 dist = math.sqrt((plant.x - self.x)**2 + (plant.z - self.z)**2)
-                                if 30 < dist < 200:  # Not too close, not too far
-                                    candidates.append((plant.x, plant.y + plant.dna.height * 0.5, plant.z, 
-                                                      "plant", plant))
+                                if 500 < dist < 3000:  # 5x further!
+                                    h = plant_height.value if plant_height else 3.0
+                                    candidates.append((plant.x, plant.y + h * 0.5, plant.z, 
+                                                      "plant", plant, dist))
         
         # Collect animals
         if animal_manager:
@@ -1404,9 +1496,9 @@ class Camera:
                     if key in animal_manager.chunk_animals:
                         for animal in animal_manager.chunk_animals[key]:
                             dist = math.sqrt((animal.x - self.x)**2 + (animal.z - self.z)**2)
-                            if 30 < dist < 200:
+                            if 500 < dist < 3000:  # 5x further!
                                 candidates.append((animal.x, animal.y + 2.0, animal.z, 
-                                                  "animal", animal))
+                                                  "animal", animal, dist))
         
         # Collect structures
         if structure_manager:
@@ -1416,27 +1508,102 @@ class Camera:
                     floor = structure.floors[0]
                     struct_x = floor.x
                     struct_z = floor.z
-                    struct_y = floor.y + 10  # Above the structure
+                    struct_y = floor.y + 15  # Higher above for better view
                     dist = math.sqrt((struct_x - self.x)**2 + (struct_z - self.z)**2)
-                    if 30 < dist < 250:
-                        candidates.append((struct_x, struct_y, struct_z, "structure", structure))
+                    if 500 < dist < 4000:  # 5x further!
+                        candidates.append((struct_x, struct_y, struct_z, "structure", structure, dist))
         
         if not candidates:
             self.showcase_target = None
             return
         
-        # Pick random target
-        target = random.choice(candidates)
-        self.showcase_target = target
+        # STRICT filtering: only consider targets within 45 degrees of where we're facing
+        forward_candidates = []
+        for cand in candidates:
+            tx, ty, tz, etype, ent, dist = cand
+            
+            # Calculate direction to this target
+            dx = tx - self.x
+            dz = tz - self.z
+            target_dir = math.atan2(dx, dz)
+            
+            # How well does it align with our facing direction?
+            dir_diff = abs(target_dir - self.showcase_explore_dir)
+            while dir_diff > math.pi: dir_diff = abs(dir_diff - 2 * math.pi)
+            
+            # Only keep targets within 45 degrees of forward
+            if dir_diff < math.radians(45):
+                forward_candidates.append((cand, dist, dir_diff))
+        
+        # If no forward targets, widen to 90 degrees
+        if not forward_candidates:
+            for cand in candidates:
+                tx, ty, tz, etype, ent, dist = cand
+                dx = tx - self.x
+                dz = tz - self.z
+                target_dir = math.atan2(dx, dz)
+                dir_diff = abs(target_dir - self.showcase_explore_dir)
+                while dir_diff > math.pi: dir_diff = abs(dir_diff - 2 * math.pi)
+                if dir_diff < math.radians(90):
+                    forward_candidates.append((cand, dist, dir_diff))
+        
+        # If still nothing, take anything
+        if not forward_candidates:
+            forward_candidates = [(c, c[5], 0) for c in candidates]
+        
+        # Score remaining candidates: prefer distant + well-aligned
+        scored = []
+        for cand, dist, dir_diff in forward_candidates:
+            direction_score = 1.0 - (dir_diff / math.radians(45))  # 1.0 = perfect, 0 = 45° off
+            distance_score = dist / 3000.0  # Favor further targets
+            
+            score = max(0.1, (direction_score * 2.0) + (distance_score * 1.0))
+            
+            # Slight bonus for structures
+            if cand[3] == "structure":
+                score += 0.3
+            
+            scored.append((cand, score))
+        
+        # Weighted random selection
+        total_score = sum(s for _, s in scored)
+        if total_score <= 0:
+            target_full = forward_candidates[0][0] if forward_candidates else random.choice(candidates)
+        else:
+            r = random.random() * total_score
+            cumulative = 0
+            target_full = scored[0][0]
+            for cand, score in scored:
+                cumulative += score
+                if r <= cumulative:
+                    target_full = cand
+                    break
+        
+        # Unpack target (now has 6 elements including dist)
+        target_x, target_y, target_z, entity_type, entity, target_dist = target_full
+        self.showcase_target = (target_x, target_y, target_z, entity_type, entity)
         self.showcase_start_pos = (self.x, self.y, self.z)
         self.showcase_phase = 0
         self.showcase_arc_progress = 0.0
+        self.showcase_is_structure = (entity_type == "structure")
         
-        # Calculate arc height based on distance and height difference
-        target_x, target_y, target_z, entity_type, entity = target
+        # Calculate arc height based on distance
         horiz_dist = math.sqrt((target_x - self.x)**2 + (target_z - self.z)**2)
         height_diff = abs(target_y - self.y)
-        self.showcase_arc_height = max(15.0, horiz_dist * 0.3, height_diff * 0.5)
+        self.showcase_arc_height = max(20.0, horiz_dist * 0.25, height_diff * 0.5)
+        
+        # Set initial orbit angle based on approach direction
+        dx = self.x - target_x
+        dz = self.z - target_z
+        self.showcase_orbit_angle = math.atan2(dx, dz)
+        
+        # Vary viewing distance based on entity type
+        if entity_type == "structure":
+            self.showcase_view_distance = 35.0  # Much further for buildings - stay OUTSIDE
+        elif entity_type == "plant":
+            self.showcase_view_distance = 7.0   # Plants
+        else:
+            self.showcase_view_distance = 9.0   # Animals
         
         print(f"  Showcase: flying to {entity_type} ({horiz_dist:.0f}m away)")
         self.set_status(f"Flying to {entity_type}...")
@@ -2712,6 +2879,8 @@ def run_explorer(config: WorldConfig = None):
     print("    P=Screenshot | B=Use Tool | Tab=Menu | ,/.=Switch Tool | X=Tour | N=Warp")
     if gamepad.is_connected():
         print(f"  GAMEPAD ({gamepad.name}):")
+        print(f"    Config: L-Stick X={GamepadConfig.L_STICK_X} Y={GamepadConfig.L_STICK_Y}")
+        print(f"    Config: R-Stick X={GamepadConfig.R_STICK_X} Y={GamepadConfig.R_STICK_Y}")
         print("    Left Stick=Move | Right Stick=Look")
         print("    L3=Down | R3=Up | L2/R2=Speed | A=Jump | B=Use Tool | Y=Screenshot")
         print("    L1/R1=Switch Tool | START=Menu | SELECT=Warp")
@@ -2850,8 +3019,8 @@ def run_explorer(config: WorldConfig = None):
             if keys[pygame.K_LEFT]: camera.menu_switch_tab(-1)
             if keys[pygame.K_RIGHT]: camera.menu_switch_tab(1)
         
-        # Gamepad input (check for hotplug every 60 frames)
-        if frame_count % 60 == 0:
+        # Gamepad input (check for hotplug every 30 frames - more responsive)
+        if frame_count % 30 == 0:
             gamepad.check_hotplug()
         
         if gamepad.is_connected():
@@ -2881,6 +3050,10 @@ def run_explorer(config: WorldConfig = None):
             if not camera.menu_open:
                 gp_move = gamepad.get_movement()
                 gp_speed = SPEED_LEVELS[camera.speed_level]
+                # Debug: print if movement detected
+                if abs(gp_move[0]) > 0.1 or abs(gp_move[1]) > 0.1:
+                    if frame_count % 30 == 0:  # Print every 0.5 sec
+                        print(f"  [GP] L-Stick: fwd={gp_move[0]:.2f} right={gp_move[1]:.2f}")
                 forward += gp_move[0] * dt * gp_speed
                 right += gp_move[1] * dt * gp_speed
             
