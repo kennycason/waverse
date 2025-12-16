@@ -383,3 +383,307 @@ class ChunkDNAManager:
         for key in to_remove:
             del self.chunk_dna[key]
 
+
+# =============================================================================
+# WIND DNA - Wind vectors per chunk with smooth gradients
+# =============================================================================
+@dataclass
+class WindDNA:
+    """Wind pattern for a chunk - grid of wind vectors with smooth gradients."""
+    
+    # Grid of wind vectors (direction in radians, magnitude 0-1)
+    # Shape: (grid_size, grid_size, 2) where [..., 0] = direction, [..., 1] = magnitude
+    grid_size: int = 4  # 4x4 = 16 wind sample points per chunk
+    
+    # Base wind parameters
+    base_direction: float = 0.0  # Radians (0 = north, pi/2 = east)
+    base_magnitude: float = 0.3  # Average wind strength (0-1)
+    magnitude_variation: float = 0.2  # How much magnitude varies across chunk
+    direction_variation: float = 0.3  # How much direction varies (radians)
+    
+    # Cycle parameters (rotating winds)
+    has_cycle: bool = False
+    cycle_speed: float = 0.0  # Radians per second (0 = no cycle)
+    cycle_center: Tuple[float, float] = (0.5, 0.5)  # Center of rotation (0-1, 0-1)
+    
+    # Gust parameters
+    gust_chance: float = 0.1  # Chance of gusts
+    gust_strength: float = 0.3  # Additional magnitude during gusts
+    
+    # The actual wind grid (computed from parameters)
+    wind_grid: np.ndarray = field(default=None, repr=False)
+    
+    def __post_init__(self):
+        if self.wind_grid is None:
+            self._generate_grid()
+    
+    def _generate_grid(self):
+        """Generate wind vector grid from parameters."""
+        self.wind_grid = np.zeros((self.grid_size, self.grid_size, 2), dtype=np.float32)
+        
+        for i in range(self.grid_size):
+            for j in range(self.grid_size):
+                # Normalized position (0-1)
+                px = i / (self.grid_size - 1) if self.grid_size > 1 else 0.5
+                py = j / (self.grid_size - 1) if self.grid_size > 1 else 0.5
+                
+                # Direction with smooth variation
+                dir_offset = np.sin(px * np.pi * 2) * np.cos(py * np.pi) * self.direction_variation
+                direction = self.base_direction + dir_offset
+                
+                # Add rotation for cyclic wind
+                if self.has_cycle:
+                    dx = px - self.cycle_center[0]
+                    dy = py - self.cycle_center[1]
+                    # Tangent direction for circular motion
+                    tangent = np.arctan2(-dx, dy)
+                    direction = direction * 0.5 + tangent * 0.5
+                
+                # Magnitude with smooth variation
+                mag_offset = np.sin(px * np.pi * 1.5) * np.sin(py * np.pi * 1.5) * self.magnitude_variation
+                magnitude = np.clip(self.base_magnitude + mag_offset, 0.05, 1.0)
+                
+                self.wind_grid[i, j, 0] = direction
+                self.wind_grid[i, j, 1] = magnitude
+    
+    def get_wind_at(self, local_x: float, local_z: float, time: float = 0.0) -> Tuple[float, float, float]:
+        """Get interpolated wind at a local position (0-1, 0-1). Returns (dir, mag, gust)."""
+        # Clamp to valid range
+        local_x = np.clip(local_x, 0.0, 1.0)
+        local_z = np.clip(local_z, 0.0, 1.0)
+        
+        # Grid coordinates
+        gx = local_x * (self.grid_size - 1)
+        gz = local_z * (self.grid_size - 1)
+        
+        # Bilinear interpolation
+        x0, x1 = int(gx), min(int(gx) + 1, self.grid_size - 1)
+        z0, z1 = int(gz), min(int(gz) + 1, self.grid_size - 1)
+        
+        fx = gx - x0
+        fz = gz - z0
+        
+        # Interpolate direction (needs special handling for angle wraparound)
+        d00 = self.wind_grid[x0, z0, 0]
+        d01 = self.wind_grid[x0, z1, 0]
+        d10 = self.wind_grid[x1, z0, 0]
+        d11 = self.wind_grid[x1, z1, 0]
+        
+        # Average angles properly
+        direction = self._interpolate_angles(d00, d01, d10, d11, fx, fz)
+        
+        # Add time-based cycle rotation
+        if self.has_cycle and self.cycle_speed != 0:
+            direction += time * self.cycle_speed
+        
+        # Interpolate magnitude
+        m00 = self.wind_grid[x0, z0, 1]
+        m01 = self.wind_grid[x0, z1, 1]
+        m10 = self.wind_grid[x1, z0, 1]
+        m11 = self.wind_grid[x1, z1, 1]
+        
+        magnitude = (m00 * (1-fx) * (1-fz) + m01 * (1-fx) * fz + 
+                    m10 * fx * (1-fz) + m11 * fx * fz)
+        
+        # Gust calculation (time-based noise)
+        gust = 0.0
+        if self.gust_chance > 0:
+            gust_noise = np.sin(time * 2.0 + local_x * 10 + local_z * 10) * 0.5 + 0.5
+            if gust_noise > (1.0 - self.gust_chance):
+                gust = self.gust_strength * gust_noise
+        
+        return direction, magnitude, gust
+    
+    def _interpolate_angles(self, a00, a01, a10, a11, fx, fz):
+        """Bilinear interpolation of angles (handles wraparound)."""
+        # Convert to unit vectors, interpolate, convert back
+        def angle_to_vec(a):
+            return np.cos(a), np.sin(a)
+        
+        v00 = angle_to_vec(a00)
+        v01 = angle_to_vec(a01)
+        v10 = angle_to_vec(a10)
+        v11 = angle_to_vec(a11)
+        
+        vx = (v00[0] * (1-fx) * (1-fz) + v01[0] * (1-fx) * fz + 
+              v10[0] * fx * (1-fz) + v11[0] * fx * fz)
+        vy = (v00[1] * (1-fx) * (1-fz) + v01[1] * (1-fx) * fz + 
+              v10[1] * fx * (1-fz) + v11[1] * fx * fz)
+        
+        return np.arctan2(vy, vx)
+    
+    def mutate(self, rng: np.random.Generator) -> "WindDNA":
+        """Create mutated copy."""
+        new_dna = WindDNA(grid_size=self.grid_size)
+        
+        # 20% chance to mutate each parameter
+        mutation_rate = 0.2
+        
+        # Direction drifts slowly
+        if rng.random() < mutation_rate:
+            new_dna.base_direction = self.base_direction + rng.normal(0, 0.2)
+        else:
+            new_dna.base_direction = self.base_direction
+        
+        # Magnitude changes gradually
+        if rng.random() < mutation_rate:
+            new_dna.base_magnitude = np.clip(self.base_magnitude + rng.normal(0, 0.1), 0.05, 0.8)
+        else:
+            new_dna.base_magnitude = self.base_magnitude
+        
+        # Variation parameters
+        new_dna.magnitude_variation = np.clip(self.magnitude_variation + rng.normal(0, 0.05), 0.0, 0.4)
+        new_dna.direction_variation = np.clip(self.direction_variation + rng.normal(0, 0.05), 0.0, 0.6)
+        
+        # Cycle - small chance to gain/lose
+        if rng.random() < 0.05:  # 5% chance to toggle cycle
+            new_dna.has_cycle = not self.has_cycle
+            if new_dna.has_cycle:
+                new_dna.cycle_speed = rng.uniform(0.1, 0.5) * rng.choice([-1, 1])
+                new_dna.cycle_center = (rng.uniform(0.3, 0.7), rng.uniform(0.3, 0.7))
+        else:
+            new_dna.has_cycle = self.has_cycle
+            new_dna.cycle_speed = self.cycle_speed
+            new_dna.cycle_center = self.cycle_center
+        
+        # Gust parameters
+        new_dna.gust_chance = np.clip(self.gust_chance + rng.normal(0, 0.02), 0.0, 0.3)
+        new_dna.gust_strength = np.clip(self.gust_strength + rng.normal(0, 0.05), 0.0, 0.5)
+        
+        # Regenerate grid
+        new_dna._generate_grid()
+        
+        return new_dna
+    
+    def crossover(self, other: "WindDNA", rng: np.random.Generator) -> "WindDNA":
+        """Create offspring from two parent DNAs."""
+        new_dna = WindDNA(grid_size=self.grid_size)
+        blend = rng.uniform(0.3, 0.7)
+        
+        # Blend parameters
+        new_dna.base_direction = self._blend_angles(self.base_direction, other.base_direction, blend)
+        new_dna.base_magnitude = self.base_magnitude * (1 - blend) + other.base_magnitude * blend
+        new_dna.magnitude_variation = self.magnitude_variation * (1 - blend) + other.magnitude_variation * blend
+        new_dna.direction_variation = self.direction_variation * (1 - blend) + other.direction_variation * blend
+        
+        # Cycle from one parent
+        if rng.random() < blend:
+            new_dna.has_cycle = other.has_cycle
+            new_dna.cycle_speed = other.cycle_speed
+            new_dna.cycle_center = other.cycle_center
+        else:
+            new_dna.has_cycle = self.has_cycle
+            new_dna.cycle_speed = self.cycle_speed
+            new_dna.cycle_center = self.cycle_center
+        
+        # Gust parameters
+        new_dna.gust_chance = self.gust_chance * (1 - blend) + other.gust_chance * blend
+        new_dna.gust_strength = self.gust_strength * (1 - blend) + other.gust_strength * blend
+        
+        # Regenerate grid
+        new_dna._generate_grid()
+        
+        return new_dna
+    
+    def _blend_angles(self, a1: float, a2: float, blend: float) -> float:
+        """Blend two angles properly."""
+        v1 = (np.cos(a1), np.sin(a1))
+        v2 = (np.cos(a2), np.sin(a2))
+        vx = v1[0] * (1 - blend) + v2[0] * blend
+        vy = v1[1] * (1 - blend) + v2[1] * blend
+        return np.arctan2(vy, vx)
+    
+    @staticmethod
+    def create_random(rng: np.random.Generator) -> "WindDNA":
+        """Create a random wind pattern."""
+        dna = WindDNA()
+        dna.base_direction = rng.uniform(0, 2 * np.pi)
+        dna.base_magnitude = rng.uniform(0.1, 0.6)
+        dna.magnitude_variation = rng.uniform(0.05, 0.25)
+        dna.direction_variation = rng.uniform(0.1, 0.4)
+        dna.has_cycle = rng.random() < 0.15  # 15% have cycles
+        if dna.has_cycle:
+            dna.cycle_speed = rng.uniform(0.1, 0.4) * rng.choice([-1, 1])
+            dna.cycle_center = (rng.uniform(0.2, 0.8), rng.uniform(0.2, 0.8))
+        dna.gust_chance = rng.uniform(0.0, 0.2)
+        dna.gust_strength = rng.uniform(0.1, 0.3)
+        dna._generate_grid()
+        return dna
+
+
+class WindManager:
+    """Manages wind DNA per chunk and provides wind queries."""
+    
+    def __init__(self, seed: int = 42):
+        self.seed = seed
+        self.chunk_wind: Dict[Tuple[int, int], WindDNA] = {}
+        self.default_wind = WindDNA()
+        self.time = 0.0
+    
+    def update(self, dt: float):
+        """Update wind time."""
+        self.time += dt
+    
+    def get_wind_dna(self, cx: int, cz: int) -> WindDNA:
+        """Get or create wind DNA for a chunk."""
+        key = (cx, cz)
+        
+        if key in self.chunk_wind:
+            return self.chunk_wind[key]
+        
+        # Create from neighbors
+        chunk_seed = abs(hash((self.seed, cx, cz, "wind"))) % (2**31)
+        rng = np.random.default_rng(chunk_seed)
+        
+        neighbors = []
+        for dx in [-1, 0, 1]:
+            for dz in [-1, 0, 1]:
+                if dx == 0 and dz == 0:
+                    continue
+                neighbor_key = (cx + dx, cz + dz)
+                if neighbor_key in self.chunk_wind:
+                    neighbors.append(self.chunk_wind[neighbor_key])
+        
+        if not neighbors:
+            new_wind = WindDNA.create_random(rng)
+        elif len(neighbors) == 1:
+            new_wind = neighbors[0].mutate(rng)
+        else:
+            parents = rng.choice(neighbors, size=min(2, len(neighbors)), replace=False)
+            if len(parents) == 2:
+                new_wind = parents[0].crossover(parents[1], rng).mutate(rng)
+            else:
+                new_wind = parents[0].mutate(rng)
+        
+        self.chunk_wind[key] = new_wind
+        return new_wind
+    
+    def get_wind_at_world(self, world_x: float, world_z: float, chunk_size: float) -> Tuple[float, float, float]:
+        """Get wind at world coordinates. Returns (direction, magnitude, gust)."""
+        # Calculate chunk coordinates
+        cx = int(world_x // chunk_size)
+        cz = int(world_z // chunk_size)
+        
+        # Local position within chunk (0-1)
+        local_x = (world_x % chunk_size) / chunk_size
+        local_z = (world_z % chunk_size) / chunk_size
+        
+        # Get wind from this chunk
+        wind_dna = self.get_wind_dna(cx, cz)
+        return wind_dna.get_wind_at(local_x, local_z, self.time)
+    
+    def get_wind_vector(self, world_x: float, world_z: float, chunk_size: float) -> Tuple[float, float]:
+        """Get wind as (vx, vz) vector."""
+        direction, magnitude, gust = self.get_wind_at_world(world_x, world_z, chunk_size)
+        total_mag = magnitude + gust
+        return (np.cos(direction) * total_mag, np.sin(direction) * total_mag)
+    
+    def cleanup_distant(self, center_cx: int, center_cz: int, max_distance: int = 30):
+        """Remove wind data for distant chunks."""
+        to_remove = [
+            key for key in self.chunk_wind
+            if abs(key[0] - center_cx) > max_distance or abs(key[1] - center_cz) > max_distance
+        ]
+        for key in to_remove:
+            del self.chunk_wind[key]
+

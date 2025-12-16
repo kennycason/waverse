@@ -1321,8 +1321,9 @@ class FloraManager:
     
     def render_chunk_flora(self, cx: int, cz: int, camera_x: float, camera_z: float,
                            heightmap, chunk_world_x: float, chunk_world_z: float,
-                           tile_scale: float, height_scale: float = 3.5):
-        """Render plants for a chunk with appropriate LOD."""
+                           tile_scale: float, height_scale: float = 3.5,
+                           wind_manager=None, time: float = 0.0):
+        """Render plants for a chunk with appropriate LOD and wind sway."""
         plants = self.get_plants_for_chunk(
             cx, cz, heightmap, chunk_world_x, chunk_world_z, tile_scale, height_scale
         )
@@ -1335,10 +1336,13 @@ class FloraManager:
         # Distance to chunk center
         chunk_center_x = chunk_world_x + 16 * tile_scale
         chunk_center_z = chunk_world_z + 16 * tile_scale
+        chunk_size = 32 * tile_scale
         dist = math.sqrt((camera_x - chunk_center_x)**2 + (camera_z - chunk_center_z)**2)
         
         glDisable(GL_LIGHTING)
         
+        # Simple LOD rendering - wind gusts are now visual-only (no plant sway)
+        # This preserves original pre-wind performance
         if dist < self.LOD_FULL:
             glCallList(full_list)
         elif dist < self.LOD_SIMPLE:
@@ -1347,6 +1351,88 @@ class FloraManager:
             glCallList(point_list)
         
         glEnable(GL_LIGHTING)
+    
+    # Cache for plant sway angles (updated at low FPS for performance)
+    _sway_cache: dict = {}
+    _sway_frame: int = 0
+    
+    def _render_plants_with_wind(self, plants: list, camera_x: float, camera_z: float,
+                                  wind_manager, chunk_size: float, time: float):
+        """Render plants with wind sway - HIGHLY OPTIMIZED.
+        
+        Strategy:
+        - Only 1 in 4 plants get sway (most visible ones)
+        - Sway angles cached at very low fps (1-3fps)
+        - Single wind query per chunk
+        """
+        FloraManager._sway_frame += 1
+        
+        if not plants:
+            return
+        
+        # Get wind ONCE for entire chunk
+        chunk_cx = plants[0].x
+        chunk_cz = plants[0].z
+        wind_dir, wind_mag, wind_gust = wind_manager.get_wind_at_world(
+            chunk_cx, chunk_cz, chunk_size
+        )
+        total_wind = wind_mag + wind_gust
+        
+        # Skip all sway if no wind
+        if total_wind < 0.1:
+            for plant in plants:
+                PlantRenderer.draw_full(plant)
+            return
+        
+        wind_dir_deg = math.degrees(wind_dir)
+        
+        for i, plant in enumerate(plants):
+            dist_sq = (plant.x - camera_x)**2 + (plant.z - camera_z)**2
+            
+            # Skip plants too far
+            if dist_sq > 10000:  # 100^2
+                continue
+            
+            # Only 1 in 4 plants sway (based on position hash for consistency)
+            plant_hash = int((plant.x * 7 + plant.z * 13)) % 4
+            if plant_hash != 0:
+                PlantRenderer.draw_full(plant)
+                continue
+            
+            # Distance-based update frequency (VERY slow updates)
+            # Close: ~2fps, Far: ~0.5fps
+            dist = math.sqrt(dist_sq)
+            update_interval = 30 if dist < 50 else 60
+            
+            plant_id = id(plant)
+            should_update = (FloraManager._sway_frame + plant_id) % update_interval == 0
+            
+            # Get or calculate cached sway
+            if should_update or plant_id not in FloraManager._sway_cache:
+                plant_height = plant.dna.height_gene.value if hasattr(plant.dna, 'height_gene') else 3.0
+                phase = (plant.x + plant.z) * 0.1
+                oscillation = math.sin(time * 1.5 + phase) * 0.5 + 0.5
+                sway_angle = total_wind * plant_height * 1.0 * oscillation
+                FloraManager._sway_cache[plant_id] = sway_angle
+            else:
+                sway_angle = FloraManager._sway_cache.get(plant_id, 0.0)
+            
+            # Apply sway
+            if sway_angle > 0.5:
+                glPushMatrix()
+                glTranslatef(plant.x, plant.y, plant.z)
+                glRotatef(wind_dir_deg, 0, 1, 0)
+                glRotatef(sway_angle, 1, 0, 0)
+                glRotatef(-wind_dir_deg, 0, 1, 0)
+                glTranslatef(-plant.x, -plant.y, -plant.z)
+                PlantRenderer.draw_full(plant)
+                glPopMatrix()
+            else:
+                PlantRenderer.draw_full(plant)
+        
+        # Clear cache less frequently
+        if FloraManager._sway_frame % 1800 == 0:  # Every 30 seconds
+            FloraManager._sway_cache.clear()
     
     def cleanup_chunk(self, cx: int, cz: int):
         """Remove cached data for a chunk."""

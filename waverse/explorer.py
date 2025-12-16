@@ -13,7 +13,7 @@ import json
 import os
 import random
 
-from .chunk_dna import ChunkDNAManager, ChunkDNA, TerrainPalette
+from .chunk_dna import ChunkDNAManager, ChunkDNA, TerrainPalette, WindManager
 from .climate import ClimateManager, WeatherRenderer
 from .structures import StructureManager, Structure
 
@@ -766,7 +766,7 @@ def load_position(seed: int) -> dict:
 
 def warp_to_new_universe(camera, chunk_manager, chunk_renderer, flora_manager, 
                          animal_manager, chunk_dna_manager, climate_manager,
-                         structure_manager, config):
+                         structure_manager, config, wind_manager=None):
     """Warp to a far-away location with completely fresh DNA AND terrain - a new waverse!"""
     print("=" * 60)
     print("  WARPING TO NEW WAVERSE...")
@@ -810,6 +810,11 @@ def warp_to_new_universe(camera, chunk_manager, chunk_renderer, flora_manager,
     climate_manager.biomes.clear()
     climate_manager.regional_weather.clear()
     climate_manager.seed = new_universe_seed
+    
+    # Reset wind system
+    if wind_manager:
+        wind_manager.chunk_wind.clear()
+        wind_manager.seed = new_universe_seed
     
     # Reset flora DNA pool with new mutations
     flora_manager.dna_pool.seed = new_universe_seed
@@ -2356,6 +2361,151 @@ def draw_menu(display: tuple, camera: Camera, hud_font=None):
     glMatrixMode(GL_MODELVIEW)
 
 
+# =============================================================================
+# WIND PARTICLE SYSTEM
+# =============================================================================
+class WindGust:
+    """A single fog-like wind gust that drifts through the world."""
+    __slots__ = ['x', 'y', 'z', 'vx', 'vz', 'life', 'size', 'alpha']
+    
+    def __init__(self, x, y, z, vx, vz, size):
+        self.x = x
+        self.y = y
+        self.z = z
+        self.vx = vx
+        self.vz = vz
+        self.life = 8.0 + random.random() * 6.0  # Long-lived gusts
+        self.size = size
+        self.alpha = 0.0  # Fades in
+
+
+class WindGustManager:
+    """Simple wind visualization - occasional gusts flowing through like fog."""
+    
+    def __init__(self, wind_manager: WindManager, chunk_size: float):
+        self.wind_manager = wind_manager
+        self.chunk_size = chunk_size
+        self.gusts: list = []
+        self.gust_timer = 3.0  # Start with a gust soon
+        self.max_gusts = 8  # Very few gusts at a time
+    
+    def update(self, dt: float, camera_x: float, camera_z: float, camera_y: float = 20.0):
+        """Update gusts - very lightweight, occasional fog-like wind."""
+        dt_sec = dt / 60.0 if dt > 1 else dt
+        
+        # Update wind manager
+        self.wind_manager.update(dt_sec)
+        
+        # Update existing gusts
+        alive = []
+        for g in self.gusts:
+            g.life -= dt_sec
+            if g.life > 0:
+                # Follow wind gradient
+                wind_dir, wind_mag, _ = self.wind_manager.get_wind_at_world(
+                    g.x, g.z, self.chunk_size)
+                
+                # Smooth velocity update
+                target_vx = math.cos(wind_dir) * wind_mag * 25
+                target_vz = math.sin(wind_dir) * wind_mag * 25
+                g.vx = g.vx * 0.95 + target_vx * 0.05
+                g.vz = g.vz * 0.95 + target_vz * 0.05
+                
+                g.x += g.vx * dt_sec
+                g.z += g.vz * dt_sec
+                
+                # Fade in/out
+                if g.life > 6.0:
+                    g.alpha = min(0.15, (8.0 - g.life) * 0.075)
+                elif g.life < 2.0:
+                    g.alpha = g.life * 0.075
+                else:
+                    g.alpha = 0.15
+                
+                alive.append(g)
+        
+        self.gusts = alive
+        
+        # Spawn new gusts occasionally
+        self.gust_timer -= dt_sec
+        if self.gust_timer <= 0 and len(self.gusts) < self.max_gusts:
+            self._spawn_gust(camera_x, camera_z, camera_y)
+            self.gust_timer = 4.0 + random.random() * 8.0  # 4-12 seconds between gusts
+    
+    def _spawn_gust(self, cam_x: float, cam_z: float, cam_y: float = 20.0):
+        """Spawn a fog-like wind gust."""
+        # Spawn at edge of view, moving toward/past camera
+        angle = random.random() * math.pi * 2
+        spawn_dist = 60.0 + random.random() * 40.0
+        
+        x = cam_x + math.cos(angle) * spawn_dist
+        z = cam_z + math.sin(angle) * spawn_dist
+        
+        # Get wind direction
+        wind_dir, wind_mag, _ = self.wind_manager.get_wind_at_world(x, z, self.chunk_size)
+        
+        # Height - mostly low, some at camera level when flying
+        if cam_y > 40 and random.random() < 0.3:
+            y = cam_y + (random.random() - 0.5) * 30
+        else:
+            y = 3 + random.random() * 20
+        
+        # Initial velocity from wind
+        vx = math.cos(wind_dir) * wind_mag * 20
+        vz = math.sin(wind_dir) * wind_mag * 20
+        
+        # Size - large fog-like clouds
+        size = 15.0 + random.random() * 25.0
+        
+        self.gusts.append(WindGust(x, y, z, vx, vz, size))
+    
+    def render(self, camera):
+        """Render fog-like wind gusts - very simple billboarded quads."""
+        if not self.gusts:
+            return
+        
+        glDisable(GL_LIGHTING)
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+        glDisable(GL_TEXTURE_2D)
+        
+        # Billboard vectors
+        yaw_rad = math.radians(camera.yaw)
+        right_x = math.cos(yaw_rad)
+        right_z = -math.sin(yaw_rad)
+        
+        glBegin(GL_QUADS)
+        for g in self.gusts:
+            dx = g.x - camera.x
+            dz = g.z - camera.z
+            dist = math.sqrt(dx*dx + dz*dz)
+            
+            if dist > 150:
+                continue
+            
+            # Distance fade
+            dist_fade = 1.0 - (dist / 150.0)
+            alpha = g.alpha * dist_fade
+            
+            if alpha < 0.01:
+                continue
+            
+            # Soft white-blue fog color
+            glColor4f(0.9, 0.95, 1.0, alpha)
+            
+            # Draw as simple billboard quad
+            s = g.size
+            glVertex3f(g.x - right_x * s, g.y - s * 0.5, g.z - right_z * s)
+            glVertex3f(g.x + right_x * s, g.y - s * 0.5, g.z + right_z * s)
+            glVertex3f(g.x + right_x * s, g.y + s * 0.5, g.z + right_z * s)
+            glVertex3f(g.x - right_x * s, g.y + s * 0.5, g.z - right_z * s)
+        
+        glEnd()
+        
+        glDisable(GL_BLEND)
+        glEnable(GL_LIGHTING)
+
+
 def draw_hud(display: tuple, camera: Camera, sky: SkySystem = None, climate: ClimateManager = None,
               hud_font=None):
     """Draw HUD."""
@@ -2841,6 +2991,11 @@ def run_explorer(config: WorldConfig = None):
     climate_manager = ClimateManager(config.seed)
     weather_renderer = WeatherRenderer()
     
+    # Wind system
+    wind_manager = WindManager(config.seed)
+    chunk_world_size = CHUNK_SIZE * TERRAIN_SCALE
+    wind_gusts = WindGustManager(wind_manager, chunk_world_size)
+    
     # Structure system (buildings, etc.)
     structure_manager = StructureManager(config.seed)
     
@@ -2891,6 +3046,7 @@ def run_explorer(config: WorldConfig = None):
     mouse_look = False
     last_chunk = None
     frame_count = 0
+    game_time = 0.0  # Total elapsed time in seconds
     
     # Gamepad speed change cooldown
     gamepad_speed_cooldown = 0
@@ -2900,6 +3056,7 @@ def run_explorer(config: WorldConfig = None):
     while running:
         frame_count += 1
         dt = clock.tick(60) / 16.67
+        game_time += dt / 60.0  # Convert to seconds
         
         # Update gamepad speed cooldown
         if gamepad_speed_cooldown > 0:
@@ -2964,7 +3121,7 @@ def run_explorer(config: WorldConfig = None):
                     warp_to_new_universe(camera, chunk_manager, chunk_renderer, 
                                         flora_manager, animal_manager,
                                         chunk_dna_manager, climate_manager,
-                                        structure_manager, config)
+                                        structure_manager, config, wind_manager)
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 3:
                     mouse_look = True
@@ -3131,7 +3288,7 @@ def run_explorer(config: WorldConfig = None):
                 warp_to_new_universe(camera, chunk_manager, chunk_renderer, 
                                     flora_manager, animal_manager,
                                     chunk_dna_manager, climate_manager,
-                                    structure_manager, config)
+                                    structure_manager, config, wind_manager)
                 gamepad_speed_cooldown = 60  # Longer cooldown for warp
             
         
@@ -3200,7 +3357,8 @@ def run_explorer(config: WorldConfig = None):
             chunk = chunk_manager.get_chunk(cx, cz)
             flora_manager.render_chunk_flora(
                 cx, cz, cam_pos[0], cam_pos[2],
-                chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE
+                chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE,
+                wind_manager=wind_manager, time=game_time
             )
             # Spawn animals for this chunk if not already done
             animal_manager.spawn_animals_for_chunk(
@@ -3235,6 +3393,10 @@ def run_explorer(config: WorldConfig = None):
         weather_renderer.render(cam_pos[0], cam_pos[1], cam_pos[2],
                                climate_manager.current_weather,
                                climate_manager.lightning_flash)
+        
+        # Update and render wind gusts (occasional fog-like wind)
+        wind_gusts.update(dt, camera.x, camera.z, camera.y)
+        wind_gusts.render(camera)
         
         draw_crosshair(display)
         draw_hud(display, camera, sky, climate_manager, hud_font)
