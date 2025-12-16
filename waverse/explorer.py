@@ -433,13 +433,13 @@ def render_entity_to_png(entity, entity_type: str, filename: str, size: int = 51
             # size is a tuple (width, height, depth), sum the max dimensions
             total_size = sum(max(seg.size) if isinstance(seg.size, tuple) else seg.size 
                            for seg in entity.dna.body_segments)
-            entity_height = total_size * 2.0  # More generous height estimate
-            entity_width = total_size * 2.5
-        # Animals are centered at origin, legs go down
-        center_y = 0.0  # Center on origin
-        # Use symmetric view for animals (centered)
-        view_bottom_mult = 1.2  # More room below for legs/tentacles
-        view_top_mult = 1.2    # Symmetric
+            entity_height = total_size * 2.5  # More generous height estimate
+            entity_width = total_size * 3.0
+        # Animals body is mostly above origin, legs go down
+        center_y = entity_height * 0.3  # Look at middle of body (above legs)
+        # View needs more room below for legs/tentacles
+        view_bottom_mult = 1.8  # Much more room below
+        view_top_mult = 0.8    # Less room above (body doesn't extend much up)
     
     # Add padding - make view big enough
     view_size = max(entity_height, entity_width, 5.0) * 2.0
@@ -894,7 +894,7 @@ class Camera:
         self.jumping = False
         self.jump_velocity = 0.0
         self.gravity = 6.0  # Faster gravity for snappier falls
-        self.jump_strength = 0.85  # Higher jump - can reach ~1 story (5.5 units)
+        self.jump_strength = 1.7  # 2x higher jump - can reach ~2 stories
         
         # Auto-fly / Tour mode: 0=off, 1=wander
         self.auto_fly_mode = 0
