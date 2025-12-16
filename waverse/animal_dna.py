@@ -202,7 +202,7 @@ class AnimalType:
     CROC = "croc"        # Alligators/crocodiles
     HOPPER = "hopper"    # Rabbits, frogs, kangaroos
     
-    # New underwater creatures
+    # Underwater creatures
     CRUSTACEAN = "crustacean"  # Crabs, lobsters, shrimp
     CORAL = "coral"            # Coral polyps (stationary but animated)
     BARNACLE = "barnacle"      # Attached filter feeders
@@ -212,9 +212,30 @@ class AnimalType:
     ANEMONE = "anemone"        # Sea anemones with tentacles
     URCHIN = "urchin"          # Spiny sea urchins
     
+    # New creative types
+    OCTOPUS = "octopus"        # 8-armed swimmers/crawlers
+    AMOEBA = "amoeba"          # Blobby, morphing creatures
+    HYDRA = "hydra"            # Multi-headed tentacle creature
+    NAUTILUS = "nautilus"      # Spiral-shelled swimmers
+    MANTA = "manta"            # Flat ray-like swimmers
+    TRILOBITE = "trilobite"    # Ancient segmented crawlers
+    CENTIPEDE = "centipede"    # Many-legged crawlers
+    BLOB = "blob"              # Amorphous shifting shapes
+    POLYP = "polyp"            # Branching coral-like
+    NUDIBRANCH = "nudibranch"  # Colorful sea slugs with frills
+    
     ALL = [INSECT, BIRD, FISH, MAMMAL, REPTILE, AMPHIBIAN, JELLYFISH, WORM, ALIEN, 
            METROID, SPIDER, DINOSAUR, CROC, HOPPER, CRUSTACEAN, CORAL, BARNACLE, 
-           SNAIL, SEASTAR, SQUID, ANEMONE, URCHIN]
+           SNAIL, SEASTAR, SQUID, ANEMONE, URCHIN, OCTOPUS, AMOEBA, HYDRA, NAUTILUS,
+           MANTA, TRILOBITE, CENTIPEDE, BLOB, POLYP, NUDIBRANCH]
+    
+    # Categories for spawning
+    AQUATIC = [FISH, JELLYFISH, SQUID, OCTOPUS, NAUTILUS, MANTA, ANEMONE, 
+               CORAL, SEASTAR, URCHIN, NUDIBRANCH, HYDRA]
+    LAND = [INSECT, MAMMAL, REPTILE, SPIDER, DINOSAUR, CROC, HOPPER, 
+            CENTIPEDE, TRILOBITE, SNAIL, WORM]
+    AMPHIBIOUS = [AMPHIBIAN, CRUSTACEAN, AMOEBA, BLOB]
+    FLYING = [BIRD, ALIEN, METROID]
     
     # Ground animals for weighted spawning
     GROUND = [MAMMAL, REPTILE, WORM, INSECT, SPIDER, DINOSAUR, CROC, HOPPER, SNAIL]
@@ -478,6 +499,26 @@ class AnimalDNA:
             dna = cls._create_anemone(rng)
         elif animal_type == AnimalType.URCHIN:
             dna = cls._create_urchin(rng)
+        elif animal_type == AnimalType.OCTOPUS:
+            dna = cls._create_octopus(rng)
+        elif animal_type == AnimalType.AMOEBA:
+            dna = cls._create_amoeba(rng)
+        elif animal_type == AnimalType.HYDRA:
+            dna = cls._create_hydra(rng)
+        elif animal_type == AnimalType.NAUTILUS:
+            dna = cls._create_nautilus(rng)
+        elif animal_type == AnimalType.MANTA:
+            dna = cls._create_manta(rng)
+        elif animal_type == AnimalType.TRILOBITE:
+            dna = cls._create_trilobite(rng)
+        elif animal_type == AnimalType.CENTIPEDE:
+            dna = cls._create_centipede(rng)
+        elif animal_type == AnimalType.BLOB:
+            dna = cls._create_blob(rng)
+        elif animal_type == AnimalType.POLYP:
+            dna = cls._create_polyp(rng)
+        elif animal_type == AnimalType.NUDIBRANCH:
+            dna = cls._create_nudibranch(rng)
         else:
             dna = cls._create_mammal(rng)
         
@@ -1704,6 +1745,424 @@ class AnimalDNA:
         dna.primary_color = color
         dna.movement_speed = 0.02 + rng.random() * 0.05  # Almost stationary
         dna.animation_speed = 0.2 + rng.random() * 0.2
+        
+        return dna
+    
+    @classmethod
+    def _create_octopus(cls, rng: np.random.Generator) -> "AnimalDNA":
+        """Create octopus DNA - 8-armed cephalopod."""
+        hue = rng.choice([0.0, 0.05, 0.55, 0.75, 0.85])  # Reds, purples, blues
+        color = _hsv_to_rgb(hue, 0.6 + rng.random() * 0.3, 0.4 + rng.random() * 0.4)
+        
+        size_mult = 0.5 + rng.random() * 1.5
+        
+        dna = cls()
+        dna.body_segments = [
+            BodySegmentGene(shape="ellipsoid", size=(0.4 * size_mult, 0.3 * size_mult, 0.35 * size_mult), color=color),
+        ]
+        
+        # 8 tentacle arms
+        dna.limbs = [
+            LimbGene(limb_type="tentacle", segment_count=5,
+                    segment_lengths=[0.3 * size_mult, 0.25 * size_mult, 0.2 * size_mult, 0.15 * size_mult, 0.1 * size_mult],
+                    segment_widths=[0.08 * size_mult, 0.06 * size_mult, 0.04 * size_mult, 0.03 * size_mult, 0.02 * size_mult],
+                    color=color),
+        ]
+        dna.limb_pairs = 4  # 8 arms total
+        
+        dna.features = [
+            FeatureGene(feature_type="eye", count=2, size=0.1 * size_mult, color=(0.9, 0.8, 0.1), position=(0.3, 0.15, 0.2)),
+        ]
+        
+        dna.movement_type = MovementType.SWIM
+        dna.ai_behavior = AIBehavior.WANDER
+        dna.base_scale = size_mult
+        dna.primary_color = color
+        dna.movement_speed = 0.6 + rng.random() * 0.8
+        dna.animation_speed = 0.8 + rng.random() * 0.6
+        
+        return dna
+    
+    @classmethod
+    def _create_amoeba(cls, rng: np.random.Generator) -> "AnimalDNA":
+        """Create amoeba DNA - blobby, morphing single-celled look."""
+        # Translucent colors
+        hue = rng.random()
+        color = _hsv_to_rgb(hue, 0.3 + rng.random() * 0.3, 0.6 + rng.random() * 0.3)
+        
+        size_mult = 0.3 + rng.random() * 1.2
+        
+        dna = cls()
+        # Multiple overlapping blobs for amorphous look
+        num_blobs = 3 + rng.integers(0, 4)
+        dna.body_segments = []
+        for i in range(num_blobs):
+            blob_size = 0.15 + rng.random() * 0.2
+            dna.body_segments.append(
+                BodySegmentGene(shape="ellipsoid", 
+                              size=(blob_size * size_mult, blob_size * 0.8 * size_mult, blob_size * size_mult), 
+                              color=color)
+            )
+        
+        # Pseudopod-like extensions
+        dna.limbs = [
+            LimbGene(limb_type="pseudopod", segment_count=2,
+                    segment_lengths=[0.15 * size_mult, 0.1 * size_mult],
+                    segment_widths=[0.06 * size_mult, 0.04 * size_mult],
+                    color=color),
+        ]
+        dna.limb_pairs = 2 + rng.integers(0, 3)
+        
+        # Maybe a nucleus-like feature
+        if rng.random() < 0.7:
+            dna.features = [
+                FeatureGene(feature_type="nucleus", count=1, 
+                           size=0.08 * size_mult, 
+                           color=_hsv_to_rgb(hue, 0.5, 0.4), 
+                           position=(0, 0, 0)),
+            ]
+        else:
+            dna.features = []
+        
+        dna.movement_type = MovementType.CRAWL
+        dna.ai_behavior = AIBehavior.WANDER
+        dna.base_scale = size_mult
+        dna.primary_color = color
+        dna.movement_speed = 0.1 + rng.random() * 0.3  # Slow
+        dna.animation_speed = 0.3 + rng.random() * 0.3
+        
+        return dna
+    
+    @classmethod
+    def _create_hydra(cls, rng: np.random.Generator) -> "AnimalDNA":
+        """Create hydra DNA - multi-headed tentacle creature."""
+        hue = rng.choice([0.3, 0.45, 0.55, 0.65])  # Greens and blues
+        color = _hsv_to_rgb(hue, 0.5 + rng.random() * 0.3, 0.5 + rng.random() * 0.3)
+        
+        size_mult = 0.4 + rng.random() * 1.0
+        
+        dna = cls()
+        # Multiple "heads" as body segments
+        num_heads = 3 + rng.integers(0, 5)
+        dna.body_segments = [
+            BodySegmentGene(shape="ellipsoid", size=(0.3 * size_mult, 0.4 * size_mult, 0.3 * size_mult), color=color),
+        ]
+        
+        # Tentacles from each head
+        dna.limbs = [
+            LimbGene(limb_type="tentacle", segment_count=4,
+                    segment_lengths=[0.25 * size_mult, 0.2 * size_mult, 0.15 * size_mult, 0.1 * size_mult],
+                    segment_widths=[0.05 * size_mult, 0.04 * size_mult, 0.03 * size_mult, 0.02 * size_mult],
+                    color=color),
+        ]
+        dna.limb_pairs = num_heads
+        
+        dna.features = [
+            FeatureGene(feature_type="mouth", count=num_heads, size=0.05 * size_mult, 
+                       color=(0.8, 0.2, 0.2), position=(0.4, 0.1, 0)),
+        ]
+        
+        dna.movement_type = MovementType.FLOAT
+        dna.ai_behavior = AIBehavior.WANDER
+        dna.base_scale = size_mult
+        dna.primary_color = color
+        dna.movement_speed = 0.2 + rng.random() * 0.4
+        dna.animation_speed = 0.5 + rng.random() * 0.5
+        
+        return dna
+    
+    @classmethod
+    def _create_nautilus(cls, rng: np.random.Generator) -> "AnimalDNA":
+        """Create nautilus DNA - spiral-shelled swimmer."""
+        # Shell colors - pearly, striped
+        shell_hue = rng.choice([0.05, 0.08, 0.1, 0.55])
+        shell_color = _hsv_to_rgb(shell_hue, 0.3 + rng.random() * 0.2, 0.7 + rng.random() * 0.2)
+        body_color = _hsv_to_rgb(0.0, 0.1, 0.9)  # Pale body
+        
+        size_mult = 0.4 + rng.random() * 0.8
+        
+        dna = cls()
+        # Spiral shell body
+        dna.body_segments = [
+            BodySegmentGene(shape="ellipsoid", size=(0.4 * size_mult, 0.35 * size_mult, 0.4 * size_mult), color=shell_color),
+            BodySegmentGene(shape="ellipsoid", size=(0.15 * size_mult, 0.2 * size_mult, 0.15 * size_mult), color=body_color),
+        ]
+        
+        # Multiple small tentacles
+        dna.limbs = [
+            LimbGene(limb_type="tentacle", segment_count=2,
+                    segment_lengths=[0.15 * size_mult, 0.1 * size_mult],
+                    segment_widths=[0.02 * size_mult, 0.01 * size_mult],
+                    color=body_color),
+        ]
+        dna.limb_pairs = 4 + rng.integers(0, 4)  # Many small tentacles
+        
+        dna.features = [
+            FeatureGene(feature_type="eye", count=2, size=0.06 * size_mult, color=(0.1, 0.1, 0.1), position=(0.3, 0.15, 0.15)),
+        ]
+        
+        dna.movement_type = MovementType.SWIM
+        dna.ai_behavior = AIBehavior.WANDER
+        dna.base_scale = size_mult
+        dna.primary_color = shell_color
+        dna.pattern_type = "stripes"
+        dna.movement_speed = 0.3 + rng.random() * 0.4
+        dna.animation_speed = 0.6 + rng.random() * 0.4
+        
+        return dna
+    
+    @classmethod
+    def _create_manta(cls, rng: np.random.Generator) -> "AnimalDNA":
+        """Create manta ray DNA - flat, graceful swimmers."""
+        # Dark blues, blacks, grays
+        hue = rng.choice([0.6, 0.65, 0.7, 0.0])
+        color = _hsv_to_rgb(hue, 0.3 + rng.random() * 0.3, 0.2 + rng.random() * 0.3)
+        belly_color = _hsv_to_rgb(0, 0.05, 0.9)  # White belly
+        
+        size_mult = 1.0 + rng.random() * 2.0  # Large creatures
+        
+        dna = cls()
+        # Flat body
+        dna.body_segments = [
+            BodySegmentGene(shape="ellipsoid", size=(0.8 * size_mult, 0.1 * size_mult, 0.6 * size_mult), color=color),
+        ]
+        
+        # Wing-like fins
+        dna.limbs = [
+            LimbGene(limb_type="fin", segment_count=1,
+                    segment_lengths=[0.8 * size_mult],
+                    segment_widths=[0.02 * size_mult],
+                    color=color, membrane=True, membrane_color=color + (0.7,)),
+        ]
+        dna.limb_pairs = 1
+        
+        # Tail
+        dna.tail_style = "whip"
+        dna.tail_length = 1.5
+        
+        dna.features = [
+            FeatureGene(feature_type="eye", count=2, size=0.06 * size_mult, color=(0.1, 0.1, 0.1), position=(0.4, 0.05, 0.3)),
+            FeatureGene(feature_type="mouth", count=1, size=0.15 * size_mult, color=(0.3, 0.3, 0.3), position=(0.5, -0.05, 0)),
+        ]
+        
+        dna.movement_type = MovementType.SWIM
+        dna.ai_behavior = AIBehavior.SCHOOL
+        dna.base_scale = size_mult
+        dna.primary_color = color
+        dna.secondary_color = belly_color
+        dna.movement_speed = 0.8 + rng.random() * 0.6
+        dna.animation_speed = 0.4 + rng.random() * 0.3  # Graceful, slow flapping
+        
+        return dna
+    
+    @classmethod
+    def _create_trilobite(cls, rng: np.random.Generator) -> "AnimalDNA":
+        """Create trilobite DNA - ancient segmented crawlers."""
+        hue = rng.choice([0.05, 0.08, 0.1, 0.55])  # Browns, grays
+        color = _hsv_to_rgb(hue, 0.3 + rng.random() * 0.2, 0.3 + rng.random() * 0.3)
+        
+        size_mult = 0.3 + rng.random() * 0.8
+        
+        dna = cls()
+        # Segmented body
+        num_segments = 5 + rng.integers(0, 6)
+        dna.body_segments = []
+        for i in range(num_segments):
+            seg_width = 0.2 - i * 0.015
+            dna.body_segments.append(
+                BodySegmentGene(shape="ellipsoid", 
+                              size=(0.12 * size_mult, 0.04 * size_mult, seg_width * size_mult), 
+                              color=color)
+            )
+        
+        # Many small legs
+        dna.limbs = [
+            LimbGene(limb_type="leg", segment_count=2,
+                    segment_lengths=[0.06 * size_mult, 0.04 * size_mult],
+                    segment_widths=[0.015 * size_mult, 0.01 * size_mult],
+                    color=color),
+        ]
+        dna.limb_pairs = num_segments
+        
+        dna.features = [
+            FeatureGene(feature_type="eye", count=2, size=0.04 * size_mult, color=(0.1, 0.1, 0.1), position=(0.4, 0.02, 0.08)),
+        ]
+        
+        dna.movement_type = MovementType.CRAWL
+        dna.ai_behavior = AIBehavior.GRAZE
+        dna.base_scale = size_mult
+        dna.primary_color = color
+        dna.movement_speed = 0.2 + rng.random() * 0.3
+        dna.animation_speed = 1.0 + rng.random() * 0.5
+        
+        return dna
+    
+    @classmethod
+    def _create_centipede(cls, rng: np.random.Generator) -> "AnimalDNA":
+        """Create centipede DNA - many-legged crawlers."""
+        hue = rng.choice([0.0, 0.05, 0.08, 0.55, 0.75])  # Reds, oranges, browns
+        color = _hsv_to_rgb(hue, 0.6 + rng.random() * 0.3, 0.4 + rng.random() * 0.3)
+        
+        size_mult = 0.3 + rng.random() * 1.0
+        
+        dna = cls()
+        # Long segmented body
+        num_segments = 8 + rng.integers(0, 10)
+        dna.body_segments = []
+        for i in range(num_segments):
+            dna.body_segments.append(
+                BodySegmentGene(shape="ellipsoid", 
+                              size=(0.08 * size_mult, 0.04 * size_mult, 0.06 * size_mult), 
+                              color=color)
+            )
+        
+        # Legs on each segment
+        dna.limbs = [
+            LimbGene(limb_type="leg", segment_count=2,
+                    segment_lengths=[0.08 * size_mult, 0.06 * size_mult],
+                    segment_widths=[0.012 * size_mult, 0.008 * size_mult],
+                    color=_hsv_to_rgb(hue, 0.4, 0.3)),
+        ]
+        dna.limb_pairs = num_segments
+        
+        # Antennae and fangs
+        dna.features = [
+            FeatureGene(feature_type="eye", count=2, size=0.02 * size_mult, color=(0.1, 0.1, 0.1), position=(0.4, 0.02, 0.02)),
+            FeatureGene(feature_type="antenna", count=2, size=0.1 * size_mult, color=color, position=(0.45, 0.02, 0.02)),
+            FeatureGene(feature_type="fang", count=2, size=0.04 * size_mult, color=(0.2, 0.1, 0.1), position=(0.42, -0.01, 0.02)),
+        ]
+        
+        dna.movement_type = MovementType.CRAWL
+        dna.ai_behavior = AIBehavior.WANDER
+        dna.base_scale = size_mult
+        dna.primary_color = color
+        dna.movement_speed = 0.5 + rng.random() * 0.8  # Fast!
+        dna.animation_speed = 2.0 + rng.random() * 1.0
+        
+        return dna
+    
+    @classmethod
+    def _create_blob(cls, rng: np.random.Generator) -> "AnimalDNA":
+        """Create blob DNA - amorphous shifting creature."""
+        hue = rng.random()
+        color = _hsv_to_rgb(hue, 0.4 + rng.random() * 0.4, 0.5 + rng.random() * 0.4)
+        
+        size_mult = 0.4 + rng.random() * 1.5
+        
+        dna = cls()
+        # Single blobby mass
+        dna.body_segments = [
+            BodySegmentGene(shape="ellipsoid", 
+                          size=(0.4 * size_mult, 0.25 * size_mult, 0.35 * size_mult), 
+                          color=color),
+        ]
+        
+        # No real limbs, just pseudopods
+        dna.limbs = []
+        dna.limb_pairs = 0
+        
+        # Maybe internal structures visible
+        if rng.random() < 0.5:
+            dna.features = [
+                FeatureGene(feature_type="nucleus", count=1 + rng.integers(0, 3), 
+                           size=0.08 * size_mult, 
+                           color=_hsv_to_rgb(hue, 0.6, 0.3), 
+                           position=(0, 0, 0)),
+            ]
+        else:
+            dna.features = []
+        
+        dna.movement_type = MovementType.CRAWL
+        dna.ai_behavior = AIBehavior.WANDER
+        dna.base_scale = size_mult
+        dna.primary_color = color
+        dna.has_glow = rng.random() < 0.3  # Some glow
+        dna.glow_color = _hsv_to_rgb(hue, 0.5, 0.8)
+        dna.movement_speed = 0.1 + rng.random() * 0.2
+        dna.animation_speed = 0.2 + rng.random() * 0.3
+        
+        return dna
+    
+    @classmethod
+    def _create_polyp(cls, rng: np.random.Generator) -> "AnimalDNA":
+        """Create polyp DNA - coral-like branching creature."""
+        hue = rng.choice([0.0, 0.05, 0.55, 0.75, 0.85])  # Pinks, purples, blues
+        color = _hsv_to_rgb(hue, 0.5 + rng.random() * 0.3, 0.6 + rng.random() * 0.3)
+        
+        size_mult = 0.3 + rng.random() * 0.8
+        
+        dna = cls()
+        # Stalk body
+        dna.body_segments = [
+            BodySegmentGene(shape="cylinder", size=(0.1 * size_mult, 0.3 * size_mult, 0.1 * size_mult), color=color),
+        ]
+        
+        # Tentacle crown
+        dna.limbs = [
+            LimbGene(limb_type="tentacle", segment_count=3,
+                    segment_lengths=[0.12 * size_mult, 0.08 * size_mult, 0.05 * size_mult],
+                    segment_widths=[0.02 * size_mult, 0.015 * size_mult, 0.01 * size_mult],
+                    color=_hsv_to_rgb(hue, 0.4, 0.7)),
+        ]
+        dna.limb_pairs = 4 + rng.integers(0, 4)
+        
+        dna.features = [
+            FeatureGene(feature_type="mouth", count=1, size=0.05 * size_mult, 
+                       color=_hsv_to_rgb(hue, 0.7, 0.4), position=(0, 0.35, 0)),
+        ]
+        
+        dna.movement_type = MovementType.FLOAT  # Sessile but sways
+        dna.ai_behavior = AIBehavior.GRAZE
+        dna.base_scale = size_mult
+        dna.primary_color = color
+        dna.movement_speed = 0.0  # Stationary
+        dna.animation_speed = 0.5 + rng.random() * 0.3
+        
+        return dna
+    
+    @classmethod
+    def _create_nudibranch(cls, rng: np.random.Generator) -> "AnimalDNA":
+        """Create nudibranch DNA - colorful sea slugs with frills."""
+        # VERY colorful - psychedelic
+        hue = rng.random()
+        color = _hsv_to_rgb(hue, 0.8 + rng.random() * 0.2, 0.7 + rng.random() * 0.3)
+        frill_hue = (hue + 0.3 + rng.random() * 0.4) % 1.0
+        frill_color = _hsv_to_rgb(frill_hue, 0.9, 0.8)
+        
+        size_mult = 0.2 + rng.random() * 0.6
+        
+        dna = cls()
+        # Slug body
+        dna.body_segments = [
+            BodySegmentGene(shape="ellipsoid", size=(0.15 * size_mult, 0.06 * size_mult, 0.08 * size_mult), color=color),
+            BodySegmentGene(shape="ellipsoid", size=(0.2 * size_mult, 0.08 * size_mult, 0.1 * size_mult), color=color),
+            BodySegmentGene(shape="ellipsoid", size=(0.15 * size_mult, 0.06 * size_mult, 0.08 * size_mult), color=color),
+        ]
+        
+        # Frilly cerata (gill-like projections)
+        dna.limbs = [
+            LimbGene(limb_type="frill", segment_count=2,
+                    segment_lengths=[0.06 * size_mult, 0.04 * size_mult],
+                    segment_widths=[0.02 * size_mult, 0.01 * size_mult],
+                    color=frill_color),
+        ]
+        dna.limb_pairs = 4 + rng.integers(0, 6)
+        
+        # Rhinophores (head tentacles)
+        dna.features = [
+            FeatureGene(feature_type="antenna", count=2, size=0.06 * size_mult, color=frill_color, position=(0.4, 0.06, 0.03)),
+            FeatureGene(feature_type="eye", count=2, size=0.015 * size_mult, color=(0.1, 0.1, 0.1), position=(0.35, 0.04, 0.03)),
+        ]
+        
+        dna.movement_type = MovementType.CRAWL
+        dna.ai_behavior = AIBehavior.GRAZE
+        dna.base_scale = size_mult
+        dna.primary_color = color
+        dna.secondary_color = frill_color
+        dna.pattern_type = rng.choice(["spots", "stripes", "patches"])
+        dna.pattern_contrast = 0.5 + rng.random() * 0.4
+        dna.movement_speed = 0.1 + rng.random() * 0.2
+        dna.animation_speed = 0.4 + rng.random() * 0.3
         
         return dna
 

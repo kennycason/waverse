@@ -16,6 +16,7 @@ import random
 from .chunk_dna import ChunkDNAManager, ChunkDNA, TerrainPalette
 from .climate import ClimateManager, WeatherRenderer
 from .structures import StructureManager, Structure
+from .life import LifeSimulator
 
 try:
     from OpenGL.GL import *
@@ -766,7 +767,7 @@ def load_position(seed: int) -> dict:
 
 def warp_to_new_universe(camera, chunk_manager, chunk_renderer, flora_manager, 
                          animal_manager, chunk_dna_manager, climate_manager,
-                         structure_manager, config):
+                         structure_manager, config, life_simulator=None):
     """Warp to a far-away location with completely fresh DNA AND terrain - a new waverse!"""
     print("=" * 60)
     print("  WARPING TO NEW WAVERSE...")
@@ -810,6 +811,16 @@ def warp_to_new_universe(camera, chunk_manager, chunk_renderer, flora_manager,
     climate_manager.biomes.clear()
     climate_manager.regional_weather.clear()
     climate_manager.seed = new_universe_seed
+    
+    # Reset life simulator
+    if life_simulator:
+        life_simulator.plant_life.clear()
+        life_simulator.animal_life.clear()
+        life_simulator.eggs.clear()
+        life_simulator.pending_births.clear()
+        life_simulator.pending_plants.clear()
+        life_simulator.seed = new_universe_seed
+        life_simulator.rng = random.Random(new_universe_seed)
     
     # Reset flora DNA pool with new mutations
     flora_manager.dna_pool.seed = new_universe_seed
@@ -2841,6 +2852,9 @@ def run_explorer(config: WorldConfig = None):
     climate_manager = ClimateManager(config.seed)
     weather_renderer = WeatherRenderer()
     
+    # Life simulation system (growth, death, reproduction)
+    life_simulator = LifeSimulator(config.seed)
+    
     # Structure system (buildings, etc.)
     structure_manager = StructureManager(config.seed)
     
@@ -2964,7 +2978,7 @@ def run_explorer(config: WorldConfig = None):
                     warp_to_new_universe(camera, chunk_manager, chunk_renderer, 
                                         flora_manager, animal_manager,
                                         chunk_dna_manager, climate_manager,
-                                        structure_manager, config)
+                                        structure_manager, config, life_simulator)
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 3:
                     mouse_look = True
@@ -3131,7 +3145,7 @@ def run_explorer(config: WorldConfig = None):
                 warp_to_new_universe(camera, chunk_manager, chunk_renderer, 
                                     flora_manager, animal_manager,
                                     chunk_dna_manager, climate_manager,
-                                    structure_manager, config)
+                                    structure_manager, config, life_simulator)
                 gamepad_speed_cooldown = 60  # Longer cooldown for warp
             
         
@@ -3172,6 +3186,36 @@ def run_explorer(config: WorldConfig = None):
         weather_renderer.update(dt, camera.x, camera.y, camera.z,
                                climate_manager.current_weather,
                                climate_manager.current_biome)
+        
+        # Update life simulation (growth, death, reproduction)
+        is_raining = climate_manager.current_weather in ('rain', 'heavy_rain', 'storm')
+        is_day = sky.time > 0.25 and sky.time < 0.75
+        sun_intensity = max(0, math.sin(sky.time * math.pi * 2 - math.pi/2)) if is_day else 0
+        
+        # Build chunk lookups for life sim
+        plants_by_chunk = {}
+        animals_by_chunk = {}
+        for (cx, cz), plants in flora_manager.chunk_plants.items():
+            plants_by_chunk[(cx, cz)] = plants
+        for (cx, cz), animals in animal_manager.chunk_animals.items():
+            animals_by_chunk[(cx, cz)] = animals
+        
+        life_simulator.update(
+            dt / 60.0,  # Convert to seconds
+            camera.x, camera.z,
+            is_raining, is_day, sun_intensity,
+            plants_by_chunk, animals_by_chunk,
+            chunk_size=CHUNK_SIZE * TERRAIN_SCALE
+        )
+        
+        # Refresh display lists for chunks where plants changed (eaten/died)
+        for chunk_key in life_simulator.chunks_needing_refresh:
+            if chunk_key in flora_manager.display_lists:
+                # Delete old display lists
+                for dl in flora_manager.display_lists[chunk_key]:
+                    glDeleteLists(dl, 1)
+                del flora_manager.display_lists[chunk_key]
+        life_simulator.chunks_needing_refresh.clear()
         
         # Set sky color and fog based on time of day (now with DNA tint)
         sky_color = sky.get_sky_color()
@@ -3217,6 +3261,9 @@ def run_explorer(config: WorldConfig = None):
         
         # Render animals
         animal_manager.render(cam_pos[0], cam_pos[1], cam_pos[2])
+        
+        # Render eggs from life simulation
+        life_simulator.render_eggs(cam_pos[0], cam_pos[2])
         
         # Render structures (buildings)
         structure_manager.render(cam_pos[0], cam_pos[1], cam_pos[2])

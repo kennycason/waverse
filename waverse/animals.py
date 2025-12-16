@@ -715,11 +715,27 @@ class AnimalManager:
             
             # Determine what can spawn here - favor GROUND animals heavily
             if ground_h < 2:
-                # Near/in water - crocs and frogs
+                # Near/in water - aquatic and amphibious creatures!
                 animal_type = rng.choice([
+                    # Amphibious
                     AnimalType.CROC, AnimalType.CROC,
                     AnimalType.HOPPER,  # Frogs
-                    AnimalType.WORM,    # Water snakes
+                    AnimalType.AMPHIBIAN,
+                    # Aquatic - new creatures
+                    AnimalType.OCTOPUS, AnimalType.OCTOPUS,
+                    AnimalType.SQUID,
+                    AnimalType.JELLYFISH,
+                    AnimalType.FISH, AnimalType.FISH,
+                    AnimalType.CRUSTACEAN, AnimalType.CRUSTACEAN,
+                    AnimalType.ANEMONE,
+                    AnimalType.SEASTAR,
+                    AnimalType.NUDIBRANCH,
+                    AnimalType.NAUTILUS,
+                    AnimalType.MANTA,
+                    AnimalType.HYDRA,
+                    # Amoebas love water
+                    AnimalType.AMOEBA, AnimalType.AMOEBA,
+                    AnimalType.BLOB,
                 ])
             elif ground_h < 15:
                 # Lowlands - lots of ground variety
@@ -732,12 +748,19 @@ class AnimalManager:
                     AnimalType.REPTILE, AnimalType.REPTILE,
                     AnimalType.HOPPER, AnimalType.HOPPER,  # Rabbits, frogs
                     AnimalType.WORM, AnimalType.WORM,      # Snakes
-                    # Small crawlers
+                    # Small crawlers - new types!
                     AnimalType.SPIDER, AnimalType.SPIDER,
+                    AnimalType.CENTIPEDE,
+                    AnimalType.TRILOBITE,
                     AnimalType.INSECT,
+                    AnimalType.SNAIL,
                     # Occasional flyers
                     AnimalType.BIRD,
-                    AnimalType.METROID  # Rare floating horror
+                    AnimalType.METROID,  # Rare floating horror
+                    # Weird creatures
+                    AnimalType.AMOEBA,
+                    AnimalType.BLOB,
+                    AnimalType.ALIEN,
                 ])
             elif ground_h < 30:
                 # Hills - diverse ground animals
@@ -747,9 +770,11 @@ class AnimalManager:
                     AnimalType.REPTILE, AnimalType.REPTILE,
                     AnimalType.HOPPER, AnimalType.HOPPER,
                     AnimalType.SPIDER,
+                    AnimalType.CENTIPEDE,
                     AnimalType.WORM,
                     AnimalType.BIRD, AnimalType.BIRD,
                     AnimalType.INSECT,
+                    AnimalType.TRILOBITE,
                 ])
             else:
                 # High ground - hardy mammals, birds, some hoppers
@@ -757,7 +782,8 @@ class AnimalManager:
                     AnimalType.MAMMAL, AnimalType.MAMMAL, AnimalType.MAMMAL,
                     AnimalType.HOPPER,  # Mountain goat-like
                     AnimalType.BIRD, AnimalType.BIRD,
-                    AnimalType.METROID  # They float up high
+                    AnimalType.METROID,  # They float up high
+                    AnimalType.ALIEN,    # Aliens too
                 ])
             
             # Get template and mutate
