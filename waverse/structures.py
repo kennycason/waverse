@@ -540,6 +540,222 @@ def generate_tile_building(x: float, y: float, z: float,
     return structure
 
 
+def generate_maze(x: float, y: float, z: float,
+                  width: int = 10, depth: int = 10,
+                  floors: int = 1,
+                  cell_size: float = 6.0,
+                  wall_height: float = 10.0,
+                  seed: int = 42,
+                  terrain_heights: List[float] = None) -> Structure:
+    """Generate a maze structure using recursive backtracking.
+    
+    Args:
+        x, y, z: World position (center)
+        width, depth: Number of cells in X and Z
+        floors: Number of vertical floors (1 = 2D maze, >1 = 3D maze)
+        cell_size: Size of each cell in world units
+        wall_height: Height of maze walls
+        seed: Random seed for reproducible mazes
+        terrain_heights: Corner heights for pillar generation
+    
+    Returns:
+        Structure with maze walls, floors, and entrance/exit
+    """
+    rng = np.random.default_rng(seed)
+    structure = Structure(x=x, y=y, z=z)
+    
+    # Colors for maze
+    wall_colors = [
+        (0.5, 0.4, 0.3),   # Brown stone
+        (0.55, 0.55, 0.5), # Gray stone
+        (0.4, 0.45, 0.35), # Mossy
+        (0.6, 0.5, 0.4),   # Sandy
+    ]
+    wall_color = wall_colors[rng.integers(0, len(wall_colors))]
+    floor_color = (wall_color[0] * 0.8, wall_color[1] * 0.8, wall_color[2] * 0.8)
+    
+    wall_thickness = 0.5
+    
+    # Maze dimensions in world units
+    maze_width = width * cell_size
+    maze_depth = depth * cell_size
+    half_width = maze_width / 2
+    half_depth = maze_depth / 2
+    
+    # Generate maze using recursive backtracking
+    # Grid: True = wall, False = passage
+    # We use a grid where odd cells are passages and even cells are walls
+    grid_w = width * 2 + 1
+    grid_h = depth * 2 + 1
+    
+    def generate_maze_grid(floor_num: int) -> np.ndarray:
+        """Generate a maze grid for one floor."""
+        floor_seed = seed + floor_num * 1000
+        floor_rng = np.random.default_rng(floor_seed)
+        
+        grid = np.ones((grid_h, grid_w), dtype=bool)  # All walls
+        
+        # Start from random cell
+        start_x = floor_rng.integers(0, width) * 2 + 1
+        start_z = floor_rng.integers(0, depth) * 2 + 1
+        grid[start_z, start_x] = False
+        
+        # Stack for backtracking
+        stack = [(start_x, start_z)]
+        
+        while stack:
+            cx, cz = stack[-1]
+            
+            # Find unvisited neighbors (2 cells away)
+            neighbors = []
+            for dx, dz in [(0, -2), (0, 2), (-2, 0), (2, 0)]:
+                nx, nz = cx + dx, cz + dz
+                if 0 < nx < grid_w - 1 and 0 < nz < grid_h - 1:
+                    if grid[nz, nx]:  # Still a wall (unvisited)
+                        neighbors.append((nx, nz, dx // 2, dz // 2))
+            
+            if neighbors:
+                # Choose random neighbor
+                nx, nz, dx, dz = neighbors[floor_rng.integers(0, len(neighbors))]
+                # Carve path
+                grid[cz + dz, cx + dx] = False  # Wall between
+                grid[nz, nx] = False  # Cell
+                stack.append((nx, nz))
+            else:
+                stack.pop()
+        
+        return grid
+    
+    # Generate each floor
+    for floor_num in range(floors):
+        floor_y = y + floor_num * wall_height
+        grid = generate_maze_grid(floor_num)
+        
+        # Add entrance on first floor (south wall)
+        if floor_num == 0:
+            entrance_x = rng.integers(1, width) * 2
+            grid[0, entrance_x] = False
+            grid[1, entrance_x] = False
+        
+        # Add exit on first floor (north wall)
+        if floor_num == 0:
+            exit_x = rng.integers(1, width) * 2
+            grid[grid_h - 1, exit_x] = False
+            grid[grid_h - 2, exit_x] = False
+        
+        # Add stairs between floors (for 3D maze)
+        if floor_num < floors - 1:
+            # Find a few open cells to add stairs
+            stair_count = max(1, min(3, (width * depth) // 20))
+            stair_cells = []
+            for _ in range(stair_count):
+                for attempt in range(50):
+                    sx = rng.integers(0, width) * 2 + 1
+                    sz = rng.integers(0, depth) * 2 + 1
+                    if not grid[sz, sx] and (sx, sz) not in stair_cells:
+                        stair_cells.append((sx, sz))
+                        break
+            
+            # Add ramps at stair positions
+            for sx, sz in stair_cells:
+                cell_world_x = x - half_width + sx * cell_size / 2
+                cell_world_z = z - half_depth + sz * cell_size / 2
+                
+                structure.ramps.append(Ramp(
+                    x=cell_world_x,
+                    y_bottom=floor_y,
+                    z=cell_world_z,
+                    width=cell_size * 0.8,
+                    length=cell_size * 0.8,
+                    height=wall_height,
+                    rotation=rng.choice([0, 90, 180, 270]),
+                    color=(0.4, 0.35, 0.3)
+                ))
+        
+        # Generate walls from grid
+        # Horizontal walls (along X axis)
+        for gz in range(grid_h):
+            wall_start = None
+            for gx in range(grid_w):
+                if grid[gz, gx]:  # Wall cell
+                    if wall_start is None:
+                        wall_start = gx
+                else:  # Passage
+                    if wall_start is not None:
+                        # Create wall from wall_start to gx-1
+                        wall_len = gx - wall_start
+                        if wall_len > 0:
+                            wx = x - half_width + (wall_start + wall_len / 2) * cell_size / 2
+                            wz = z - half_depth + gz * cell_size / 2
+                            structure.walls.append(Wall(
+                                x=wx, y=floor_y, z=wz,
+                                width=wall_len * cell_size / 2,
+                                height=wall_height,
+                                thickness=wall_thickness,
+                                rotation=0,
+                                color=wall_color
+                            ))
+                        wall_start = None
+            
+            # Handle wall that extends to edge
+            if wall_start is not None:
+                wall_len = grid_w - wall_start
+                if wall_len > 0:
+                    wx = x - half_width + (wall_start + wall_len / 2) * cell_size / 2
+                    wz = z - half_depth + gz * cell_size / 2
+                    structure.walls.append(Wall(
+                        x=wx, y=floor_y, z=wz,
+                        width=wall_len * cell_size / 2,
+                        height=wall_height,
+                        thickness=wall_thickness,
+                        rotation=0,
+                        color=wall_color
+                    ))
+        
+        # Add floor for each level (except ground floor which uses terrain)
+        if floor_num > 0:
+            structure.floors.append(Floor(
+                x=x, y=floor_y, z=z,
+                width=maze_width + 2,
+                depth=maze_depth + 2,
+                thickness=0.3,
+                color=floor_color
+            ))
+        
+        # Add ceiling for top floor
+        if floor_num == floors - 1:
+            structure.floors.append(Floor(
+                x=x, y=floor_y + wall_height, z=z,
+                width=maze_width + 2,
+                depth=maze_depth + 2,
+                thickness=0.3,
+                color=floor_color
+            ))
+    
+    # Add support pillars at corners if on slope
+    if terrain_heights and len(terrain_heights) >= 4:
+        min_terrain = min(terrain_heights)
+        if y - min_terrain > 2:
+            pillar_height = y - min_terrain + 2
+            corners = [
+                (x - half_width, z - half_depth),
+                (x + half_width, z - half_depth),
+                (x - half_width, z + half_depth),
+                (x + half_width, z + half_depth),
+            ]
+            for i, (px, pz) in enumerate(corners):
+                local_ground = terrain_heights[i]
+                if y - local_ground > 1:
+                    structure.pillars.append(Pillar(
+                        x=px, y_bottom=local_ground, y_top=y + 0.5, z=pz,
+                        width=1.0,
+                        color=(wall_color[0] * 0.7, wall_color[1] * 0.7, wall_color[2] * 0.7)
+                    ))
+    
+    structure.compute_bounds()
+    return structure
+
+
 class StructureRenderer:
     """Renders structures efficiently."""
     
@@ -843,31 +1059,60 @@ class StructureManager:
         # Use the maximum height as the floor level (building sits on top)
         world_y = max(corner_heights)
         
-        # Building size with bias toward multi-floor and larger structures
-        floor_roll = rng.random()
-        if floor_roll < 0.2:
-            floors = 1  # 20% single floor
-        elif floor_roll < 0.5:
-            floors = 2  # 30% two floors
-        elif floor_roll < 0.8:
-            floors = 3  # 30% three floors
+        # Decide building type: regular building or maze
+        building_type_roll = rng.random()
+        
+        if building_type_roll < 0.15:  # 15% chance of maze
+            # Generate maze
+            maze_roll = rng.random()
+            if maze_roll < 0.7:  # 70% of mazes are 2D (single floor)
+                maze_floors = 1
+                maze_width = 6 + rng.integers(0, 6)  # 6-11 cells
+                maze_depth = 6 + rng.integers(0, 6)
+            else:  # 30% of mazes are 3D (multi-floor)
+                maze_floors = 2 + rng.integers(0, 2)  # 2-3 floors
+                maze_width = 5 + rng.integers(0, 4)  # 5-8 cells (smaller for 3D)
+                maze_depth = 5 + rng.integers(0, 4)
+            
+            cell_size = 5.0 + rng.random() * 3.0  # 5-8 units per cell
+            
+            building = generate_maze(
+                world_x, world_y, world_z,
+                width=maze_width,
+                depth=maze_depth,
+                floors=maze_floors,
+                cell_size=cell_size,
+                wall_height=10.0 + rng.random() * 5.0,  # 10-15 units tall walls
+                seed=chunk_seed,
+                terrain_heights=corner_heights
+            )
         else:
-            floors = 4 + rng.integers(0, 3)  # 20% tall (4-6 floors)
+            # Regular building
+            floor_roll = rng.random()
+            if floor_roll < 0.2:
+                floors = 1  # 20% single floor
+            elif floor_roll < 0.5:
+                floors = 2  # 30% two floors
+            elif floor_roll < 0.8:
+                floors = 3  # 30% three floors
+            else:
+                floors = 4 + rng.integers(0, 3)  # 20% tall (4-6 floors)
+            
+            # Use pre-calculated values from terrain sampling above
+            tiles_x = tiles_x_temp
+            tiles_z = tiles_z_temp
+            tile_size = tile_size_temp
+            
+            building = generate_tile_building(
+                world_x, world_y, world_z,
+                tiles_x=tiles_x,
+                tiles_z=tiles_z,
+                floors=floors,
+                tile_size=tile_size,
+                seed=chunk_seed,
+                terrain_heights=corner_heights
+            )
         
-        # Use pre-calculated values from terrain sampling above
-        tiles_x = tiles_x_temp
-        tiles_z = tiles_z_temp
-        tile_size = tile_size_temp
-        
-        building = generate_tile_building(
-            world_x, world_y, world_z,
-            tiles_x=tiles_x,
-            tiles_z=tiles_z,
-            floors=floors,
-            tile_size=tile_size,
-            seed=chunk_seed,
-            terrain_heights=corner_heights  # Pass terrain heights for pillar generation
-        )
         self.add_structure(building)
     
     def check_collision(self, px: float, py: float, pz: float, 

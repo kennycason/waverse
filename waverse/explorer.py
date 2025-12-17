@@ -1019,6 +1019,7 @@ class Camera:
         self.yaw = 0
         self.pitch = -20
         self.flying = False  # Start in walking mode
+        self.swimming = False  # In water, swim mode (fly but capped at surface)
         self.target_y = 40
         self.speed_level = 7  # Default speed (0.5x walking) - index into SPEED_LEVELS
         
@@ -1307,16 +1308,21 @@ class Camera:
         """Get terrain height at current position."""
         return chunk_manager.get_height_at(self.x, self.z) * HEIGHT_SCALE
     
-    def move(self, forward, right, up, chunk_manager: ChunkManager, structure_manager=None):
+    def move(self, forward, right, up, chunk_manager: ChunkManager, structure_manager=None, water_level: float = 0.0):
         # Get current speed based on level, with running multiplier
         speed = BASE_MOVE_SPEED * SPEED_LEVELS[self.speed_level]
         if self.is_running:
             speed *= 2.0  # Double speed while running (B held)
         
+        # Swimming is slower
+        if self.swimming:
+            speed *= 0.7
+        
         yaw_rad = math.radians(self.yaw)
         pitch_rad = math.radians(self.pitch)
         
-        if self.flying:
+        if self.flying or self.swimming:
+            # Flying/swimming: move in look direction
             forward_x = -math.sin(yaw_rad) * math.cos(pitch_rad)
             forward_y = math.sin(pitch_rad)
             forward_z = -math.cos(yaw_rad) * math.cos(pitch_rad)
@@ -1361,9 +1367,28 @@ class Camera:
         else:
             effective_ground = terrain_ground
         
-        if self.flying:
+        # Water surface height (scaled)
+        water_surface = water_level * HEIGHT_SCALE + PLAYER_HEIGHT
+        
+        # Check if we should enter/exit swimming mode
+        if not self.flying:
+            # Enter swimming if in water (below water surface and terrain is underwater)
+            if terrain_h < water_level * HEIGHT_SCALE and self.y <= water_surface + 1.0:
+                if not self.swimming:
+                    self.swimming = True
+                    self.set_status("Swimming", 1.5)
+            # Exit swimming if terrain is above water
+            elif terrain_h >= water_level * HEIGHT_SCALE:
+                if self.swimming:
+                    self.swimming = False
+        
+        if self.flying or self.swimming:
             # Calculate new Y position
             new_y = self.y + forward * forward_y * speed + up * speed
+            
+            # Swimming: cap at water surface
+            if self.swimming and new_y > water_surface:
+                new_y = water_surface
             
             # Check for collision at new height (both UP and DOWN movement)
             vertical_blocked = False
@@ -1393,11 +1418,16 @@ class Camera:
                 if new_floor is not None:
                     effective_ground = max(terrain_ground, new_floor + PLAYER_HEIGHT)
             
-            # Land when pressing down and at ground level
-            if up < 0 and self.y <= effective_ground + 0.5:
+            # Land when pressing down and at ground level (not when swimming)
+            if up < 0 and self.y <= effective_ground + 0.5 and not self.swimming:
                 self.y = effective_ground
                 self.flying = False
                 self.target_y = effective_ground
+            
+            # Swimming: exit water by pressing up when above surface and on land
+            if self.swimming and up > 0 and terrain_h >= water_level * HEIGHT_SCALE:
+                self.swimming = False
+                self.y = effective_ground
             
             # Don't go below ground/floor
             if self.y < effective_ground:
@@ -1906,8 +1936,8 @@ class Camera:
             self.y = min_height
     
     def set_speed(self, level: int):
-        """Set speed level (0-4, corresponds to keys 1-5)."""
-        self.speed_level = max(0, min(4, level))
+        """Set speed level (0 to len(SPEED_LEVELS)-1)."""
+        self.speed_level = max(0, min(len(SPEED_LEVELS) - 1, level))
     
     def apply(self):
         glRotatef(-self.pitch, 1, 0, 0)
@@ -3389,9 +3419,10 @@ def run_explorer(config: WorldConfig = None):
             # L2/R2 behavior depends on mode
             l2_val, r2_val = gamepad.get_triggers()
             
-            # Debug R2 issues
-            if r2_val > 0.1 and frame_count % 30 == 0:
-                print(f"  [GP] R2={r2_val:.2f} L2={l2_val:.2f} cooldown={gamepad_speed_cooldown} auto_fly={camera.auto_fly_mode}")
+            # Debug ALL axes to find the right one for R2
+            if frame_count % 60 == 0:
+                axes_str = " ".join([f"{i}:{gamepad.get_axis_raw(i):+.2f}" for i in range(6)])
+                print(f"  [GP] Axes: {axes_str} | L2={l2_val:.2f} R2={r2_val:.2f}")
             
             if camera.auto_fly_mode > 0:
                 # TOUR MODE: L2/R2 adjust flight height
@@ -3404,26 +3435,29 @@ def run_explorer(config: WorldConfig = None):
             else:
                 # NORMAL MODE: L2/R2 for speed changes (with cooldown)
                 if gamepad_speed_cooldown <= 0:
-                    if l2_val > 0.7:  # L2 = decrease speed
+                    if l2_val > 0.7:  # L2 = decrease speed (faster response)
                         new_level = max(0, camera.speed_level - 1)
                         if new_level != camera.speed_level:
                             camera.set_speed(new_level)
                             print(f"  Speed: {SPEED_LEVELS[new_level]:.2f}x")
-                            gamepad_speed_cooldown = 20  # ~0.33 seconds
-                    elif r2_val > 0.7:  # R2 = increase speed
+                            gamepad_speed_cooldown = 12  # ~0.2 seconds - quick slow down
+                    elif r2_val > 0.7:  # R2 = increase speed (slower response)
                         new_level = min(len(SPEED_LEVELS) - 1, camera.speed_level + 1)
                         if new_level != camera.speed_level:
                             camera.set_speed(new_level)
                             print(f"  Speed: {SPEED_LEVELS[new_level]:.2f}x")
-                            gamepad_speed_cooldown = 20
+                            gamepad_speed_cooldown = 30  # ~0.5 seconds - gradual speed up
             
             # A button = jump (in walk mode) - only when menu closed
             if not camera.menu_open and gamepad.get_button(GamepadConfig.A):
                 camera.jump()
             
             # B button = RUN (doubles speed while held) - only when menu closed
-            if not camera.menu_open and gamepad.get_button(GamepadConfig.B):
+            b_pressed = gamepad.get_button(GamepadConfig.B)
+            if not camera.menu_open and b_pressed:
                 camera.is_running = True
+                if frame_count % 30 == 0:
+                    print(f"  [GP] B pressed - RUNNING")
             else:
                 camera.is_running = False
             
@@ -3480,11 +3514,10 @@ def run_explorer(config: WorldConfig = None):
         if not camera.menu_open and keys[pygame.K_SPACE] and not camera.flying:
             camera.jump()
         
-        # Keyboard B = run (double speed while held)
+        # Keyboard B = run (double speed while held) - OR with gamepad B
         if keys[pygame.K_b]:
             camera.is_running = True
-        else:
-            camera.is_running = False
+        # Don't reset if keyboard B not pressed - gamepad B may have set it
         
         # Auto-fly mode - overrides manual movement
         if camera.auto_fly_mode > 0:
@@ -3494,7 +3527,7 @@ def run_explorer(config: WorldConfig = None):
             right += auto_right
             up += auto_up
         
-        camera.move(forward, right, up, chunk_manager, structure_manager)
+        camera.move(forward, right, up, chunk_manager, structure_manager, water_level)
         
         # Maintain height during auto-fly
         camera.maintain_auto_fly_height(chunk_manager)
