@@ -277,6 +277,10 @@ class PlantDNA:
     upside_down: bool = False      # Plant grows downward (hanging)
     lean_angle: float = 0.0        # How much the plant leans (-1 to 1)
     
+    # EVOLVABLE GROWTH RATE - affects how fast plant grows in life simulation
+    # Range: 0.5 (slow grower) to 2.0 (fast grower), default 1.0
+    growth_rate: float = 1.0
+    
     def mutate(self, rng: np.random.Generator = None, strength: float = 0.5) -> "PlantDNA":
         """
         Create a mutated copy of this DNA.
@@ -379,6 +383,12 @@ class PlantDNA:
         # Bark texture can mutate
         if rng.random() < 0.03 * strength:
             new_dna.bark_texture = rng.choice(["smooth", "rough", "scaly", "peeling", "ridged"])
+        
+        # Growth rate mutation - allows plants to evolve faster/slower growth
+        new_dna.growth_rate = float(np.clip(
+            self.growth_rate + rng.normal(0, 0.1 * strength), 
+            0.5, 2.0  # Range: 0.5x to 2x growth speed
+        ))
         
         return new_dna
     

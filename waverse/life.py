@@ -179,8 +179,14 @@ class AnimalLife(LifeState):
         if random.random() < 0.5:
             self.gender = Gender.FEMALE
     
-    def update(self, dt_hours: float, is_day: bool):
-        """Update animal life state."""
+    def update(self, dt_hours: float, is_day: bool, growth_rate_mod: float = 1.0):
+        """Update animal life state.
+        
+        Args:
+            dt_hours: Time delta in game-hours
+            is_day: Whether it's daytime
+            growth_rate_mod: Growth rate modifier from DNA (0.5-2.0)
+        """
         self.age += dt_hours
         
         # Reduce eat cooldown
@@ -194,9 +200,10 @@ class AnimalLife(LifeState):
             burn_rate *= 1.1  # Slightly more active during day
         self.energy = max(0, self.energy - dt_hours * burn_rate)
         
-        # Growth when well-fed (faster for testing)
+        # Growth when well-fed - uses DNA growth rate!
         if self.energy > self.max_energy * 0.5 and self.growth < 1.0:
-            growth_rate = 0.03 * LifeConfig.ANIMAL_GROWTH_RATE  # Faster growth
+            base_rate = 0.03 * LifeConfig.ANIMAL_GROWTH_RATE
+            growth_rate = base_rate * growth_rate_mod  # Apply DNA-evolved rate
             self.growth = min(1.0, self.growth + dt_hours * growth_rate)
             # Max energy increases as animal grows
             self.max_energy = 50 + self.growth * 150  # 50-200 capacity
@@ -502,8 +509,12 @@ class LifeSimulator:
             old_fraction = life.get_render_fraction()
             old_growth = life.growth
             
-            # Get per-plant growth variance (set during first update)
-            growth_mod = getattr(plant, 'growth_rate_mod', 1.0)
+            # Get growth rate from plant's DNA (evolved trait!)
+            # Falls back to random variance if DNA doesn't have growth_rate
+            if hasattr(plant, 'dna') and hasattr(plant.dna, 'growth_rate'):
+                growth_mod = plant.dna.growth_rate
+            else:
+                growth_mod = getattr(plant, 'growth_rate_mod', 1.0)
             life.update(dt_hours, is_raining, is_day, sun_intensity, growth_mod)
             new_fraction = life.get_render_fraction()
             
@@ -568,7 +579,12 @@ class LifeSimulator:
             animal_type = getattr(animal, 'animal_type', None) or getattr(animal.dna, 'animal_type', 'walker')
             life = self.get_or_create_animal_life(animal_id, animal_type)
             
-            life.update(dt_hours, is_day)
+            # Get growth rate from animal's DNA (evolved trait!)
+            if hasattr(animal, 'dna') and hasattr(animal.dna, 'growth_rate'):
+                growth_mod = animal.dna.growth_rate
+            else:
+                growth_mod = 1.0  # Default if no DNA growth rate
+            life.update(dt_hours, is_day, growth_mod)
             
             # Apply growth to visual scale
             if hasattr(animal, 'scale'):

@@ -317,6 +317,10 @@ class AnimalDNA:
     # Texture hints
     skin_texture: str = "smooth"  # smooth, scaly, furry, feathered, slimy
     
+    # EVOLVABLE GROWTH RATE - affects how fast animal grows in life simulation
+    # Range: 0.5 (slow grower) to 2.0 (fast grower), default 1.0
+    growth_rate: float = 1.0
+    
     def mutate(self, rng: np.random.Generator = None, strength: float = 0.5) -> "AnimalDNA":
         """Create mutated copy of this DNA."""
         if rng is None:
@@ -393,6 +397,12 @@ class AnimalDNA:
         # Mutate texture (rare)
         if rng.random() < 0.02 * strength:
             new_dna.skin_texture = rng.choice(["smooth", "scaly", "furry", "feathered", "slimy"])
+        
+        # Growth rate mutation - allows animals to evolve faster/slower growth
+        new_dna.growth_rate = float(np.clip(
+            self.growth_rate + rng.normal(0, 0.1 * strength), 
+            0.5, 2.0  # Range: 0.5x to 2x growth speed
+        ))
         
         return new_dna
     
