@@ -105,6 +105,87 @@ class BiomeDNA:
 
 
 @dataclass
+class WeatherVisualDNA:
+    """
+    Visual DNA for weather effects - evolves across regions.
+    Defines colors, shapes, and patterns for rain/snow/clouds.
+    """
+    # Rain visuals
+    rain_color: Tuple[float, float, float] = (0.6, 0.7, 0.9)  # RGB
+    rain_alpha: float = 0.6
+    rain_waviness: float = 0.3      # 0=straight, 1=very wavy
+    rain_streak_length: float = 1.5  # Length of rain streaks
+    
+    # Snow visuals
+    snow_color: Tuple[float, float, float] = (1.0, 1.0, 1.0)
+    snow_size: float = 3.0          # Base snowflake size
+    snow_drift: float = 0.5         # How much snow drifts sideways
+    
+    # Cloud visuals
+    cloud_color: Tuple[float, float, float] = (0.9, 0.9, 0.92)
+    cloud_speed: float = 0.01       # How fast clouds move
+    cloud_size_base: float = 80.0   # Base cloud size
+    cloud_size_variance: float = 30.0  # Size variation
+    cloud_count: int = 8            # Number of cloud patches
+    cloud_height_offset: float = 150.0  # Height above camera
+    
+    def mutate(self, rng: np.random.Generator, strength: float = 0.05) -> "WeatherVisualDNA":
+        """Mutate weather visuals."""
+        if rng.random() > 0.15:  # 15% chance of mutation
+            return WeatherVisualDNA(
+                rain_color=self.rain_color,
+                rain_alpha=self.rain_alpha,
+                rain_waviness=self.rain_waviness,
+                rain_streak_length=self.rain_streak_length,
+                snow_color=self.snow_color,
+                snow_size=self.snow_size,
+                snow_drift=self.snow_drift,
+                cloud_color=self.cloud_color,
+                cloud_speed=self.cloud_speed,
+                cloud_size_base=self.cloud_size_base,
+                cloud_size_variance=self.cloud_size_variance,
+                cloud_count=self.cloud_count,
+                cloud_height_offset=self.cloud_height_offset,
+            )
+        
+        s = strength
+        return WeatherVisualDNA(
+            rain_color=tuple(_clamp(c + rng.normal(0, s * 0.3)) for c in self.rain_color),
+            rain_alpha=_clamp(self.rain_alpha + rng.normal(0, s * 0.2), 0.3, 0.9),
+            rain_waviness=_clamp(self.rain_waviness + rng.normal(0, s), 0.0, 0.8),
+            rain_streak_length=_clamp(self.rain_streak_length + rng.normal(0, s * 0.5), 0.8, 3.0),
+            snow_color=tuple(_clamp(c + rng.normal(0, s * 0.1), 0.8, 1.0) for c in self.snow_color),
+            snow_size=_clamp(self.snow_size + rng.normal(0, s * 2), 2.0, 6.0),
+            snow_drift=_clamp(self.snow_drift + rng.normal(0, s), 0.2, 1.0),
+            cloud_color=tuple(_clamp(c + rng.normal(0, s * 0.15), 0.5, 1.0) for c in self.cloud_color),
+            cloud_speed=_clamp(self.cloud_speed + rng.normal(0, s * 0.01), 0.005, 0.03),
+            cloud_size_base=_clamp(self.cloud_size_base + rng.normal(0, s * 20), 50.0, 120.0),
+            cloud_size_variance=_clamp(self.cloud_size_variance + rng.normal(0, s * 10), 10.0, 50.0),
+            cloud_count=int(_clamp(self.cloud_count + rng.normal(0, s * 2), 4, 12)),
+            cloud_height_offset=_clamp(self.cloud_height_offset + rng.normal(0, s * 30), 100.0, 250.0),
+        )
+    
+    def crossover(self, other: "WeatherVisualDNA", rng: np.random.Generator) -> "WeatherVisualDNA":
+        """Blend two weather visual DNAs."""
+        t = 0.3 + rng.random() * 0.4
+        return WeatherVisualDNA(
+            rain_color=tuple(self.rain_color[i] * (1-t) + other.rain_color[i] * t for i in range(3)),
+            rain_alpha=self.rain_alpha * (1-t) + other.rain_alpha * t,
+            rain_waviness=self.rain_waviness * (1-t) + other.rain_waviness * t,
+            rain_streak_length=self.rain_streak_length * (1-t) + other.rain_streak_length * t,
+            snow_color=tuple(self.snow_color[i] * (1-t) + other.snow_color[i] * t for i in range(3)),
+            snow_size=self.snow_size * (1-t) + other.snow_size * t,
+            snow_drift=self.snow_drift * (1-t) + other.snow_drift * t,
+            cloud_color=tuple(self.cloud_color[i] * (1-t) + other.cloud_color[i] * t for i in range(3)),
+            cloud_speed=self.cloud_speed * (1-t) + other.cloud_speed * t,
+            cloud_size_base=self.cloud_size_base * (1-t) + other.cloud_size_base * t,
+            cloud_size_variance=self.cloud_size_variance * (1-t) + other.cloud_size_variance * t,
+            cloud_count=int(self.cloud_count * (1-t) + other.cloud_count * t),
+            cloud_height_offset=self.cloud_height_offset * (1-t) + other.cloud_height_offset * t,
+        )
+
+
+@dataclass
 class WeatherState:
     """Current weather conditions - changes over time."""
     precipitation: float = 0.0     # 0=none, 0.5=light, 1=heavy
@@ -114,6 +195,9 @@ class WeatherState:
     wind_direction: float = 0.0    # Radians
     lightning_active: bool = False
     fog_density: float = 0.0       # 0=clear, 1=thick fog
+    
+    # Visual DNA for this weather region
+    visual_dna: WeatherVisualDNA = field(default_factory=WeatherVisualDNA)
     
     # Transition tracking
     target_precipitation: float = 0.0
@@ -276,6 +360,52 @@ class ClimateManager:
             weather.lightning_active = False
             weather.target_clouds = biome.cloud_base + random.random() * 0.4
             weather.wind_strength = biome.wind_base + random.random() * 0.2
+        
+        # Evolve visual DNA based on biome characteristics
+        rng = np.random.default_rng(abs(hash((self.seed, self.time, roll))))
+        weather.visual_dna = weather.visual_dna.mutate(rng)
+        
+        # Tint rain/cloud colors based on biome
+        if biome.temperature > 0.7:  # Hot/tropical - warmer rain tints
+            weather.visual_dna = WeatherVisualDNA(
+                rain_color=(_clamp(0.5 + rng.random() * 0.2), 
+                            _clamp(0.6 + rng.random() * 0.2), 
+                            _clamp(0.7 + rng.random() * 0.2)),
+                rain_alpha=weather.visual_dna.rain_alpha,
+                rain_waviness=0.2 + rng.random() * 0.3,  # More tropical waviness
+                rain_streak_length=weather.visual_dna.rain_streak_length,
+                snow_color=weather.visual_dna.snow_color,
+                snow_size=weather.visual_dna.snow_size,
+                snow_drift=weather.visual_dna.snow_drift,
+                cloud_color=(_clamp(0.85 + rng.random() * 0.1),
+                             _clamp(0.85 + rng.random() * 0.1),
+                             _clamp(0.88 + rng.random() * 0.1)),
+                cloud_speed=0.015 + rng.random() * 0.01,
+                cloud_size_base=weather.visual_dna.cloud_size_base,
+                cloud_size_variance=weather.visual_dna.cloud_size_variance,
+                cloud_count=weather.visual_dna.cloud_count,
+                cloud_height_offset=weather.visual_dna.cloud_height_offset,
+            )
+        elif biome.temperature < 0.3:  # Cold - icy blue tints
+            weather.visual_dna = WeatherVisualDNA(
+                rain_color=weather.visual_dna.rain_color,
+                rain_alpha=weather.visual_dna.rain_alpha,
+                rain_waviness=0.1,  # Straighter in cold
+                rain_streak_length=weather.visual_dna.rain_streak_length,
+                snow_color=(_clamp(0.95 + rng.random() * 0.05),
+                            _clamp(0.97 + rng.random() * 0.03),
+                            1.0),
+                snow_size=3.5 + rng.random() * 2.0,  # Bigger flakes in cold
+                snow_drift=0.3 + rng.random() * 0.4,
+                cloud_color=(_clamp(0.8 + rng.random() * 0.15),
+                             _clamp(0.85 + rng.random() * 0.1),
+                             _clamp(0.95 + rng.random() * 0.05)),
+                cloud_speed=0.005 + rng.random() * 0.01,  # Slower in cold
+                cloud_size_base=weather.visual_dna.cloud_size_base,
+                cloud_size_variance=weather.visual_dna.cloud_size_variance,
+                cloud_count=weather.visual_dna.cloud_count,
+                cloud_height_offset=120 + rng.random() * 50,  # Lower clouds in cold
+            )
     
     def cleanup_distant(self, cx: int, cz: int, max_dist: int = 30):
         """Remove data for distant chunks/regions."""
@@ -393,29 +523,50 @@ class WeatherRenderer:
             glEnd()
             glEnable(GL_DEPTH_TEST)
         
-        # Rain
+        # Rain with DNA-based visuals
         if weather.precipitation > 0.05 and weather.precipitation_type == "rain":
             active_count = int(self.MAX_RAIN_PARTICLES * weather.precipitation)
+            vdna = weather.visual_dna
             
-            # Rain color - slightly blue, more visible
-            alpha = 0.5 + weather.precipitation * 0.4
-            glColor4f(0.6, 0.7, 0.9, alpha)
-            glLineWidth(2)  # Thicker rain
+            # Rain color from DNA
+            alpha = vdna.rain_alpha + weather.precipitation * 0.3
+            glColor4f(vdna.rain_color[0], vdna.rain_color[1], vdna.rain_color[2], alpha)
+            glLineWidth(2)
             
+            # Regular rain streaks
+            streak_len = vdna.rain_streak_length
             glBegin(GL_LINES)
             for p in self.rain_particles[:active_count]:
-                # Longer rain streaks
                 glVertex3f(p[0], p[1], p[2])
-                glVertex3f(p[0], p[1] + 1.5, p[2])
+                glVertex3f(p[0], p[1] + streak_len, p[2])
             glEnd()
+            
+            # Wavy rain streams (a few polygon ribbons for visual interest)
+            if vdna.rain_waviness > 0.1 and weather.precipitation > 0.3:
+                wavy_count = min(15, int(active_count * vdna.rain_waviness * 0.05))
+                glColor4f(vdna.rain_color[0] * 0.9, vdna.rain_color[1] * 0.95, 
+                          vdna.rain_color[2], alpha * 0.5)
+                
+                for i in range(wavy_count):
+                    p = self.rain_particles[i * 5 % active_count]
+                    # Draw wavy polygon stream
+                    glBegin(GL_LINE_STRIP)
+                    wave_amp = vdna.rain_waviness * 0.5
+                    for j in range(6):
+                        t = j / 5.0
+                        wave_x = math.sin((p[1] + j) * 0.5 + lightning_flash * 10) * wave_amp
+                        wave_z = math.cos((p[1] + j) * 0.4) * wave_amp * 0.5
+                        glVertex3f(p[0] + wave_x, p[1] + t * 4, p[2] + wave_z)
+                    glEnd()
         
-        # Snow
+        # Snow with DNA-based visuals
         if weather.precipitation > 0.05 and weather.precipitation_type == "snow":
             active_count = int(self.MAX_SNOW_PARTICLES * weather.precipitation)
+            vdna = weather.visual_dna
             
-            # Snow - bright white points
-            glColor4f(1, 1, 1, 0.9)
-            glPointSize(4)  # Bigger snowflakes
+            # Snow color and size from DNA
+            glColor4f(vdna.snow_color[0], vdna.snow_color[1], vdna.snow_color[2], 0.9)
+            glPointSize(vdna.snow_size)
             
             glBegin(GL_POINTS)
             for p in self.snow_particles[:active_count]:
@@ -423,10 +574,10 @@ class WeatherRenderer:
             glEnd()
             
             # Larger flakes for variety
-            glPointSize(4)
-            glColor4f(1, 1, 1, 0.6)
+            glPointSize(vdna.snow_size * 1.3)
+            glColor4f(vdna.snow_color[0], vdna.snow_color[1], vdna.snow_color[2], 0.6)
             glBegin(GL_POINTS)
-            for p in self.snow_particles[:active_count:3]:  # Every 3rd
+            for p in self.snow_particles[:active_count:3]:
                 glVertex3f(p[0] + 0.1, p[1] + 0.2, p[2])
             glEnd()
         
@@ -434,29 +585,46 @@ class WeatherRenderer:
         glEnable(GL_LIGHTING)
     
     def render_clouds(self, camera_x: float, camera_y: float, camera_z: float,
-                      cloud_cover: float, time: float):
-        """Render simple cloud layer."""
+                      cloud_cover: float, time: float, visual_dna: WeatherVisualDNA = None):
+        """Render cloud layer with DNA-based visuals."""
         if cloud_cover < 0.1:
             return
+        
+        # Use defaults if no DNA provided
+        if visual_dna is None:
+            visual_dna = WeatherVisualDNA()
         
         glDisable(GL_LIGHTING)
         glEnable(GL_BLEND)
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
         glDisable(GL_DEPTH_TEST)
         
-        cloud_height = camera_y + 150
+        cloud_height = camera_y + visual_dna.cloud_height_offset
         cloud_alpha = cloud_cover * 0.4
         
-        # Simple cloud quads at height
-        glColor4f(0.9, 0.9, 0.92, cloud_alpha)
+        # Cloud color from DNA
+        glColor4f(visual_dna.cloud_color[0], visual_dna.cloud_color[1], 
+                  visual_dna.cloud_color[2], cloud_alpha)
         
-        # Multiple cloud patches
-        for i in range(8):
-            angle = (i / 8) * math.pi * 2 + time * 0.01
-            dist = 200 + math.sin(angle * 3) * 50
+        # Multiple cloud patches with DNA-based properties
+        cloud_count = visual_dna.cloud_count
+        cloud_speed = visual_dna.cloud_speed
+        
+        for i in range(cloud_count):
+            angle = (i / cloud_count) * math.pi * 2 + time * cloud_speed
+            dist = 200 + math.sin(angle * 3 + i) * 60
             cx = camera_x + math.cos(angle) * dist
             cz = camera_z + math.sin(angle) * dist
-            size = 80 + math.sin(i + time * 0.02) * 30
+            
+            # Size from DNA with variance
+            base_size = visual_dna.cloud_size_base
+            variance = visual_dna.cloud_size_variance
+            size = base_size + math.sin(i + time * 0.02) * variance
+            
+            # Vary alpha slightly per cloud for depth
+            local_alpha = cloud_alpha * (0.8 + math.sin(i * 1.5) * 0.2)
+            glColor4f(visual_dna.cloud_color[0], visual_dna.cloud_color[1],
+                      visual_dna.cloud_color[2], local_alpha)
             
             glBegin(GL_QUADS)
             glVertex3f(cx - size, cloud_height, cz - size)
@@ -464,6 +632,20 @@ class WeatherRenderer:
             glVertex3f(cx + size, cloud_height, cz + size)
             glVertex3f(cx - size, cloud_height, cz + size)
             glEnd()
+            
+            # Add smaller secondary cloud puff nearby for more organic shape
+            if i % 2 == 0:
+                offset_x = math.cos(angle + 0.5) * size * 0.6
+                offset_z = math.sin(angle + 0.5) * size * 0.6
+                small_size = size * 0.5
+                glColor4f(visual_dna.cloud_color[0], visual_dna.cloud_color[1],
+                          visual_dna.cloud_color[2], local_alpha * 0.7)
+                glBegin(GL_QUADS)
+                glVertex3f(cx + offset_x - small_size, cloud_height + 5, cz + offset_z - small_size)
+                glVertex3f(cx + offset_x + small_size, cloud_height + 5, cz + offset_z - small_size)
+                glVertex3f(cx + offset_x + small_size, cloud_height + 5, cz + offset_z + small_size)
+                glVertex3f(cx + offset_x - small_size, cloud_height + 5, cz + offset_z + small_size)
+                glEnd()
         
         glEnable(GL_DEPTH_TEST)
         glDisable(GL_BLEND)

@@ -321,6 +321,12 @@ class AnimalDNA:
     # Range: 0.5 (slow grower) to 2.0 (fast grower), default 1.0
     growth_rate: float = 1.0
     
+    # EVOLVABLE METABOLISM - affects how fast animal burns energy (gets hungry)
+    # High metabolism (2.0) = burns energy 2x faster = needs more food = risky!
+    # Low metabolism (0.5) = burns energy slowly = survives on less food
+    # Range: 0.5 to 2.0, default 1.0
+    metabolism_rate: float = 1.0
+    
     def mutate(self, rng: np.random.Generator = None, strength: float = 0.5) -> "AnimalDNA":
         """Create mutated copy of this DNA."""
         if rng is None:
@@ -402,6 +408,14 @@ class AnimalDNA:
         new_dna.growth_rate = float(np.clip(
             self.growth_rate + rng.normal(0, 0.1 * strength), 
             0.5, 2.0  # Range: 0.5x to 2x growth speed
+        ))
+        
+        # Metabolism rate mutation - affects hunger/energy burn rate
+        # High metabolism = needs more food, risky in scarce environments
+        # Low metabolism = survives on less, but maybe slower/weaker
+        new_dna.metabolism_rate = float(np.clip(
+            self.metabolism_rate + rng.normal(0, 0.1 * strength), 
+            0.5, 2.0  # Range: 0.5x to 2x energy burn
         ))
         
         return new_dna

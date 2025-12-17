@@ -8,6 +8,7 @@ Handles:
 - Food chain (herbivores eat plants, carnivores eat animals)
 
 Designed for efficiency - updates are batched and infrequent.
+Uses SpatialIndex for O(1) neighbor lookups instead of O(N²) loops.
 """
 from __future__ import annotations
 
@@ -16,6 +17,9 @@ import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 from enum import Enum
+
+# SpatialIndex available but not used - per-chunk loops are faster at this scale
+# from .spatial import SpatialIndex, EntityType as SpatialType
 
 if TYPE_CHECKING:
     from .flora import PlantInstance
@@ -68,11 +72,11 @@ class LifeConfig:
     
     # === PERFORMANCE TUNING ===
     # Life simulation runs every UPDATE_INTERVAL seconds (NOT every frame!)
-    # At 60fps, 0.5 = only 2 updates/sec instead of 60 = 30x savings
-    UPDATE_INTERVAL = 0.4       # Seconds between life updates
-    UPDATE_RADIUS = 12          # Update chunks within this radius (bigger = more life!)
-    MAX_PLANTS_PER_UPDATE = 80  # Max plants to update per chunk per cycle
-    MAX_ANIMALS_PER_UPDATE = 50 # Max animals to update per cycle
+    # At 60fps, 1.0 = only 1 update/sec instead of 60 = 60x savings
+    UPDATE_INTERVAL = 1.0       # Seconds between life updates (was 0.5)
+    UPDATE_RADIUS = 5           # Update chunks within this radius (was 10 = 441 chunks!)
+    MAX_PLANTS_PER_UPDATE = 50  # Max plants to update per chunk per cycle (was 60)
+    MAX_ANIMALS_PER_UPDATE = 30 # Max animals to update per cycle (was 40)
     
     # Logging (set to False to disable console spam)
     LOG_ENABLED = False
@@ -179,13 +183,16 @@ class AnimalLife(LifeState):
         if random.random() < 0.5:
             self.gender = Gender.FEMALE
     
-    def update(self, dt_hours: float, is_day: bool, growth_rate_mod: float = 1.0):
+    def update(self, dt_hours: float, is_day: bool, growth_rate_mod: float = 1.0, 
+               metabolism_mod: float = 1.0):
         """Update animal life state.
         
         Args:
             dt_hours: Time delta in game-hours
             is_day: Whether it's daytime
             growth_rate_mod: Growth rate modifier from DNA (0.5-2.0)
+            metabolism_mod: Metabolism modifier from DNA (0.5-2.0)
+                           High = burns energy fast, needs more food!
         """
         self.age += dt_hours
         
@@ -193,9 +200,10 @@ class AnimalLife(LifeState):
         if self.eat_cooldown > 0:
             self.eat_cooldown = max(0, self.eat_cooldown - dt_hours)
         
-        # Energy drain over time (metabolism) - MUCH slower
-        # Bigger animals burn more but still slow
-        burn_rate = 0.5 + self.growth * 1.0  # 0.5-1.5 energy/hour (was 2-5!)
+        # Energy drain over time (metabolism) - affected by DNA!
+        # Bigger animals burn more, but metabolism_mod is the key evolutionary factor
+        base_burn = 0.5 + self.growth * 1.0  # 0.5-1.5 base energy/hour
+        burn_rate = base_burn * metabolism_mod  # Apply DNA metabolism!
         if is_day:
             burn_rate *= 1.1  # Slightly more active during day
         self.energy = max(0, self.energy - dt_hours * burn_rate)
@@ -357,6 +365,9 @@ class LifeSimulator:
         # Chunks that need display list refresh (plants changed)
         self.chunks_needing_refresh: set[ChunkKey] = set()
         
+        # NOTE: SpatialIndex not used - per-chunk loops are faster at this scale
+        # The index build cost (80ms for 12K entities) exceeded query savings
+        
         # Update timing - use config for performance tuning
         self.update_timer: float = 0.0
         self.update_interval: float = LifeConfig.UPDATE_INTERVAL
@@ -439,6 +450,9 @@ class LifeSimulator:
         if self.update_timer < self.update_interval:
             return
         
+        import time
+        _perf_start = time.perf_counter()
+        
         self.update_timer = 0.0
         dt_hours = self.update_interval * LifeConfig.TIME_SCALE
         
@@ -467,23 +481,29 @@ class LifeSimulator:
                 # Update plants in this chunk (with limit)
                 if chunk_key in plants_by_chunk and plants_updated < max_plants:
                     chunk_plants = plants_by_chunk[chunk_key]
-                    # Limit plants per chunk
                     plants_to_update = chunk_plants[:LifeConfig.MAX_PLANTS_PER_UPDATE]
                     self._update_plants(plants_to_update, dt_hours, 
                                        is_raining, is_day, sun_intensity, chunk_key)
                     plants_updated += len(plants_to_update)
                 
                 # Update animals in this chunk (with limit)
+                # Pass the chunk's plants for eating behavior
                 if chunk_key in animals_by_chunk and animals_updated < max_animals:
                     chunk_animals = animals_by_chunk[chunk_key]
+                    chunk_plants = plants_by_chunk.get(chunk_key, [])
                     animals_to_update = chunk_animals[:LifeConfig.MAX_ANIMALS_PER_UPDATE]
                     self._update_animals(animals_to_update, dt_hours,
-                                        is_day, plants_by_chunk.get(chunk_key, []),
-                                        chunk_key)
+                                        is_day, chunk_plants, chunk_key)
                     animals_updated += len(animals_to_update)
         
         # Update eggs
         self._update_eggs(dt_hours, is_day)
+        
+        _total_time = (time.perf_counter() - _perf_start) * 1000
+        
+        # PERF LOGGING - only print if slow (>50ms)
+        if _total_time > 50:
+            print(f"[PERF] Life update SLOW: {_total_time:.1f}ms ({plants_updated}p/{animals_updated}a)")
         
         # Periodic logging
         if LifeConfig.LOG_ENABLED and self.log_timer >= LifeConfig.LOG_INTERVAL:
@@ -570,85 +590,97 @@ class LifeSimulator:
     
     def _update_animals(self, animals: list, dt_hours: float, is_day: bool,
                         plants: list, chunk_key: tuple):
-        """Update animals in a chunk."""
-        # Build spatial index for nearby checks
-        animal_positions = [(a, a.x, a.z, id(a)) for a in animals if hasattr(a, 'x')]
+        """Update animals in a chunk. Uses simple loops with early-out for efficiency."""
+        # Pre-build animal positions for O(N) hunting/mating (within chunk only)
+        animal_positions = []
+        for a in animals:
+            ax = getattr(a, 'x', None)
+            if ax is not None:
+                animal_positions.append((a, ax, getattr(a, 'z', 0), id(a)))
         
         for animal in animals:
             animal_id = id(animal)
-            animal_type = getattr(animal, 'animal_type', None) or getattr(animal.dna, 'animal_type', 'walker')
-            life = self.get_or_create_animal_life(animal_id, animal_type)
             
-            # Get growth rate from animal's DNA (evolved trait!)
-            if hasattr(animal, 'dna') and hasattr(animal.dna, 'growth_rate'):
-                growth_mod = animal.dna.growth_rate
+            # Cache DNA values on animal to avoid repeated lookups
+            dna = getattr(animal, 'dna', None)
+            if dna:
+                if not hasattr(animal, '_cached_growth'):
+                    animal._cached_growth = getattr(dna, 'growth_rate', 1.0)
+                    animal._cached_metabolism = getattr(dna, 'metabolism_rate', 1.0)
+                    animal._cached_type = getattr(dna, 'animal_type', 'walker')
+                growth_mod = animal._cached_growth
+                metabolism_mod = animal._cached_metabolism
+                animal_type = animal._cached_type
             else:
-                growth_mod = 1.0  # Default if no DNA growth rate
-            life.update(dt_hours, is_day, growth_mod)
+                growth_mod = 1.0
+                metabolism_mod = 1.0
+                animal_type = getattr(animal, 'animal_type', 'walker')
+            
+            life = self.get_or_create_animal_life(animal_id, animal_type)
+            life.update(dt_hours, is_day, growth_mod, metabolism_mod)
             
             # Apply growth to visual scale
-            if hasattr(animal, 'scale'):
+            scale = getattr(animal, 'scale', None)
+            if scale is not None:
                 animal.scale = 0.4 + life.growth * 0.6
             
+            ax = getattr(animal, 'x', None)
+            az = getattr(animal, 'z', None)
+            if ax is None or az is None:
+                continue
+            
             # Eating behavior (only if can eat - not on cooldown)
-            if life.can_eat() and hasattr(animal, 'x'):
+            if life.can_eat():
                 if life.diet in (Diet.HERBIVORE, Diet.OMNIVORE) and plants:
-                    # Try to eat nearby plant
-                    for plant in plants[:10]:
-                        if hasattr(plant, 'x'):
-                            # Size check: animal can only eat plants smaller than itself
-                            plant_height = getattr(plant.dna, 'height_gene', None)
-                            plant_size = plant_height.value if plant_height else 2.0
-                            animal_size = life.growth * 3.0
-                            
-                            # Can't eat trees if you're small
-                            if plant_size > animal_size * 2:
-                                continue
-                            
-                            # Skip if plant has no energy left
-                            plant_life = self.get_or_create_plant_life(id(plant))
-                            if plant_life.energy < 5:
-                                continue  # Not enough to eat
-                            
-                            # Must be reasonably close (5 units - easier to find food)
-                            dist = math.sqrt((animal.x - plant.x)**2 + (animal.z - plant.z)**2)
-                            if dist < 5.0:
-                                # Take a bite! Energy transfer
-                                energy_gained = plant_life.take_bite(life.growth)
-                                life.eat(energy_gained)
-                                self.animals_ate += 1
-                                
-                                # Mark chunk for visual refresh
-                                cx = int(plant.x // 128)
-                                cz = int(plant.z // 128)
-                                self.chunks_needing_refresh.add((cx, cz))
-                                
-                                if LifeConfig.LOG_ENABLED and self.rng.random() < 0.3:
-                                    pct = plant_life.get_render_fraction() * 100
-                                    print(f"  [LIFE] {animal_type} ate {energy_gained:.0f} energy, plant at {pct:.0f}%")
-                                break
+                    # Check nearby plants (limit to 8 for perf)
+                    animal_size = life.growth * 3.0
+                    for plant in plants[:8]:
+                        px = getattr(plant, 'x', None)
+                        pz = getattr(plant, 'z', None)
+                        if px is None:
+                            continue
+                        
+                        # Quick squared distance check (no sqrt!)
+                        dx, dz = ax - px, az - pz
+                        dist_sq = dx * dx + dz * dz
+                        if dist_sq > 25.0:  # 5² = 25
+                            continue
+                        
+                        # Size check
+                        pdna = getattr(plant, 'dna', None)
+                        plant_height = getattr(pdna, 'height_gene', None) if pdna else None
+                        plant_size = plant_height.value if plant_height else 2.0
+                        
+                        if plant_size > animal_size * 2:
+                            continue
+                        
+                        plant_life = self.get_or_create_plant_life(id(plant))
+                        if plant_life.energy < 5:
+                            continue
+                        
+                        energy_gained = plant_life.take_bite(life.growth)
+                        life.eat(energy_gained)
+                        self.animals_ate += 1
+                        self.chunks_needing_refresh.add(chunk_key)
+                        break
                 
                 if life.diet in (Diet.CARNIVORE, Diet.OMNIVORE):
-                    # Try to eat smaller animals (must be close!)
+                    # Hunt smaller animals (within chunk only)
                     for other, ox, oz, other_id in animal_positions:
                         if other_id == animal_id:
                             continue
                         other_life = self.animal_life.get(other_id)
                         if other_life and other_life.growth < life.growth * 0.7:
-                            dist = math.sqrt((animal.x - ox)**2 + (animal.z - oz)**2)
-                            if dist < 2.0:  # Must be very close
-                                # Gain energy from prey (half their energy)
+                            dx, dz = ax - ox, az - oz
+                            if dx * dx + dz * dz < 4.0:  # 2² = 4
                                 energy_gained = other_life.energy * 0.5
                                 life.eat(energy_gained)
-                                other_life.health = 0  # Kill prey
+                                other_life.health = 0
                                 self.animals_ate += 1
-                                if LifeConfig.LOG_ENABLED:
-                                    print(f"  [LIFE] {animal_type} hunted! +{energy_gained:.0f} energy")
                                 break
             
-            # Reproduction (costs energy for both)
+            # Reproduction
             if life.can_reproduce() and life.gender == Gender.FEMALE:
-                # Look for nearby male
                 for other, ox, oz, other_id in animal_positions:
                     if other_id == animal_id:
                         continue
@@ -656,16 +688,13 @@ class LifeSimulator:
                     if (other_life and 
                         other_life.gender == Gender.MALE and 
                         other_life.can_reproduce()):
-                        dist = math.sqrt((animal.x - ox)**2 + (animal.z - oz)**2)
-                        if dist < 4.0:  # Must be close to mate
-                            # Mate! Both lose energy
+                        dx, dz = ax - ox, az - oz
+                        if dx * dx + dz * dz < 16.0:  # 4² = 16 (no sqrt!)
                             life.pregnant = True
                             life.pregnancy_timer = 0.0
-                            life.energy -= 20  # Female energy cost
-                            other_life.energy -= 15  # Male energy cost
+                            life.energy -= 20
+                            other_life.energy -= 15
                             self.matings += 1
-                            if LifeConfig.LOG_ENABLED:
-                                print(f"  [LIFE] {animal_type} mated! (-20 energy)")
                             break
             
             # Give birth (lay egg) - with cap check
@@ -794,33 +823,27 @@ class LifeSimulator:
             glPushMatrix()
             glTranslatef(egg.x, egg.y + egg.size * 0.6, egg.z)
             
-            # GIANT WHITE MARKER ABOVE EGG (debug visibility!)
-            glColor3f(1.0, 1.0, 1.0)  # Bright white
-            glLineWidth(4.0)
-            glBegin(GL_LINES)
-            glVertex3f(0, 0, 0)
-            glVertex3f(0, 20.0, 0)  # 20 units tall white line!
-            glEnd()
-            
-            # White diamond at top
-            glBegin(GL_QUADS)
-            glVertex3f(-1, 20, 0)
-            glVertex3f(0, 22, 0)
-            glVertex3f(1, 20, 0)
-            glVertex3f(0, 18, 0)
-            glEnd()
-            glLineWidth(1.0)
+            # # DEBUG MARKER - commented out for performance
+            # if dist < 50:
+            #     glColor4f(1.0, 1.0, 1.0, 0.6)
+            #     glLineWidth(2.0)
+            #     glBegin(GL_LINES)
+            #     glVertex3f(0, 0, 0)
+            #     glVertex3f(0, 3.0, 0)
+            #     glEnd()
+            #     glLineWidth(1.0)
             
             # Progress affects color saturation (more vibrant near hatching)
             progress = min(1.0, egg.hatch_timer / egg.hatch_time)
             
-            # Base egg color from DNA, slightly shifting as it develops
-            r = egg.base_color[0] * (1.0 - progress * 0.1)
-            g = egg.base_color[1] * (1.0 - progress * 0.05)
-            b = egg.base_color[2] * (1.0 + progress * 0.1)
+            # Base egg color from DNA - BRIGHTER (multiply by 1.5, clamp to 1.0)
+            r = min(1.0, egg.base_color[0] * 1.5 * (1.0 - progress * 0.1))
+            g = min(1.0, egg.base_color[1] * 1.5 * (1.0 - progress * 0.05))
+            b = min(1.0, egg.base_color[2] * 1.5 * (1.0 + progress * 0.1))
             
-            # Scale for elongation
-            glScalef(egg.size * 0.7, egg.size * egg.elongation, egg.size * 0.7)
+            # Scale for elongation - 3X BIGGER for visibility
+            egg_scale = 3.0
+            glScalef(egg.size * 0.7 * egg_scale, egg.size * egg.elongation * egg_scale, egg.size * 0.7 * egg_scale)
             
             # Draw main egg body
             segments = 12

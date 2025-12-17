@@ -24,6 +24,7 @@ Controls:
 import argparse
 import sys
 import os
+import json
 import shutil
 import random
 import time
@@ -60,13 +61,28 @@ def main():
         clear_cache()
         return
     
-    # Generate random seed if not specified
-    if args.seed is None:
-        seed = int(time.time() * 1000) % (2**31)
-    else:
+    # Determine seed: CLI arg > saved seed > random
+    if args.seed is not None:
         seed = args.seed
-    
-    print(f"  World seed: {seed}")
+        print(f"  World seed: {seed} (from --seed)")
+    else:
+        # Try to load seed from save file first
+        save_file = os.path.expanduser("~/.waverse/config.json")
+        saved_seed = None
+        if os.path.exists(save_file):
+            try:
+                with open(save_file, "r") as f:
+                    saved_data = json.load(f)
+                    saved_seed = saved_data.get("seed")
+            except:
+                pass
+        
+        if saved_seed is not None:
+            seed = saved_seed
+            print(f"  World seed: {seed} (from save file)")
+        else:
+            seed = int(time.time() * 1000) % (2**31)
+            print(f"  World seed: {seed} (new random)")
     
     # Choose world type
     if args.islands:

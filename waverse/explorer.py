@@ -911,6 +911,11 @@ def warp_to_new_universe(camera, chunk_manager, chunk_renderer, flora_manager,
     chunk_renderer.display_lists.clear()
     flora_manager.chunk_plants.clear()
     flora_manager.display_lists.clear()
+    # Clear cached DNA values from old animals before clearing
+    for animal in animal_manager.animals:
+        for attr in ('_cached_growth', '_cached_metabolism', '_cached_type'):
+            if hasattr(animal, attr):
+                delattr(animal, attr)
     animal_manager.animals.clear()
     animal_manager.chunk_animals.clear()
     structure_manager.structures.clear()
@@ -925,15 +930,18 @@ def warp_to_new_universe(camera, chunk_manager, chunk_renderer, flora_manager,
     climate_manager.regional_weather.clear()
     climate_manager.seed = new_universe_seed
     
-    # Reset life simulator
+    # Reset life simulator and pause it briefly to let world settle
     if life_simulator:
         life_simulator.plant_life.clear()
         life_simulator.animal_life.clear()
         life_simulator.eggs.clear()
         life_simulator.pending_births.clear()
         life_simulator.pending_plants.clear()
+        life_simulator.chunks_needing_refresh.clear()
         life_simulator.seed = new_universe_seed
         life_simulator.rng = random.Random(new_universe_seed)
+        # Pause life sim for 3 seconds to let chunks load
+        life_simulator.update_timer = -3.0
     
     # Reset flora DNA pool with new mutations
     flora_manager.dna_pool.seed = new_universe_seed
@@ -1021,7 +1029,15 @@ class Camera:
         self.flying = False  # Start in walking mode
         self.swimming = False  # In water, swim mode (fly but capped at surface)
         self.target_y = 40
-        self.speed_level = 7  # Default speed (0.5x walking) - index into SPEED_LEVELS
+        self.speed_level = 9  # Default speed (1.0x walking) - index into SPEED_LEVELS
+        
+        # Velocity tracking for HUD display
+        self.prev_x = 0
+        self.prev_y = 40
+        self.prev_z = 0
+        self.velocity_x = 0.0
+        self.velocity_y = 0.0
+        self.velocity_z = 0.0
         
         # Jump/fall physics
         self.jumping = False
@@ -1499,7 +1515,8 @@ class Camera:
                         self.jump_velocity = 0.0
             
             # HARD FLOOR: Never let camera go below terrain on steep hills
-            min_height = terrain_h + PLAYER_HEIGHT + 0.5  # Extra 0.5 buffer
+            # Increased buffer to 1.5 to prevent seeing through ground when looking down on slopes
+            min_height = terrain_h + PLAYER_HEIGHT + 1.5
             if self.y < min_height:
                 self.y = min_height
                 self.falling = False
@@ -1511,6 +1528,14 @@ class Camera:
                 self.flying = True
                 self.jumping = False
                 self.y += speed
+        
+        # Update velocity tracking for HUD
+        self.velocity_x = self.x - self.prev_x
+        self.velocity_y = self.y - self.prev_y
+        self.velocity_z = self.z - self.prev_z
+        self.prev_x = self.x
+        self.prev_y = self.y
+        self.prev_z = self.z
     
     def jump(self):
         """Start a jump if on the ground and not already jumping/falling."""
@@ -2696,24 +2721,44 @@ def draw_hud(display: tuple, camera: Camera, sky: SkySystem = None, climate: Cli
     top_bar_h = 36
     
     # Coordinates background (left side, after minimap ~190px)
+    # Expanded to show X, Y, Z positions and dx, dy, dz velocities
     coord_x = 200
-    coord_w = 130  # Sized for ~12 digit coordinates
+    coord_w = 220  # Wider to fit position + velocity columns
+    coord_h = 52   # Taller for 3 rows (X, Y, Z)
     glColor4f(0, 0, 0, 0.6)
     glBegin(GL_QUADS)
-    glVertex2f(coord_x, 10)
-    glVertex2f(coord_x + coord_w, 10)
-    glVertex2f(coord_x + coord_w, 10 + top_bar_h)
-    glVertex2f(coord_x, 10 + top_bar_h)
+    glVertex2f(coord_x, 6)
+    glVertex2f(coord_x + coord_w, 6)
+    glVertex2f(coord_x + coord_w, 6 + coord_h)
+    glVertex2f(coord_x, 6 + coord_h)
     glEnd()
     
     # Draw coordinate text using pygame font if available
+    # Format: X: 123.4  dx: 0.5
+    #         Y: 567.8  dy: 0.0
+    #         Z:  45.2  dz: 0.3
     if hud_font:
-        # X coordinate
-        x_text = f"X: {camera.x:.1f}"
-        y_text = f"Y: {camera.z:.1f}"  # Z is the "Y" in top-down view
+        # Scale velocity for display (multiply by ~60 for per-second)
+        vx = camera.velocity_x * 60
+        vy = camera.velocity_y * 60
+        vz = camera.velocity_z * 60
         
-        _draw_text(hud_font, x_text, coord_x + 10, 14, (255, 180, 100))
-        _draw_text(hud_font, y_text, coord_x + 10, 28, (100, 200, 255))
+        # Position column
+        x_text = f"X: {camera.x:7.1f}"
+        y_text = f"Y: {camera.z:7.1f}"  # Z is the "Y" in top-down view
+        z_text = f"Z: {camera.y:7.1f}"  # Y is height, shown as Z
+        
+        # Velocity column
+        dx_text = f"∂X: {vx:+5.1f}"
+        dy_text = f"∂Y: {vz:+5.1f}"
+        dz_text = f"∂Z: {vy:+5.1f}"
+        
+        _draw_text(hud_font, x_text, coord_x + 5, 10, (255, 180, 100))
+        _draw_text(hud_font, dx_text, coord_x + 115, 10, (200, 150, 80))
+        _draw_text(hud_font, y_text, coord_x + 5, 24, (100, 200, 255))
+        _draw_text(hud_font, dy_text, coord_x + 115, 24, (80, 160, 200))
+        _draw_text(hud_font, z_text, coord_x + 5, 38, (150, 255, 150))
+        _draw_text(hud_font, dz_text, coord_x + 115, 38, (120, 200, 120))
     else:
         # Fallback: draw simple coordinate indicators
         glColor4f(1.0, 0.7, 0.4, 1.0)
@@ -2721,9 +2766,9 @@ def draw_hud(display: tuple, camera: Camera, sky: SkySystem = None, climate: Cli
         glColor4f(0.4, 0.8, 1.0, 1.0)
         _draw_number(coord_x + 10, 32, camera.z)
     
-    # Compass background (2x wider)
+    # Compass background (adjusted position for wider coord box)
     compass_x = coord_x + coord_w + 10
-    compass_w = 400  # 2x wider
+    compass_w = 350  # Slightly narrower to fit
     glColor4f(0, 0, 0, 0.6)
     glBegin(GL_QUADS)
     glVertex2f(compass_x, 10)
@@ -3137,7 +3182,7 @@ def run_explorer(config: WorldConfig = None):
     setup_opengl()
     
     glMatrixMode(GL_PROJECTION)
-    gluPerspective(75, display[0]/display[1], 1.0, 2000)  # Wide FOV, near clip at 1.0 to prevent terrain clipping
+    gluPerspective(75, display[0]/display[1], 1.5, 2000)  # Wide FOV, near clip at 1.5 to prevent terrain clipping on slopes
     glMatrixMode(GL_MODELVIEW)
     
     # Create world with background chunk worker
@@ -3175,11 +3220,14 @@ def run_explorer(config: WorldConfig = None):
         camera.z = saved.get("z", 0)
         camera.yaw = saved.get("yaw", 0)
         camera.pitch = saved.get("pitch", -20)
-        camera.flying = saved.get("flying", True)
-        camera.speed_level = saved.get("speed_level", 2)
+        camera.flying = saved.get("flying", False)  # Default to walking mode
+        camera.speed_level = saved.get("speed_level", 9)  # Default to 1.0x speed
         print(f"  Loaded position: ({camera.x:.0f}, {camera.y:.0f}, {camera.z:.0f})")
     else:
+        # New game - start in walking mode at spawn
         camera.y = chunk_manager.get_height_at(0, 0) * HEIGHT_SCALE + 30
+        camera.flying = False  # Walking mode
+        camera.speed_level = 9  # 1.0x speed (comfortable walking pace)
     
     # Pre-load chunks around camera position
     start_chunk = camera.get_chunk_pos()
@@ -3400,10 +3448,10 @@ def run_explorer(config: WorldConfig = None):
             if not camera.menu_open:
                 gp_move = gamepad.get_movement()
                 gp_speed = SPEED_LEVELS[camera.speed_level]
-                # Debug: print if movement detected
-                if abs(gp_move[0]) > 0.1 or abs(gp_move[1]) > 0.1:
-                    if frame_count % 30 == 0:  # Print every 0.5 sec
-                        print(f"  [GP] L-Stick: fwd={gp_move[0]:.2f} right={gp_move[1]:.2f}")
+                # Debug: print if movement detected (commented out)
+                # if abs(gp_move[0]) > 0.1 or abs(gp_move[1]) > 0.1:
+                #     if frame_count % 30 == 0:  # Print every 0.5 sec
+                #         print(f"  [GP] L-Stick: fwd={gp_move[0]:.2f} right={gp_move[1]:.2f}")
                 forward += gp_move[0] * dt * gp_speed
                 right += gp_move[1] * dt * gp_speed
             
@@ -3420,9 +3468,9 @@ def run_explorer(config: WorldConfig = None):
             l2_val, r2_val = gamepad.get_triggers()
             
             # Debug ALL axes to find the right one for R2
-            if frame_count % 60 == 0:
-                axes_str = " ".join([f"{i}:{gamepad.get_axis_raw(i):+.2f}" for i in range(6)])
-                print(f"  [GP] Axes: {axes_str} | L2={l2_val:.2f} R2={r2_val:.2f}")
+            # if frame_count % 60 == 0:
+            #     axes_str = " ".join([f"{i}:{gamepad.get_axis_raw(i):+.2f}" for i in range(6)])
+            #     print(f"  [GP] Axes: {axes_str} | L2={l2_val:.2f} R2={r2_val:.2f}")
             
             if camera.auto_fly_mode > 0:
                 # TOUR MODE: L2/R2 adjust flight height
@@ -3456,8 +3504,8 @@ def run_explorer(config: WorldConfig = None):
             b_pressed = gamepad.get_button(GamepadConfig.B)
             if not camera.menu_open and b_pressed:
                 camera.is_running = True
-                if frame_count % 30 == 0:
-                    print(f"  [GP] B pressed - RUNNING")
+                # if frame_count % 30 == 0:
+                #     print(f"  [GP] B pressed - RUNNING")
             else:
                 camera.is_running = False
             
@@ -3610,10 +3658,11 @@ def run_explorer(config: WorldConfig = None):
         cam_pos = camera.get_pos()
         sky.render(cam_pos[0], cam_pos[1], cam_pos[2])
         
-        # Render clouds
+        # Render clouds with DNA-based visuals
         weather_renderer.render_clouds(cam_pos[0], cam_pos[1], cam_pos[2],
                                        climate_manager.current_weather.cloud_cover,
-                                       climate_manager.time)
+                                       climate_manager.time,
+                                       climate_manager.current_weather.visual_dna)
         
         chunk_renderer.render()
         

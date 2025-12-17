@@ -384,19 +384,27 @@ def generate_tile_building(x: float, y: float, z: float,
     # =========================================================================
     # GENERATE FLOORS
     # =========================================================================
+    # Check if building is on a slope - needs ground floor if so
+    has_slope = False
+    if terrain_heights is not None:
+        slope = max(terrain_heights) - min(terrain_heights)
+        has_slope = slope > 2.0
+    
     for floor_idx in range(floors):
         floor_y = y + floor_idx * floor_height
         
-        # --- Floor tiles (except ground floor) ---
-        if floor_idx > 0:
+        # --- Floor tiles ---
+        # Add floor for upper floors OR ground floor on slopes (to close the gap)
+        if floor_idx > 0 or has_slope:
             for tx in range(tiles_x):
                 for tz in range(tiles_z):
-                    # Skip ramp opening from below
+                    # Skip ramp opening from below (upper floors only)
                     is_ramp_opening = False
-                    if ramp_direction == "x" and tx in [ramp_tile_x, ramp_tile_x + 1] and tz == ramp_tile_z:
-                        is_ramp_opening = True
-                    elif ramp_direction == "z" and tz in [ramp_tile_z, ramp_tile_z + 1] and tx == ramp_tile_x:
-                        is_ramp_opening = True
+                    if floor_idx > 0:
+                        if ramp_direction == "x" and tx in [ramp_tile_x, ramp_tile_x + 1] and tz == ramp_tile_z:
+                            is_ramp_opening = True
+                        elif ramp_direction == "z" and tz in [ramp_tile_z, ramp_tile_z + 1] and tx == ramp_tile_x:
+                            is_ramp_opening = True
                     
                     if is_ramp_opening:
                         continue
@@ -413,7 +421,16 @@ def generate_tile_building(x: float, y: float, z: float,
                     ))
         
         # --- Walls ---
-        wall_height = floor_height
+        wall_height_base = floor_height
+        
+        # For ground floor on slopes, walls extend down to min terrain
+        if floor_idx == 0 and has_slope and terrain_heights is not None:
+            min_terrain = min(terrain_heights)
+            wall_base = min_terrain - 1.0  # Extend below for safety
+            extended_wall_height = (floor_y + wall_height_base) - wall_base
+        else:
+            wall_base = floor_y
+            extended_wall_height = wall_height_base
         
         def add_wall_segment(wx, wz, rotation, is_door_pos):
             """Add a wall segment, handling doors, windows, and open walls."""
@@ -432,8 +449,8 @@ def generate_tile_building(x: float, y: float, z: float,
                 ))
                 return
             
-            # WINDOW: Add wall with gap in middle
-            if rng.random() < window_chance:
+            # WINDOW: Add wall with gap in middle (only if not ground floor on slope)
+            if rng.random() < window_chance and floor_idx > 0:
                 window_bottom = 1.5
                 window_height = 2.0
                 # Wall below window
@@ -445,15 +462,15 @@ def generate_tile_building(x: float, y: float, z: float,
                 # Wall above window
                 structure.walls.append(Wall(
                     x=wx, y=floor_y + window_bottom + window_height, z=wz,
-                    width=tile_size - 0.2, height=wall_height - window_bottom - window_height,
+                    width=tile_size - 0.2, height=wall_height_base - window_bottom - window_height,
                     thickness=wall_thickness, rotation=rotation, color=wall_color
                 ))
                 return
             
-            # SOLID WALL
+            # SOLID WALL - extend to ground on slopes for floor 0
             structure.walls.append(Wall(
-                x=wx, y=floor_y, z=wz,
-                width=tile_size - 0.2, height=wall_height,
+                x=wx, y=wall_base, z=wz,
+                width=tile_size - 0.2, height=extended_wall_height,
                 thickness=wall_thickness, rotation=rotation, color=wall_color
             ))
         
@@ -672,55 +689,81 @@ def generate_maze(x: float, y: float, z: float,
                     color=(0.4, 0.35, 0.3)
                 ))
         
-        # Generate walls from grid
-        # Horizontal walls (along X axis)
+        # Calculate wall base height - walls should extend to lowest terrain
+        min_terrain = y
+        if terrain_heights and len(terrain_heights) >= 4:
+            min_terrain = min(terrain_heights)
+        
+        # For ground floor, walls extend from min terrain to floor + wall_height
+        if floor_num == 0:
+            wall_base_y = min_terrain - 1.0  # Extend slightly below for safety
+            total_wall_height = (floor_y + wall_height) - wall_base_y
+        else:
+            wall_base_y = floor_y
+            total_wall_height = wall_height
+        
+        # Generate walls from grid - create individual wall segments for each wall cell
+        # This ensures proper maze structure with walls in both directions
+        cell_world_size = cell_size / 2  # Each grid cell is half the cell_size
+        
         for gz in range(grid_h):
-            wall_start = None
             for gx in range(grid_w):
-                if grid[gz, gx]:  # Wall cell
-                    if wall_start is None:
-                        wall_start = gx
-                else:  # Passage
-                    if wall_start is not None:
-                        # Create wall from wall_start to gx-1
-                        wall_len = gx - wall_start
-                        if wall_len > 0:
-                            wx = x - half_width + (wall_start + wall_len / 2) * cell_size / 2
-                            wz = z - half_depth + gz * cell_size / 2
-                            structure.walls.append(Wall(
-                                x=wx, y=floor_y, z=wz,
-                                width=wall_len * cell_size / 2,
-                                height=wall_height,
-                                thickness=wall_thickness,
-                                rotation=0,
-                                color=wall_color
-                            ))
-                        wall_start = None
-            
-            # Handle wall that extends to edge
-            if wall_start is not None:
-                wall_len = grid_w - wall_start
-                if wall_len > 0:
-                    wx = x - half_width + (wall_start + wall_len / 2) * cell_size / 2
-                    wz = z - half_depth + gz * cell_size / 2
+                if not grid[gz, gx]:  # Skip passages
+                    continue
+                    
+                # World position for this wall cell
+                wx = x - half_width + gx * cell_world_size
+                wz = z - half_depth + gz * cell_world_size
+                
+                # Check which neighbors are also walls to determine wall orientation
+                left_wall = gx > 0 and grid[gz, gx - 1]
+                right_wall = gx < grid_w - 1 and grid[gz, gx + 1]
+                up_wall = gz > 0 and grid[gz - 1, gx]
+                down_wall = gz < grid_h - 1 and grid[gz + 1, gx]
+                
+                # Create wall segment based on connectivity
+                horiz = left_wall or right_wall
+                vert = up_wall or down_wall
+                
+                if horiz and not vert:
+                    # Horizontal wall segment
                     structure.walls.append(Wall(
-                        x=wx, y=floor_y, z=wz,
-                        width=wall_len * cell_size / 2,
-                        height=wall_height,
+                        x=wx, y=wall_base_y, z=wz,
+                        width=cell_world_size + wall_thickness,
+                        height=total_wall_height,
                         thickness=wall_thickness,
                         rotation=0,
                         color=wall_color
                     ))
+                elif vert and not horiz:
+                    # Vertical wall segment (rotated 90 degrees)
+                    structure.walls.append(Wall(
+                        x=wx, y=wall_base_y, z=wz,
+                        width=cell_world_size + wall_thickness,
+                        height=total_wall_height,
+                        thickness=wall_thickness,
+                        rotation=90,
+                        color=wall_color
+                    ))
+                else:
+                    # Junction or corner - create a small pillar/post
+                    structure.walls.append(Wall(
+                        x=wx, y=wall_base_y, z=wz,
+                        width=wall_thickness * 1.5,
+                        height=total_wall_height,
+                        thickness=wall_thickness * 1.5,
+                        rotation=0,
+                        color=wall_color
+                    ))
         
-        # Add floor for each level (except ground floor which uses terrain)
-        if floor_num > 0:
-            structure.floors.append(Floor(
-                x=x, y=floor_y, z=z,
-                width=maze_width + 2,
-                depth=maze_depth + 2,
-                thickness=0.3,
-                color=floor_color
-            ))
+        # ALWAYS add floor for mazes (they need bounded walkspace)
+        structure.floors.append(Floor(
+            x=x, y=floor_y, z=z,
+            width=maze_width + 2,
+            depth=maze_depth + 2,
+            thickness=0.5,  # Thicker for better collision
+            color=floor_color
+        ))
         
         # Add ceiling for top floor
         if floor_num == floors - 1:
@@ -736,21 +779,64 @@ def generate_maze(x: float, y: float, z: float,
     if terrain_heights and len(terrain_heights) >= 4:
         min_terrain = min(terrain_heights)
         if y - min_terrain > 2:
-            pillar_height = y - min_terrain + 2
             corners = [
-                (x - half_width, z - half_depth),
-                (x + half_width, z - half_depth),
-                (x - half_width, z + half_depth),
-                (x + half_width, z + half_depth),
+                (x - half_width, z - half_depth, terrain_heights[0]),  # -X -Z
+                (x + half_width, z - half_depth, terrain_heights[1]),  # +X -Z
+                (x - half_width, z + half_depth, terrain_heights[2]),  # -X +Z
+                (x + half_width, z + half_depth, terrain_heights[3]),  # +X +Z
             ]
-            for i, (px, pz) in enumerate(corners):
-                local_ground = terrain_heights[i]
+            for px, pz, local_ground in corners:
                 if y - local_ground > 1:
                     structure.pillars.append(Pillar(
-                        x=px, y_bottom=local_ground, y_top=y + 0.5, z=pz,
+                        x=px, y_bottom=local_ground - 1.0, y_top=y + 0.5, z=pz,
                         width=1.0,
                         color=(wall_color[0] * 0.7, wall_color[1] * 0.7, wall_color[2] * 0.7)
                     ))
+        
+        # Add entry ramp from lowest terrain point to maze floor
+        # Find which edge has lowest terrain
+        edge_heights = [
+            (terrain_heights[0] + terrain_heights[2]) / 2,  # -X edge (west)
+            (terrain_heights[1] + terrain_heights[3]) / 2,  # +X edge (east)
+            (terrain_heights[0] + terrain_heights[1]) / 2,  # -Z edge (south)
+            (terrain_heights[2] + terrain_heights[3]) / 2,  # +Z edge (north)
+        ]
+        lowest_edge = edge_heights.index(min(edge_heights))
+        lowest_height = min(edge_heights)
+        ramp_height_diff = y - lowest_height
+        
+        # Only add ramp if there's a significant height difference
+        if ramp_height_diff > 1.5:
+            ramp_length = max(ramp_height_diff * 2, cell_size * 2)  # 45° or gentler
+            ramp_width = cell_size * 0.8
+            
+            if lowest_edge == 0:  # West edge (-X)
+                rx = x - half_width - ramp_length / 2
+                rz = z
+                ramp_rot = 90
+            elif lowest_edge == 1:  # East edge (+X)
+                rx = x + half_width + ramp_length / 2
+                rz = z
+                ramp_rot = 270
+            elif lowest_edge == 2:  # South edge (-Z)
+                rx = x
+                rz = z - half_depth - ramp_length / 2
+                ramp_rot = 0
+            else:  # North edge (+Z)
+                rx = x
+                rz = z + half_depth + ramp_length / 2
+                ramp_rot = 180
+            
+            structure.ramps.append(Ramp(
+                x=rx,
+                y_bottom=lowest_height,
+                z=rz,
+                width=ramp_width,
+                length=ramp_length,
+                height=ramp_height_diff,
+                rotation=ramp_rot,
+                color=(floor_color[0] * 0.9, floor_color[1] * 0.9, floor_color[2] * 0.9)
+            ))
     
     structure.compute_bounds()
     return structure

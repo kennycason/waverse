@@ -1226,11 +1226,11 @@ class FloraManager:
         plants = []
         h, w = heightmap.shape
         
-        # Place plants using chunk's DNA species (reduced for perf with new branching)
-        num_plants = rng.integers(12, 28)
+        # Place plants using chunk's DNA species (reduced 10% for perf)
+        num_plants = rng.integers(11, 25)
         
-        # Also spawn underwater plants
-        num_underwater = rng.integers(5, 15)
+        # Also spawn underwater plants (reduced 10%)
+        num_underwater = rng.integers(4, 13)
         
         for _ in range(num_plants + num_underwater):
             local_x = rng.integers(2, w - 2)
