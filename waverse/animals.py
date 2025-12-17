@@ -44,6 +44,9 @@ class AnimalInstance:
     state: str = "idle"  # idle, moving, fleeing
     state_timer: float = 0.0
     
+    # Visual scale (for baby animals that grow)
+    scale: float = 1.0
+    
     def update(self, dt: float, neighbors: List["AnimalInstance"] = None, 
                player_pos: Tuple[float, float, float] = None,
                get_ground_height=None):
@@ -813,6 +816,51 @@ class AnimalManager:
             self.animals.append(animal)
         
         self.chunk_animals[key] = animals
+    
+    def spawn_baby_animal(self, x: float, y: float, z: float, parent_dna: dict):
+        """Spawn a baby animal at the location where an egg hatched."""
+        # Determine chunk
+        chunk_size = 128  # Approximate chunk size in world units
+        cx = int(x // chunk_size)
+        cz = int(z // chunk_size)
+        key = (cx, cz)
+        
+        # Determine animal type from parent DNA
+        animal_type = parent_dna.get('animal_type', AnimalType.MAMMAL)
+        if animal_type not in AnimalType.ALL:
+            animal_type = AnimalType.MAMMAL
+        
+        # Create DNA based on parent (with some mutation)
+        templates = self.species_templates.get(animal_type, self.species_templates.get(AnimalType.MAMMAL, []))
+        if templates:
+            rng = np.random.default_rng(abs(hash((x, z, animal_type))) % (2**31))
+            base_dna = rng.choice(templates)
+            dna = base_dna.mutate(rng, strength=0.2)  # Light mutation from parent
+        else:
+            # Fallback - create random DNA
+            dna = AnimalDNA.create_random(animal_type, int(x * 1000 + z))
+        
+        # Start on ground, then adjust for movement type
+        world_y = y
+        if dna.movement_type == MovementType.FLY:
+            world_y = y + 2  # Start just above ground, will fly up
+        elif dna.movement_type in (MovementType.SWIM, MovementType.FLOAT):
+            world_y = max(0.5, y)  # In water
+        
+        # Create baby animal (smaller scale)
+        animal = AnimalInstance(
+            x=x, y=world_y, z=z,
+            dna=dna,
+            rotation=np.random.random() * 360,
+            anim_phase=np.random.random(),
+            scale=0.3  # Baby starts small!
+        )
+        
+        # Add to collections
+        if key not in self.chunk_animals:
+            self.chunk_animals[key] = []
+        self.chunk_animals[key].append(animal)
+        self.animals.append(animal)
     
     def update(self, dt: float, player_pos: Tuple[float, float, float], 
                get_ground_height=None):

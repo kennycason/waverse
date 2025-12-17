@@ -26,10 +26,14 @@ class PlantInstance:
     dna: PlantDNA
     scale: float = 1.0
     rotation: float = 0.0  # Y-axis rotation in degrees
+    render_fraction: float = 1.0  # 0.0-1.0, how much of plant to render (energy-based)
 
 
 class PlantRenderer:
     """Renders individual plants from DNA."""
+    
+    # Class variable for passing render_fraction to static methods
+    _current_render_fraction: float = 1.0
     
     @staticmethod
     def draw_full(plant: PlantInstance):
@@ -37,7 +41,16 @@ class PlantRenderer:
         glPushMatrix()
         glTranslatef(plant.x, plant.y, plant.z)
         glRotatef(plant.rotation, 0, 1, 0)
+        
+        # render_fraction controls how much of the plant to draw (1.0 = full, 0.5 = half)
+        # This is used to show damage/eating - branches disappear from top
+        render_frac = getattr(plant, 'render_fraction', 1.0)
+        
+        # Keep trunk full size - only affect branch rendering
         glScalef(plant.scale, plant.scale, plant.scale)
+        
+        # Store render_fraction for branch methods to use
+        PlantRenderer._current_render_fraction = render_frac
         
         dna = plant.dna
         
@@ -925,7 +938,14 @@ class PlantRenderer:
         # Use a seeded RNG for consistent randomness per plant
         branch_rng = np.random.default_rng(int(dna.species_id) & 0xFFFFFFFF)
         
-        for i in range(dna.branch_count):
+        # Get render_fraction - skip upper branches when damaged
+        render_frac = getattr(PlantRenderer, '_current_render_fraction', 1.0)
+        
+        # Calculate how many branches to draw based on render_fraction
+        # At 100% = all branches, at 50% = half branches (from bottom), at 0% = none
+        branches_to_draw = max(1, int(dna.branch_count * render_frac))
+        
+        for i in range(branches_to_draw):
             angle = (i / max(1, dna.branch_count)) * 360 * dna.branch_spread
             angle += dna.asymmetry * 30 * math.sin(i * 2.5)
             
@@ -1035,7 +1055,15 @@ class PlantRenderer:
     @staticmethod
     def _draw_canopy(dna: PlantDNA, height: float):
         """Draw tree canopy based on shape."""
-        spread = height * dna.canopy_spread * 0.5
+        # Get render_fraction - canopy shrinks when damaged
+        render_frac = getattr(PlantRenderer, '_current_render_fraction', 1.0)
+        
+        # Skip canopy entirely if very damaged
+        if render_frac < 0.2:
+            return
+        
+        # Scale canopy by render_fraction
+        spread = height * dna.canopy_spread * 0.5 * render_frac
         canopy_base = height * 0.5
         
         if dna.canopy_shape == "cone":

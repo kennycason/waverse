@@ -43,8 +43,12 @@ CHUNK_RENDER_DISTANCE = 20  # Massive view distance!
 PLAYER_HEIGHT = 2.5  # Eye height above ground (shorter = world feels bigger, fits through doors)
 WALK_SMOOTH_SPEED = 0.4  # Faster terrain following
 
-# Speed levels (keys: ` 1 2 3 4 5) - extended for faster flight
-SPEED_LEVELS = [0.05, 0.15, 0.3, 0.6, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0, 256.0]  # Ultra-slow to ludicrous
+# Speed levels - more granular at low end for smooth walking
+SPEED_LEVELS = [
+    0.02, 0.05, 0.08, 0.12, 0.18, 0.25, 0.35, 0.5,  # Walking speeds (8 levels)
+    0.7, 1.0, 1.5, 2.0, 3.0, 4.0,                    # Jogging/running (6 levels)
+    6.0, 10.0, 16.0, 32.0, 64.0, 128.0, 256.0        # Flying speeds (7 levels)
+]  # 21 total speed levels
 
 # LOD settings - aggressive LOD for huge view distance
 LOD_FULL_DISTANCE = 5      # Full detail within this range
@@ -677,15 +681,116 @@ def log_dna_at_cursor(camera, flora_manager, animal_manager):
         return None
 
 
-def modify_terrain_at_cursor(camera, chunk_manager, mode: str = "MINE", amount: float = 2.0, set_status: bool = True):
-    """Modify terrain at cursor position (MINE = lower, FILL = raise).
+def _set_terrain_height_at_world_pos(chunk_manager, world_x, world_z, delta, modified_chunks):
+    """Set terrain height at a world position, updating ALL chunks that share this vertex.
+    
+    Chunk boundaries share vertices - a vertex at (32*TILE_SCALE, z) is stored in both:
+    - chunk(0, cz).heightmap[z, 32] (right edge)
+    - chunk(1, cz).heightmap[z, 0] (left edge)
+    
+    We must update ALL chunks that contain this vertex to prevent rips.
+    """
+    # Chunk world size (32 tiles * TILE_SCALE per tile)
+    chunk_world_size = CHUNK_SIZE * TILE_SCALE
+    
+    # Find the primary chunk this point is in (use floor for correct negative handling)
+    primary_cx = int(np.floor(world_x / chunk_world_size))
+    primary_cz = int(np.floor(world_z / chunk_world_size))
+    
+    chunk = chunk_manager.get_chunk(primary_cx, primary_cz)
+    if chunk is None:
+        return
+    
+    h, w = chunk.heightmap.shape  # Should be 33x33 (CHUNK_SIZE+1)
+    
+    # Calculate local position within chunk (chunk origin is at cx * chunk_world_size)
+    local_x_float = (world_x - primary_cx * chunk_world_size) / TILE_SCALE
+    local_z_float = (world_z - primary_cz * chunk_world_size) / TILE_SCALE
+    
+    # Round to nearest integer vertex
+    local_x = int(round(local_x_float))
+    local_z = int(round(local_z_float))
+    
+    # Clamp to valid range
+    local_x = max(0, min(w - 1, local_x))
+    local_z = max(0, min(h - 1, local_z))
+    
+    # Modify the primary chunk
+    chunk = chunk_manager.get_chunk(primary_cx, primary_cz)
+    if chunk is not None:
+        chunk.heightmap[local_z, local_x] += delta
+        modified_chunks.add((primary_cx, primary_cz))
+        new_height = chunk.heightmap[local_z, local_x]
+    else:
+        return
+    
+    # If on left edge (local_x == 0), also update right edge of chunk to the left
+    if local_x == 0:
+        left_chunk = chunk_manager.get_chunk(primary_cx - 1, primary_cz)
+        if left_chunk is not None:
+            left_chunk.heightmap[local_z, w - 1] = new_height
+            modified_chunks.add((primary_cx - 1, primary_cz))
+    
+    # If on right edge (local_x == w-1), also update left edge of chunk to the right
+    if local_x == w - 1:
+        right_chunk = chunk_manager.get_chunk(primary_cx + 1, primary_cz)
+        if right_chunk is not None:
+            right_chunk.heightmap[local_z, 0] = new_height
+            modified_chunks.add((primary_cx + 1, primary_cz))
+    
+    # If on top edge (local_z == 0), also update bottom edge of chunk above
+    if local_z == 0:
+        top_chunk = chunk_manager.get_chunk(primary_cx, primary_cz - 1)
+        if top_chunk is not None:
+            top_chunk.heightmap[h - 1, local_x] = new_height
+            modified_chunks.add((primary_cx, primary_cz - 1))
+    
+    # If on bottom edge (local_z == h-1), also update top edge of chunk below
+    if local_z == h - 1:
+        bottom_chunk = chunk_manager.get_chunk(primary_cx, primary_cz + 1)
+        if bottom_chunk is not None:
+            bottom_chunk.heightmap[0, local_x] = new_height
+            modified_chunks.add((primary_cx, primary_cz + 1))
+    
+    # Handle corners (touch up to 4 chunks)
+    if local_x == 0 and local_z == 0:
+        corner = chunk_manager.get_chunk(primary_cx - 1, primary_cz - 1)
+        if corner is not None:
+            corner.heightmap[h - 1, w - 1] = new_height
+            modified_chunks.add((primary_cx - 1, primary_cz - 1))
+    
+    if local_x == w - 1 and local_z == 0:
+        corner = chunk_manager.get_chunk(primary_cx + 1, primary_cz - 1)
+        if corner is not None:
+            corner.heightmap[h - 1, 0] = new_height
+            modified_chunks.add((primary_cx + 1, primary_cz - 1))
+    
+    if local_x == 0 and local_z == h - 1:
+        corner = chunk_manager.get_chunk(primary_cx - 1, primary_cz + 1)
+        if corner is not None:
+            corner.heightmap[0, w - 1] = new_height
+            modified_chunks.add((primary_cx - 1, primary_cz + 1))
+    
+    if local_x == w - 1 and local_z == h - 1:
+        corner = chunk_manager.get_chunk(primary_cx + 1, primary_cz + 1)
+        if corner is not None:
+            corner.heightmap[0, 0] = new_height
+            modified_chunks.add((primary_cx + 1, primary_cz + 1))
+
+
+def modify_terrain_at_cursor(camera, chunk_manager, mode: str = "MINE", radius: int = 1, amount: float = 2.0, set_status: bool = True):
+    """Modify terrain at cursor position (MINE = lower, FILL = raise) with circular brush.
     
     Args:
         camera: Camera object
         chunk_manager: ChunkManager for terrain access
         mode: "MINE" to lower terrain, "FILL" to raise terrain
+        radius: Brush radius in tiles (1, 2, 4, 8)
         amount: How much to modify (default 2.0 units)
         set_status: Whether to show status message
+        
+    Returns:
+        Set of (cx, cz) chunk keys that were modified, or None if no terrain hit
     """
     # Get look direction
     look_x, look_y, look_z = camera.get_forward_vector()
@@ -719,32 +824,40 @@ def modify_terrain_at_cursor(camera, chunk_manager, mode: str = "MINE", amount: 
             
             # Check if ray is at or below terrain
             if py <= terrain_height:
-                # Found intersection! Modify terrain with smooth falloff
-                brush_radius = 3  # Larger brush for smoother dents
+                # Found intersection! Modify terrain with circular smooth falloff
+                # Brush radius maps: 1->3, 2->5, 4->9, 8->17 for smoother dents
+                brush_radius = radius * 2 + 1
                 delta_base = (-amount if mode == "MINE" else amount) / HEIGHT_SCALE
                 
-                # Apply Gaussian-like falloff over brush area
+                # Track all chunks that get modified
+                modified_chunks = set()
+                
+                # Apply Gaussian-like falloff over brush area using WORLD coordinates
                 for dz in range(-brush_radius, brush_radius + 1):
                     for dx in range(-brush_radius, brush_radius + 1):
-                        nx, nz = local_x + dx, local_z + dz
-                        if 0 <= nx < w and 0 <= nz < h:
-                            # Calculate distance-based falloff (smooth Gaussian-like)
-                            dist = math.sqrt(dx * dx + dz * dz)
-                            if dist <= brush_radius:
-                                # Smooth falloff: 1.0 at center, 0 at edge
-                                falloff = (1.0 - (dist / brush_radius)) ** 2
-                                chunk.heightmap[nz, nx] += delta_base * falloff
+                        # Calculate distance-based falloff (smooth Gaussian-like)
+                        dist = math.sqrt(dx * dx + dz * dz)
+                        if dist > brush_radius:
+                            continue
+                        
+                        # Smooth falloff: 1.0 at center, 0 at edge
+                        falloff = (1.0 - (dist / brush_radius)) ** 2
+                        delta = delta_base * falloff
+                        
+                        # Calculate world position for this brush point
+                        world_x = px + dx * TILE_SCALE
+                        world_z = pz + dz * TILE_SCALE
+                        
+                        # Modify terrain at this world position (handles all chunk boundaries)
+                        _set_terrain_height_at_world_pos(chunk_manager, world_x, world_z, delta, modified_chunks)
                 
                 action = "MINE" if mode == "MINE" else "FILL"
-                print(f"  [{action}] Modified terrain at ({px:.1f}, {pz:.1f})")
+                print(f"  [{action}] Modified terrain at ({px:.1f}, {pz:.1f}) - {len(modified_chunks)} chunks affected")
                 if set_status:
                     camera.set_status(f"{action} at ({px:.0f}, {pz:.0f})", 1.5)
                 
-                # Mark chunk as needing re-render
-                chunk_key = (cx, cz)
-                # The chunk renderer will need to regenerate the display list
-                # We'll handle this by removing from the cache
-                return (cx, cz)
+                # Return all modified chunks so they can be re-rendered
+                return modified_chunks
     
     print(f"  No terrain in range")
     return None
@@ -907,7 +1020,7 @@ class Camera:
         self.pitch = -20
         self.flying = False  # Start in walking mode
         self.target_y = 40
-        self.speed_level = 3  # Default speed (0.6x) - index into SPEED_LEVELS
+        self.speed_level = 7  # Default speed (0.5x walking) - index into SPEED_LEVELS
         
         # Jump/fall physics
         self.jumping = False
@@ -954,6 +1067,11 @@ class Camera:
         # Tool system
         self.current_tool_index = 0  # Index into ToolType.ALL_TOOLS
         self.current_tool = ToolType.SCAN
+        self.tool_radius = 1  # Radius for MINE/FILL tools (1, 2, 4, 8)
+        self.tool_radius_sizes = [1, 2, 4, 8]  # Available radius sizes
+        
+        # Running mode
+        self.is_running = False  # B button held = double speed
         
         # Markers for compass (list of (x, z, color, name) tuples)
         self.markers = []
@@ -964,6 +1082,15 @@ class Camera:
         self.menu_tab = 0  # 0 = Inventory, 1 = Log, 2 = Controls
         self.log_index = 0  # Currently selected log item
         self.log_items = []  # List of logged DNA files
+        self.log_filter = 0  # 0 = ALL, 1 = PLANTS, 2 = ANIMALS
+        self.log_filter_names = ["ALL", "PLANTS", "ANIMALS"]
+        
+        # Scroll acceleration state
+        self.scroll_hold_time = 0.0  # How long scroll direction held
+        self.scroll_direction = 0    # -1 = up, 1 = down, 0 = none
+        self.scroll_cooldown = 0.0   # Time until next scroll step
+        self.favorites = set()  # Set of favorite log filenames
+        self._load_favorites()
     
     def set_status(self, message: str, duration: float = 3.0):
         """Set a status message to display at bottom of screen."""
@@ -986,15 +1113,30 @@ class Camera:
             self.refresh_log_items()
             print(f"  [Menu] Opened (was: {was_open})")
         else:
+            # Reset scroll state when closing
+            self.scroll_hold_time = 0.0
+            self.scroll_direction = 0
+            self.scroll_cooldown = 0.0
             print(f"  [Menu] Closed (was: {was_open})")
     
     def refresh_log_items(self):
-        """Refresh list of logged DNA items."""
-        self.log_items = []
+        """Refresh list of logged DNA items, filtered and sorted by favorites."""
+        all_items = []
         if os.path.exists(DNA_LOGS_DIR):
             for f in sorted(os.listdir(DNA_LOGS_DIR), reverse=True):
                 if f.endswith('.json'):
-                    self.log_items.append(f)
+                    # Apply filter
+                    if self.log_filter == 0:  # ALL
+                        all_items.append(f)
+                    elif self.log_filter == 1 and f.startswith('plant_'):  # PLANTS
+                        all_items.append(f)
+                    elif self.log_filter == 2 and f.startswith('animal_'):  # ANIMALS
+                        all_items.append(f)
+        
+        # Sort: favorites first (with star), then by date descending
+        favorites = [f for f in all_items if f in self.favorites]
+        non_favorites = [f for f in all_items if f not in self.favorites]
+        self.log_items = favorites + non_favorites
         self.log_index = min(self.log_index, max(0, len(self.log_items) - 1))
     
     def menu_navigate(self, direction: int):
@@ -1002,10 +1144,116 @@ class Camera:
         if self.menu_tab == 1:  # Log tab
             self.log_index = max(0, min(len(self.log_items) - 1, self.log_index + direction))
     
+    def update_scroll(self, dt: float, is_scrolling_up: bool, is_scrolling_down: bool):
+        """Update accelerated scrolling. Returns number of items to scroll."""
+        # Determine current scroll direction
+        new_direction = 0
+        if is_scrolling_up:
+            new_direction = -1
+        elif is_scrolling_down:
+            new_direction = 1
+        
+        # If direction changed or stopped, reset
+        if new_direction != self.scroll_direction:
+            self.scroll_direction = new_direction
+            self.scroll_hold_time = 0.0
+            self.scroll_cooldown = 0.0
+            # Immediate first scroll when starting
+            if new_direction != 0:
+                return new_direction  # Scroll 1 item immediately
+            return 0
+        
+        # Not scrolling
+        if new_direction == 0:
+            return 0
+        
+        # Accumulate hold time
+        self.scroll_hold_time += dt
+        self.scroll_cooldown -= dt
+        
+        # Only scroll when cooldown expires
+        if self.scroll_cooldown > 0:
+            return 0
+        
+        # Calculate scroll speed based on hold time (acceleration)
+        # 0-0.3s: slow (1 item every 0.2s)
+        # 0.3-1s: medium (1 item every 0.1s)  
+        # 1-2s: fast (2 items every 0.08s)
+        # 2s+: very fast (3 items every 0.05s)
+        if self.scroll_hold_time < 0.3:
+            scroll_amount = 1
+            self.scroll_cooldown = 0.2
+        elif self.scroll_hold_time < 1.0:
+            scroll_amount = 1
+            self.scroll_cooldown = 0.1
+        elif self.scroll_hold_time < 2.0:
+            scroll_amount = 2
+            self.scroll_cooldown = 0.08
+        else:
+            scroll_amount = 3
+            self.scroll_cooldown = 0.05
+        
+        return scroll_amount * new_direction
+    
     def menu_switch_tab(self, direction: int):
         """Switch menu tab (direction: -1 = left, 1 = right)."""
         self.menu_tab = (self.menu_tab + direction) % 3  # 3 tabs: Inventory, Log, Controls
     
+    def log_filter_prev(self):
+        """Switch to previous log filter (ALL, PLANTS, ANIMALS)."""
+        self.log_filter = (self.log_filter - 1) % 3
+        self.refresh_log_items()
+        print(f"  Log filter: {self.log_filter_names[self.log_filter]}")
+    
+    def log_filter_next(self):
+        """Switch to next log filter (ALL, PLANTS, ANIMALS)."""
+        self.log_filter = (self.log_filter + 1) % 3
+        self.refresh_log_items()
+        print(f"  Log filter: {self.log_filter_names[self.log_filter]}")
+    
+    def _load_favorites(self):
+        """Load favorites from disk."""
+        favorites_file = os.path.join(WAVERSE_DIR, "favorites.json")
+        try:
+            if os.path.exists(favorites_file):
+                with open(favorites_file, "r") as f:
+                    self.favorites = set(json.load(f))
+        except Exception as e:
+            print(f"  Could not load favorites: {e}")
+            self.favorites = set()
+    
+    def _save_favorites(self):
+        """Save favorites to disk."""
+        favorites_file = os.path.join(WAVERSE_DIR, "favorites.json")
+        try:
+            os.makedirs(WAVERSE_DIR, exist_ok=True)
+            with open(favorites_file, "w") as f:
+                json.dump(list(self.favorites), f)
+        except Exception as e:
+            print(f"  Could not save favorites: {e}")
+    
+    def toggle_log_favorite(self):
+        """Toggle favorite status of currently selected log item."""
+        if 0 <= self.log_index < len(self.log_items):
+            item = self.log_items[self.log_index]
+            if item in self.favorites:
+                self.favorites.discard(item)
+                self.set_status(f"Removed from favorites", 1.5)
+            else:
+                self.favorites.add(item)
+                self.set_status(f"Added to favorites ★", 1.5)
+            self._save_favorites()
+            self.refresh_log_items()  # Re-sort with favorites at top
+    
+    def delete_log_favorite(self):
+        """Remove currently selected log item from favorites."""
+        if 0 <= self.log_index < len(self.log_items):
+            item = self.log_items[self.log_index]
+            if item in self.favorites:
+                self.favorites.discard(item)
+                self._save_favorites()
+                self.refresh_log_items()
+                self.set_status(f"Removed favorite", 1.5)
     
     def next_tool(self):
         """Switch to next tool (R1)."""
@@ -1014,10 +1262,18 @@ class Camera:
         print(f"  Tool: {self.current_tool}")
     
     def prev_tool(self):
-        """Switch to previous tool (L1)."""
+        """Switch to previous tool."""
         self.current_tool_index = (self.current_tool_index - 1) % len(ToolType.ALL_TOOLS)
         self.current_tool = ToolType.ALL_TOOLS[self.current_tool_index]
         print(f"  Tool: {self.current_tool}")
+    
+    def cycle_tool_radius(self):
+        """Cycle through tool radius sizes (for MINE/FILL)."""
+        current_idx = self.tool_radius_sizes.index(self.tool_radius) if self.tool_radius in self.tool_radius_sizes else 0
+        next_idx = (current_idx + 1) % len(self.tool_radius_sizes)
+        self.tool_radius = self.tool_radius_sizes[next_idx]
+        self.set_status(f"Tool radius: {self.tool_radius}", 2.0)
+        print(f"  Tool radius: {self.tool_radius}")
     
     def rotate(self, dx, dy):
         if self.auto_fly_mode > 0:
@@ -1052,8 +1308,10 @@ class Camera:
         return chunk_manager.get_height_at(self.x, self.z) * HEIGHT_SCALE
     
     def move(self, forward, right, up, chunk_manager: ChunkManager, structure_manager=None):
-        # Get current speed based on level
+        # Get current speed based on level, with running multiplier
         speed = BASE_MOVE_SPEED * SPEED_LEVELS[self.speed_level]
+        if self.is_running:
+            speed *= 2.0  # Double speed while running (B held)
         
         yaw_rad = math.radians(self.yaw)
         pitch_rad = math.radians(self.pitch)
@@ -2243,15 +2501,23 @@ def draw_menu(display: tuple, camera: Camera, hud_font=None):
             _draw_text(hud_font, "Inventory (Coming Soon)", menu_x + 20, content_y, (200, 200, 200))
     
     elif camera.menu_tab == 1:  # Log
+        # Draw filter header
+        filter_y = content_y
+        if hud_font:
+            filter_text = f"Filter: [{camera.log_filter_names[camera.log_filter]}]  (D-PAD L/R to change)"
+            _draw_text(hud_font, filter_text, menu_x + 20, filter_y, (150, 200, 255))
+        content_y += 25
+        content_h -= 25
+        
         if len(camera.log_items) == 0:
             if hud_font:
-                _draw_text(hud_font, "No DNA logs yet. Use SCAN tool to log creatures!", 
+                _draw_text(hud_font, "No DNA logs yet. Use SCAN tool (R or R1) to log creatures!", 
                           menu_x + 20, content_y, (200, 200, 200))
         else:
-            # Split: list on left, image preview on right
-            list_width = menu_w * 0.5
-            image_x = menu_x + list_width + 20
-            image_size = min(content_h - 20, menu_w * 0.4)
+            # Split: list on left (narrower), image preview on right (wider)
+            list_width = menu_w * 0.4
+            image_x = menu_x + list_width + 10
+            image_size = min(content_h - 10, menu_w * 0.55)  # Wider image
             
             # Show list of log items on left
             item_h = 24
@@ -2271,8 +2537,9 @@ def draw_menu(display: tuple, camera: Camera, hud_font=None):
                     glVertex2f(menu_x + 10, iy + item_h - 4)
                     glEnd()
                 
-                # Item text
+                # Item text with star for favorites
                 if hud_font:
+                    is_favorite = item in camera.favorites
                     parts = item.replace('.json', '').split('_')
                     if len(parts) >= 3:
                         entity_type = parts[0]
@@ -2282,7 +2549,11 @@ def draw_menu(display: tuple, camera: Camera, hud_font=None):
                     else:
                         display_text = item
                     
-                    color = (100, 200, 255) if start_idx + i == camera.log_index else (180, 180, 180)
+                    # Add star for favorites
+                    if is_favorite:
+                        display_text = "★ " + display_text
+                    
+                    color = (255, 215, 0) if is_favorite else (100, 200, 255) if start_idx + i == camera.log_index else (180, 180, 180)
                     _draw_text(hud_font, display_text, menu_x + 20, iy, color)
             
             # Draw image preview on right side
@@ -2312,9 +2583,11 @@ def draw_menu(display: tuple, camera: Camera, hud_font=None):
                 ("F / Shift", "Go down"),
                 ("[ / -", "Slower speed"),
                 ("] / =", "Faster speed"),
-                ("P", "Screenshot"),
-                ("B", "Use tool"),
+                ("B (hold)", "Run (2x speed)"),
+                ("R", "Use tool (ACTION)"),
                 (", / .", "Switch tool"),
+                ("T", "Cycle tool radius"),
+                ("P", "Screenshot"),
                 ("Tab", "Menu"),
                 ("X", "Tour mode"),
                 ("N", "Warp to new world"),
@@ -2339,8 +2612,10 @@ def draw_menu(display: tuple, camera: Camera, hud_font=None):
                 ("R3", "Go up"),
                 ("L2 / R2", "Speed down/up"),
                 ("A", "Jump"),
-                ("B", "Use tool"),
-                ("L1 / R1", "Switch tool"),
+                ("B (hold)", "Run (2x speed)"),
+                ("R1", "Use tool (ACTION)"),
+                ("D-PAD L/R", "Switch tool"),
+                ("L1", "Cycle tool radius"),
                 ("Y", "Screenshot"),
                 ("START", "Menu"),
                 ("SELECT", "Warp to new world"),
@@ -2351,11 +2626,14 @@ def draw_menu(display: tuple, camera: Camera, hud_font=None):
                 _draw_text(hud_font, f"{btn}: {action}", right_col, y, (200, 200, 200))
                 y += line_h
     
-    # Help text at bottom
+    # Help text at bottom (different per tab)
     if hud_font:
         help_y = menu_y + menu_h - 25
-        _draw_text(hud_font, "D-Pad/Stick: Navigate | START: Close", 
-                  menu_x + 20, help_y, (150, 150, 150))
+        if camera.menu_tab == 1:  # LOG tab
+            help_text = "UP/DN: Scroll | L/R: Filter | A: Favorite | SEL: Unfav | L1/R1: Tabs | START: Close"
+        else:
+            help_text = "UP/DN: Navigate | L1/R1: Tabs | START: Close"
+        _draw_text(hud_font, help_text, menu_x + 20, help_y, (150, 150, 150))
     
     glDisable(GL_BLEND)
     glEnable(GL_DEPTH_TEST)
@@ -2887,17 +3165,17 @@ def run_explorer(config: WorldConfig = None):
     print(f"  WAVERSE - {config.name}")
     print("=" * 60)
     print("  KEYBOARD:")
-    print("    Movement: WASD/Arrows | H/Space=Up F/Shift=Down")
+    print("    Movement: WASD/Arrows | H/Space=Up F/Shift=Down | B(hold)=Run")
     print("    Camera: IJKL or Right-Click+Mouse")
     print("    Speed: [/- = slower | ]/= = faster")
-    print("    P=Screenshot | B=Use Tool | Tab=Menu | ,/.=Switch Tool | X=Tour | N=Warp")
+    print("    R=ACTION | ,/.=Switch Tool | T=Tool Size | Tab=Menu | P=Screenshot | X=Tour | N=Warp")
     if gamepad.is_connected():
         print(f"  GAMEPAD ({gamepad.name}):")
         print(f"    Config: L-Stick X={GamepadConfig.L_STICK_X} Y={GamepadConfig.L_STICK_Y}")
         print(f"    Config: R-Stick X={GamepadConfig.R_STICK_X} Y={GamepadConfig.R_STICK_Y}")
-        print("    Left Stick=Move | Right Stick=Look")
-        print("    L3=Down | R3=Up | L2/R2=Speed | A=Jump | B=Use Tool | Y=Screenshot")
-        print("    L1/R1=Switch Tool | START=Menu | SELECT=Warp")
+        print("    Left Stick=Move | Right Stick=Look | B(hold)=Run")
+        print("    L3=Down | R3=Up | L2/R2=Speed | A=Jump | R1=ACTION | Y=Screenshot")
+        print("    DPAD L/R=Switch Tool | L1=Tool Size | START=Menu | SELECT=Warp")
     print("=" * 60 + "\n")
     
     clock = pygame.time.Clock()
@@ -2946,20 +3224,25 @@ def run_explorer(config: WorldConfig = None):
                 elif event.key == pygame.K_TAB:  # Tab = toggle menu
                     print("  [KEYDOWN] Tab pressed")
                     camera.toggle_menu()
-                elif event.key == pygame.K_b:  # B = use current tool
+                elif event.key == pygame.K_r:  # R = use current tool (ACTION)
                     if camera.current_tool == ToolType.SCAN:
                         log_dna_at_cursor(camera, flora_manager, animal_manager)
                     elif camera.current_tool == ToolType.MINE:
-                        result = modify_terrain_at_cursor(camera, chunk_manager, "MINE")
-                        if result:
-                            # Invalidate chunk display list to force re-render
-                            if result in chunk_renderer.display_lists:
-                                del chunk_renderer.display_lists[result]
+                        modified_chunks = modify_terrain_at_cursor(camera, chunk_manager, "MINE", camera.tool_radius)
+                        if modified_chunks:
+                            # Invalidate all modified chunk display lists to force re-render
+                            for chunk_key in modified_chunks:
+                                if chunk_key in chunk_renderer.display_lists:
+                                    del chunk_renderer.display_lists[chunk_key]
                     elif camera.current_tool == ToolType.FILL:
-                        result = modify_terrain_at_cursor(camera, chunk_manager, "FILL")
-                        if result:
-                            if result in chunk_renderer.display_lists:
-                                del chunk_renderer.display_lists[result]
+                        modified_chunks = modify_terrain_at_cursor(camera, chunk_manager, "FILL", camera.tool_radius)
+                        if modified_chunks:
+                            for chunk_key in modified_chunks:
+                                if chunk_key in chunk_renderer.display_lists:
+                                    del chunk_renderer.display_lists[chunk_key]
+                elif event.key == pygame.K_t:  # T = cycle tool radius (for MINE/FILL)
+                    if camera.current_tool in (ToolType.MINE, ToolType.FILL):
+                        camera.cycle_tool_radius()
                 elif event.key == pygame.K_COMMA:  # , = previous tool
                     camera.prev_tool()
                 elif event.key == pygame.K_PERIOD:  # . = next tool
@@ -3046,19 +3329,42 @@ def run_explorer(config: WorldConfig = None):
             # Menu navigation when menu is open
             if camera.menu_open:
                 gp_move = gamepad.get_movement()
+                
+                # Accelerated scrolling for UP/DOWN (DPAD or Left Stick)
+                is_scrolling_up = gp_move[0] < -0.5 or gamepad.get_dpad(GamepadConfig.DPAD_UP)
+                is_scrolling_down = gp_move[0] > 0.5 or gamepad.get_dpad(GamepadConfig.DPAD_DOWN)
+                
+                scroll_amount = camera.update_scroll(dt / 60.0, is_scrolling_up, is_scrolling_down)
+                if scroll_amount != 0:
+                    camera.menu_navigate(scroll_amount)
+                
+                # Other menu controls use cooldown
                 if gamepad_speed_cooldown <= 0:
-                    if gp_move[0] < -0.5 or gamepad.get_dpad(GamepadConfig.DPAD_UP):
-                        camera.menu_navigate(-1)
-                        gamepad_speed_cooldown = 10
-                    elif gp_move[0] > 0.5 or gamepad.get_dpad(GamepadConfig.DPAD_DOWN):
-                        camera.menu_navigate(1)
-                        gamepad_speed_cooldown = 10
-                    if gp_move[1] < -0.5 or gamepad.get_dpad(GamepadConfig.DPAD_LEFT):
+                    # DPAD LEFT/RIGHT = filter between PLANTS and ANIMALS (in LOG tab)
+                    if gamepad.get_dpad(GamepadConfig.DPAD_LEFT):
+                        camera.log_filter_prev()
+                        gamepad_speed_cooldown = 15
+                    elif gamepad.get_dpad(GamepadConfig.DPAD_RIGHT):
+                        camera.log_filter_next()
+                        gamepad_speed_cooldown = 15
+                    
+                    # L1/R1 = switch tabs
+                    if gamepad.get_button(GamepadConfig.L1):
                         camera.menu_switch_tab(-1)
                         gamepad_speed_cooldown = 15
-                    elif gp_move[1] > 0.5 or gamepad.get_dpad(GamepadConfig.DPAD_RIGHT):
+                    elif gamepad.get_button(GamepadConfig.R1):
                         camera.menu_switch_tab(1)
                         gamepad_speed_cooldown = 15
+                    
+                    # A = favorite selected log item
+                    if gamepad.get_button(GamepadConfig.A) and camera.menu_tab == 1:
+                        camera.toggle_log_favorite()
+                        gamepad_speed_cooldown = 20
+                    
+                    # SELECT = delete favorite (in LOG tab)
+                    if gamepad.get_button(GamepadConfig.SELECT) and camera.menu_tab == 1:
+                        camera.delete_log_favorite()
+                        gamepad_speed_cooldown = 20
             
             # Left stick = movement (WASD) - only when menu closed
             if not camera.menu_open:
@@ -3082,6 +3388,10 @@ def run_explorer(config: WorldConfig = None):
             
             # L2/R2 behavior depends on mode
             l2_val, r2_val = gamepad.get_triggers()
+            
+            # Debug R2 issues
+            if r2_val > 0.1 and frame_count % 30 == 0:
+                print(f"  [GP] R2={r2_val:.2f} L2={l2_val:.2f} cooldown={gamepad_speed_cooldown} auto_fly={camera.auto_fly_mode}")
             
             if camera.auto_fly_mode > 0:
                 # TOUR MODE: L2/R2 adjust flight height
@@ -3111,27 +3421,44 @@ def run_explorer(config: WorldConfig = None):
             if not camera.menu_open and gamepad.get_button(GamepadConfig.A):
                 camera.jump()
             
-            # B button = use current tool - only when menu closed
-            if not camera.menu_open and gamepad.get_button(GamepadConfig.B) and gamepad_speed_cooldown <= 0:
+            # B button = RUN (doubles speed while held) - only when menu closed
+            if not camera.menu_open and gamepad.get_button(GamepadConfig.B):
+                camera.is_running = True
+            else:
+                camera.is_running = False
+            
+            # R1 button = use current tool (ACTION) - only when menu closed
+            if not camera.menu_open and gamepad.get_button(GamepadConfig.R1) and gamepad_speed_cooldown <= 0:
                 if camera.current_tool == ToolType.SCAN:
                     log_dna_at_cursor(camera, flora_manager, animal_manager)
                 elif camera.current_tool == ToolType.MINE:
-                    result = modify_terrain_at_cursor(camera, chunk_manager, "MINE")
-                    if result and result in chunk_renderer.display_lists:
-                        del chunk_renderer.display_lists[result]
+                    modified_chunks = modify_terrain_at_cursor(camera, chunk_manager, "MINE", camera.tool_radius)
+                    if modified_chunks:
+                        for chunk_key in modified_chunks:
+                            if chunk_key in chunk_renderer.display_lists:
+                                del chunk_renderer.display_lists[chunk_key]
                 elif camera.current_tool == ToolType.FILL:
-                    result = modify_terrain_at_cursor(camera, chunk_manager, "FILL")
-                    if result and result in chunk_renderer.display_lists:
-                        del chunk_renderer.display_lists[result]
+                    modified_chunks = modify_terrain_at_cursor(camera, chunk_manager, "FILL", camera.tool_radius)
+                    if modified_chunks:
+                        for chunk_key in modified_chunks:
+                            if chunk_key in chunk_renderer.display_lists:
+                                del chunk_renderer.display_lists[chunk_key]
                 gamepad_speed_cooldown = 20  # Faster for terrain tools
             
-            # L1 = previous tool, R1 = next tool - only when menu closed
+            # DPAD LEFT/RIGHT = cycle tools - only when menu closed
+            if not camera.menu_open and gamepad_speed_cooldown <= 0:
+                if gamepad.get_dpad(GamepadConfig.DPAD_LEFT):
+                    camera.prev_tool()
+                    gamepad_speed_cooldown = 15
+                elif gamepad.get_dpad(GamepadConfig.DPAD_RIGHT):
+                    camera.next_tool()
+                    gamepad_speed_cooldown = 15
+            
+            # L1 = cycle tool radius (for MINE/FILL) - only when menu closed
             if not camera.menu_open and gamepad.get_button(GamepadConfig.L1) and gamepad_speed_cooldown <= 0:
-                camera.prev_tool()
-                gamepad_speed_cooldown = 15
-            if not camera.menu_open and gamepad.get_button(GamepadConfig.R1) and gamepad_speed_cooldown <= 0:
-                camera.next_tool()
-                gamepad_speed_cooldown = 15
+                if camera.current_tool in (ToolType.MINE, ToolType.FILL):
+                    camera.cycle_tool_radius()
+                    gamepad_speed_cooldown = 15
             
             # Y button = screenshot
             if gamepad.get_button(GamepadConfig.Y) and gamepad_speed_cooldown <= 0:
@@ -3152,6 +3479,12 @@ def run_explorer(config: WorldConfig = None):
         # Keyboard space = jump (in walk mode) - only when menu closed
         if not camera.menu_open and keys[pygame.K_SPACE] and not camera.flying:
             camera.jump()
+        
+        # Keyboard B = run (double speed while held)
+        if keys[pygame.K_b]:
+            camera.is_running = True
+        else:
+            camera.is_running = False
         
         # Auto-fly mode - overrides manual movement
         if camera.auto_fly_mode > 0:
@@ -3201,7 +3534,7 @@ def run_explorer(config: WorldConfig = None):
             animals_by_chunk[(cx, cz)] = animals
         
         life_simulator.update(
-            dt / 60.0,  # Convert to seconds
+            dt,  # Already in seconds (from pygame clock.tick)
             camera.x, camera.z,
             is_raining, is_day, sun_intensity,
             plants_by_chunk, animals_by_chunk,
@@ -3216,6 +3549,18 @@ def run_explorer(config: WorldConfig = None):
                     glDeleteLists(dl, 1)
                 del flora_manager.display_lists[chunk_key]
         life_simulator.chunks_needing_refresh.clear()
+        
+        # Process pending births - spawn animals from hatched eggs
+        for chunk_key, births in list(life_simulator.pending_births.items()):
+            for birth in births:
+                # Spawn new animal at the egg's position (on ground)
+                animal_manager.spawn_baby_animal(
+                    birth['x'], 
+                    birth['y'],  # Egg was on ground
+                    birth['z'],
+                    birth.get('parent_dna', {})
+                )
+        life_simulator.pending_births.clear()
         
         # Set sky color and fog based on time of day (now with DNA tint)
         sky_color = sky.get_sky_color()
