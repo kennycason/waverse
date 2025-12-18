@@ -929,6 +929,11 @@ def warp_to_new_universe(camera, chunk_manager, chunk_renderer, flora_manager,
     climate_manager.biomes.clear()
     climate_manager.regional_weather.clear()
     climate_manager.seed = new_universe_seed
+    # Reset current weather to safe defaults to prevent HUD rendering bugs
+    from waverse.climate import WeatherState, BiomeDNA
+    climate_manager.current_weather = WeatherState()
+    climate_manager.current_biome = BiomeDNA()
+    climate_manager.lightning_flash = 0.0
     
     # Reset life simulator and pause it briefly to let world settle
     if life_simulator:
@@ -1515,8 +1520,10 @@ class Camera:
                         self.jump_velocity = 0.0
             
             # HARD FLOOR: Never let camera go below terrain on steep hills
-            # Increased buffer to 1.5 to prevent seeing through ground when looking down on slopes
-            min_height = terrain_h + PLAYER_HEIGHT + 1.5
+            # Buffer increased to 2.5 to prevent seeing through ground on slopes
+            # (combined with near clip plane of 1.5, this keeps terrain visible)
+            slope_buffer = 2.5
+            min_height = terrain_h + PLAYER_HEIGHT + slope_buffer
             if self.y < min_height:
                 self.y = min_height
                 self.falling = False
@@ -2952,7 +2959,14 @@ def draw_hud(display: tuple, camera: Camera, sky: SkySystem = None, climate: Cli
     glVertex2f(box_x + 10, bar_y + 8)
     glEnd()
     
-    height_pct = min(1, max(0, camera.y / 100))
+    # Clamp height_pct to prevent rendering bugs on bad values
+    try:
+        height_pct = min(1.0, max(0.0, float(camera.y) / 100.0))
+        if not (0.0 <= height_pct <= 1.0):  # Catch NaN
+            height_pct = 0.5
+    except:
+        height_pct = 0.5
+    
     glColor4f(1, 0.8, 0.2, 0.9)
     glBegin(GL_QUADS)
     glVertex2f(box_x + 10, bar_y)
@@ -2988,8 +3002,13 @@ def draw_hud(display: tuple, camera: Camera, sky: SkySystem = None, climate: Cli
         glVertex2f(box_x + box_w/2, time_y + 8)
         glEnd()
         
-        # Time marker
-        time_pct = sky.time
+        # Time marker - clamp to prevent rendering bugs
+        try:
+            time_pct = min(1.0, max(0.0, float(sky.time)))
+            if not (0.0 <= time_pct <= 1.0):  # Catch NaN
+                time_pct = 0.5
+        except:
+            time_pct = 0.5
         marker_x = box_x + 10 + time_pct * (box_w - 20)
         if sky.is_night():
             glColor4f(0.9, 0.9, 1.0, 1.0)  # Moon color
@@ -3020,8 +3039,14 @@ def draw_hud(display: tuple, camera: Camera, sky: SkySystem = None, climate: Cli
         glVertex2f(box_x + 10, climate_y + 6)
         glEnd()
         
-        # Temperature marker
-        temp_x = box_x + 10 + biome.temperature * (box_w - 20)
+        # Temperature marker - clamp to prevent rendering bugs
+        try:
+            temp_val = min(1.0, max(0.0, float(biome.temperature)))
+            if not (0.0 <= temp_val <= 1.0):  # Catch NaN
+                temp_val = 0.5
+        except:
+            temp_val = 0.5
+        temp_x = box_x + 10 + temp_val * (box_w - 20)
         glColor4f(1, 1, 1, 1)
         glBegin(GL_TRIANGLES)
         glVertex2f(temp_x, climate_y - 2)
@@ -3039,14 +3064,21 @@ def draw_hud(display: tuple, camera: Camera, sky: SkySystem = None, climate: Cli
         glVertex2f(box_x + 10, weather_y + 6)
         glEnd()
         
-        # Precipitation fill
-        if weather.precipitation > 0.05:
+        # Precipitation fill - clamp to prevent rendering bugs
+        try:
+            precip_val = min(1.0, max(0.0, float(weather.precipitation)))
+            if not (0.0 <= precip_val <= 1.0):  # Catch NaN
+                precip_val = 0.0
+        except:
+            precip_val = 0.0
+        
+        if precip_val > 0.05:
             if weather.precipitation_type == "snow":
                 glColor4f(0.9, 0.95, 1.0, 0.9)  # White for snow
             else:
                 glColor4f(0.4, 0.6, 0.9, 0.9)  # Blue for rain
             
-            precip_w = weather.precipitation * (box_w - 20)
+            precip_w = precip_val * (box_w - 20)
             glBegin(GL_QUADS)
             glVertex2f(box_x + 10, weather_y)
             glVertex2f(box_x + 10 + precip_w, weather_y)
@@ -3064,7 +3096,15 @@ def draw_hud(display: tuple, camera: Camera, sky: SkySystem = None, climate: Cli
         glVertex2f(box_x + 10, cloud_y + 4)
         glEnd()
         
-        cloud_w = weather.cloud_cover * (box_w - 20)
+        # Cloud cover fill - CLAMP to prevent the white line bug!
+        try:
+            cloud_val = min(1.0, max(0.0, float(weather.cloud_cover)))
+            if not (0.0 <= cloud_val <= 1.0):  # Catch NaN
+                cloud_val = 0.3
+        except:
+            cloud_val = 0.3
+        
+        cloud_w = cloud_val * (box_w - 20)
         glColor4f(0.8, 0.8, 0.85, 0.9)
         glBegin(GL_QUADS)
         glVertex2f(box_x + 10, cloud_y)
@@ -3182,7 +3222,9 @@ def run_explorer(config: WorldConfig = None):
     setup_opengl()
     
     glMatrixMode(GL_PROJECTION)
-    gluPerspective(75, display[0]/display[1], 1.5, 2000)  # Wide FOV, near clip at 1.5 to prevent terrain clipping on slopes
+    # Near clip at 1.0 - balance between close visibility and z-fighting
+    # Combined with slope_buffer of 2.5, camera stays ~5 units above terrain minimum
+    gluPerspective(75, display[0]/display[1], 1.0, 2000)
     glMatrixMode(GL_MODELVIEW)
     
     # Create world with background chunk worker
@@ -3220,9 +3262,11 @@ def run_explorer(config: WorldConfig = None):
         camera.z = saved.get("z", 0)
         camera.yaw = saved.get("yaw", 0)
         camera.pitch = saved.get("pitch", -20)
-        camera.flying = saved.get("flying", False)  # Default to walking mode
+        # ALWAYS start in walking mode - flying is for tour/explore only
+        camera.flying = False
         camera.speed_level = saved.get("speed_level", 9)  # Default to 1.0x speed
         print(f"  Loaded position: ({camera.x:.0f}, {camera.y:.0f}, {camera.z:.0f})")
+        print(f"  (Starting in WALK mode)")
     else:
         # New game - start in walking mode at spawn
         camera.y = chunk_manager.get_height_at(0, 0) * HEIGHT_SCALE + 30
