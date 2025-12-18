@@ -3432,8 +3432,13 @@ def setup_opengl():
     glFogf(GL_FOG_END, 1500)    # Fog fades to horizon
 
 
-def run_explorer(config: WorldConfig = None):
-    """Main explorer loop."""
+def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0):
+    """Main explorer loop.
+    
+    Args:
+        config: World configuration
+        precompute_chunks: Number of chunks to precompute flora/animals for before starting
+    """
     if not OPENGL_AVAILABLE:
         print("Error: OpenGL not available!")
         return
@@ -3522,6 +3527,64 @@ def run_explorer(config: WorldConfig = None):
     chunk_renderer.update_chunks(start_chunk, force_all=True)
     total_chunks = len(chunk_renderer.display_lists)
     print(f"  Loaded {total_chunks} chunks!")
+    
+    # Precompute flora/animals if requested (for performance testing)
+    if precompute_chunks > 0:
+        import math as _math
+        # Calculate radius needed for requested chunk count
+        # For a square grid: (2r+1)^2 = num_chunks, so r = (sqrt(num_chunks) - 1) / 2
+        precompute_radius = int(_math.ceil((_math.sqrt(precompute_chunks) - 1) / 2))
+        precompute_radius = max(precompute_radius, chunk_renderer.radius)  # At least current radius
+        
+        print(f"\n  Precomputing {precompute_chunks} chunks (radius={precompute_radius})...")
+        
+        # Generate chunks in expanding spiral from start position
+        scx, scz = start_chunk
+        precomputed = 0
+        
+        # Generate in square rings outward
+        for ring in range(precompute_radius + 1):
+            if precomputed >= precompute_chunks:
+                break
+            
+            # Generate all chunks at this ring distance
+            for dx in range(-ring, ring + 1):
+                for dz in range(-ring, ring + 1):
+                    # Only process chunks on the edge of this ring (or ring 0)
+                    if ring == 0 or abs(dx) == ring or abs(dz) == ring:
+                        if precomputed >= precompute_chunks:
+                            break
+                        
+                        cx, cz = scx + dx, scz + dz
+                        
+                        # Get or generate the terrain chunk
+                        chunk = chunk_manager.get_chunk(cx, cz)
+                        if chunk is None:
+                            continue
+                        
+                        # Generate flora
+                        flora_manager.get_plants_for_chunk(
+                            cx, cz, chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE
+                        )
+                        # Create flora display lists
+                        plants = flora_manager.chunk_plants.get((cx, cz), [])
+                        if plants:
+                            flora_manager.create_display_lists(cx, cz, plants)
+                        # Spawn animals
+                        animal_manager.spawn_animals_for_chunk(
+                            cx, cz, chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE
+                        )
+                        # Spawn structures
+                        structure_manager.spawn_random_buildings(
+                            cx, cz, chunk.world_x, chunk.world_z, chunk.heightmap, HEIGHT_SCALE, TILE_SCALE
+                        )
+                        precomputed += 1
+                        
+                        if precomputed % 500 == 0:
+                            print(f"    Precomputed {precomputed}/{precompute_chunks}...")
+        
+        total_plants = sum(len(p) for p in flora_manager.chunk_plants.values())
+        print(f"  Precomputed {precomputed} chunks: {total_plants} plants, {len(animal_manager.animals)} animals")
     
     # Initial minimap
     minimap.update(0, 0)
@@ -3970,47 +4033,53 @@ def run_explorer(config: WorldConfig = None):
         chunk_renderer.render()
         perf.record_time('chunk', _chunk_start)
         
-        # Render flora with LOD - ONLY nearby chunks for performance!
-        # Terrain renders all chunks via display lists (fast), but flora/animals are slower
+        # Render flora - call render_chunk_flora which handles LOD properly
         _flora_start = time.perf_counter()
-        FLORA_RENDER_RADIUS = 12  # Only render flora within this chunk radius
-        MAX_NEW_FLORA_PER_FRAME = 2  # Limit new flora generation to prevent stutters
+        FLORA_RENDER_RADIUS = 12
+        MAX_NEW_CHUNKS_PER_FRAME = 3
         cam_cx, cam_cz = current_chunk
+        cam_x, cam_z = cam_pos[0], cam_pos[2]
+        new_chunks = 0
         
-        new_flora_count = 0
         for (cx, cz), (display_list, lod) in chunk_renderer.display_lists.items():
-            # Skip distant chunks for flora/animals/structures
-            if abs(cx - cam_cx) > FLORA_RENDER_RADIUS or abs(cz - cam_cz) > FLORA_RENDER_RADIUS:
+            dx, dz = abs(cx - cam_cx), abs(cz - cam_cz)
+            if dx > FLORA_RENDER_RADIUS or dz > FLORA_RENDER_RADIUS:
                 continue
             
-            # Check if this chunk needs flora generation (expensive!)
-            needs_flora = (cx, cz) not in flora_manager.chunk_plants
-            if needs_flora:
-                if new_flora_count >= MAX_NEW_FLORA_PER_FRAME:
-                    continue  # Skip for now, will generate next frame
-                new_flora_count += 1
-                
+            key = (cx, cz)
+            
+            # Limit new chunk generation per frame to prevent stutters
+            needs_generation = key not in flora_manager.chunk_plants
+            if needs_generation:
+                if new_chunks >= MAX_NEW_CHUNKS_PER_FRAME:
+                    continue
+                new_chunks += 1
+            
             chunk = chunk_manager.get_chunk(cx, cz)
+            
+            # render_chunk_flora handles display lists and LOD properly
             flora_manager.render_chunk_flora(
-                cx, cz, cam_pos[0], cam_pos[2],
+                cx, cz, cam_x, cam_z,
                 chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE
             )
-            # Spawn animals for this chunk if not already done (also limit)
-            if (cx, cz) not in animal_manager.chunk_animals:
-                if new_flora_count < MAX_NEW_FLORA_PER_FRAME:
-                    animal_manager.spawn_animals_for_chunk(
-                        cx, cz, chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE
-                    )
-            # Maybe spawn buildings
-            structure_manager.spawn_random_buildings(
-                cx, cz, chunk.world_x, chunk.world_z, chunk.heightmap, HEIGHT_SCALE, TILE_SCALE
-            )
+            
+            # Spawn animals/structures for new chunks
+            if key not in animal_manager.chunk_animals:
+                animal_manager.spawn_animals_for_chunk(
+                    cx, cz, chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE
+                )
+            if needs_generation:
+                structure_manager.spawn_random_buildings(
+                    cx, cz, chunk.world_x, chunk.world_z, chunk.heightmap, HEIGHT_SCALE, TILE_SCALE
+                )
+        
         perf.record_time('flora', _flora_start)
         
         # Update animals every few frames for performance
         _animal_start = time.perf_counter()
-        if frame_count % 3 == 0:  # Update AI every 3rd frame
-            animal_manager.update(dt, cam_pos, None)  # dt is frame count, normalized in update
+        # Update animals every 3rd frame - AI is now optimized with velocity caching
+        if frame_count % 3 == 0:
+            animal_manager.update(dt, cam_pos, None)
         
         # Render animals
         animal_manager.render(cam_pos[0], cam_pos[1], cam_pos[2])

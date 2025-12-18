@@ -671,14 +671,25 @@ class AnimalRenderer:
 class AnimalManager:
     """Manages animal spawning, AI updates, and rendering."""
     
-    LOD_FULL = 40      # Reduced for performance
-    LOD_SIMPLE = 100
-    LOD_POINT = 200
+    # Increased LOD distances for better visibility
+    LOD_FULL = 80      # Full detail
+    LOD_SIMPLE = 180   # Simplified geometry  
+    LOD_POINT = 350    # Point sprites (visible from far)
+    
+    # Spatial indexing for O(1) neighbor lookups
+    USE_SPATIAL_INDEX = True
+    SPATIAL_CELL_SIZE = 30.0  # Cell size for spatial hashing
     
     def __init__(self, world_seed: int = 42):
         self.world_seed = world_seed
         self.animals: List[AnimalInstance] = []
         self.chunk_animals: Dict[Tuple[int, int], List[AnimalInstance]] = {}
+        
+        # Spatial index for O(1) neighbor lookups
+        self._spatial_index = None
+        if self.USE_SPATIAL_INDEX:
+            from .spatial import SpatialIndex
+            self._spatial_index = SpatialIndex(cell_size=self.SPATIAL_CELL_SIZE)
         
         # Pre-generate species templates
         self.species_templates = self._generate_species()
@@ -693,8 +704,8 @@ class AnimalManager:
             ]
         return templates
     
-    # Hard cap on total animals (can be higher now with chunk radius culling)
-    MAX_TOTAL_ANIMALS = 800
+    # Animal cap - balanced for optimized rendering
+    MAX_TOTAL_ANIMALS = 500
     
     def spawn_animals_for_chunk(self, cx: int, cz: int, heightmap, 
                                  chunk_world_x: float, chunk_world_z: float,
@@ -821,6 +832,11 @@ class AnimalManager:
             
             animals.append(animal)
             self.animals.append(animal)
+            
+            # Add to spatial index for O(1) neighbor lookups
+            if self._spatial_index:
+                from .spatial import EntityType as SpatialType
+                self._spatial_index.insert(animal, animal.x, animal.z, SpatialType.ANIMAL, id(animal))
         
         self.chunk_animals[key] = animals
     
@@ -868,10 +884,15 @@ class AnimalManager:
             self.chunk_animals[key] = []
         self.chunk_animals[key].append(animal)
         self.animals.append(animal)
+        
+        # Add to spatial index
+        if self._spatial_index:
+            from .spatial import EntityType as SpatialType
+            self._spatial_index.insert(animal, animal.x, animal.z, SpatialType.ANIMAL, id(animal))
     
     def update(self, dt: float, player_pos: Tuple[float, float, float], 
                get_ground_height=None):
-        """Update animals - nearby ones get full AI, distant ones get simple updates."""
+        """Update animals - smart updates: expensive AI rarely, cheap movement always."""
         if not player_pos:
             return
         
@@ -881,28 +902,53 @@ class AnimalManager:
             # Distance to player
             dist_sq = (animal.x - px)**2 + (animal.z - pz)**2
             
-            # Full AI update for animals within 150 units
-            if dist_sq < 22500:  # 150^2
-                # Simplified neighbor check for flocking
+            if dist_sq > 160000:  # 400^2 - too far, skip entirely
+                continue
+            
+            # Always apply cached velocity (cheap!) 
+            # This keeps animals moving smoothly between AI updates
+            if hasattr(animal, '_cached_vx'):
+                old_x, old_z = animal.x, animal.z
+                animal.x += animal._cached_vx * dt * 0.02
+                animal.z += animal._cached_vz * dt * 0.02
+                # Update spatial index if position changed significantly
+                if self._spatial_index and (abs(animal.x - old_x) > 1 or abs(animal.z - old_z) > 1):
+                    self._spatial_index.update_position(id(animal), animal.x, animal.z)
+            
+            # Full AI update only for VERY close animals (expensive - neighbor checks)
+            if dist_sq < 10000:  # 100^2
                 neighbors = None
-                if dist_sq < 6400 and animal.dna.group_tendency > 0.3:  # 80^2
-                    neighbors = [
-                        other for other in self.animals
-                        if other is not animal 
-                        and (animal.x - other.x)**2 + (animal.z - other.z)**2 < 900  # 30^2
-                    ][:5]
+                if dist_sq < 3600 and animal.dna.group_tendency > 0.3:  # 60^2
+                    # Use spatial index for O(1) neighbor lookup instead of O(n) loop!
+                    if self._spatial_index:
+                        # query_radius is a generator, take first few results
+                        nearby = list(self._spatial_index.query_radius(animal.x, animal.z, 25.0))[:5]
+                        neighbors = [n.entity for n in nearby if n.entity is not animal][:3]
+                    else:
+                        # Fallback O(n) loop
+                        neighbors = [
+                            other for other in self.animals
+                            if other is not animal 
+                            and (animal.x - other.x)**2 + (animal.z - other.z)**2 < 625
+                        ][:3]
                 
                 animal.update(dt, neighbors, player_pos, get_ground_height)
-            elif dist_sq < 90000:  # 300^2 - simple movement update
-                # Just continue current movement without AI changes
+                # Cache velocity for interpolation
+                animal._cached_vx = getattr(animal, 'vx', 0)
+                animal._cached_vz = getattr(animal, 'vz', 0)
+            elif dist_sq < 40000:  # 200^2 - medium distance: simple update, no neighbors
                 animal.update(dt, None, None, get_ground_height)
+                animal._cached_vx = getattr(animal, 'vx', 0)
+                animal._cached_vz = getattr(animal, 'vz', 0)
     
     def render(self, camera_x: float, camera_y: float, camera_z: float):
-        """Render nearby animals with LOD."""
+        """Render nearby animals with LOD - optimized with squared distances."""
         glDisable(GL_LIGHTING)
         
-        # Only process animals within render distance
-        max_dist_sq = self.LOD_POINT * self.LOD_POINT
+        # Pre-compute squared thresholds (avoid sqrt per animal!)
+        full_sq = self.LOD_FULL * self.LOD_FULL
+        simple_sq = self.LOD_SIMPLE * self.LOD_SIMPLE
+        point_sq = self.LOD_POINT * self.LOD_POINT
         
         full_animals = []
         simple_animals = []
@@ -911,14 +957,13 @@ class AnimalManager:
         for animal in self.animals:
             dist_sq = (animal.x - camera_x)**2 + (animal.z - camera_z)**2
             
-            if dist_sq > max_dist_sq:
+            if dist_sq > point_sq:
                 continue
             
-            dist = math.sqrt(dist_sq)
-            
-            if dist < self.LOD_FULL:
+            # Use squared distances - no sqrt needed!
+            if dist_sq < full_sq:
                 full_animals.append(animal)
-            elif dist < self.LOD_SIMPLE:
+            elif dist_sq < simple_sq:
                 simple_animals.append(animal)
             else:
                 point_animals.append(animal)
@@ -948,6 +993,9 @@ class AnimalManager:
                 for animal in animals:
                     if animal in self.animals:
                         self.animals.remove(animal)
+                        # Remove from spatial index
+                        if self._spatial_index:
+                            self._spatial_index.remove(id(animal))
         
         for key in to_remove:
             del self.chunk_animals[key]
@@ -958,6 +1006,11 @@ class AnimalManager:
             excess = len(self.animals) - self.MAX_TOTAL_ANIMALS
             removed = self.animals[:excess]
             self.animals = self.animals[excess:]
+            
+            # Remove from spatial index
+            if self._spatial_index:
+                for animal in removed:
+                    self._spatial_index.remove(id(animal))
             
             # Also clean up chunk_animals dict
             for (cx, cz), chunk_list in list(self.chunk_animals.items()):

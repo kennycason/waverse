@@ -1208,8 +1208,8 @@ class FloraManager:
         self.chunk_plants: Dict[Tuple[int, int], List[PlantInstance]] = {}
         self.display_lists: Dict[Tuple[int, int], Tuple[int, int, int]] = {}
     
-    # Max plants for performance - 10k gives good visuals without lag
-    MAX_TOTAL_PLANTS = 10000
+    # Max plants - higher cap since rendering is optimized
+    MAX_TOTAL_PLANTS = 16000
     
     def cleanup_distant_chunks(self, center_cx: int, center_cz: int, max_distance: int = 15):
         """Remove plants from distant chunks to prevent memory bloat."""
@@ -1276,12 +1276,12 @@ class FloraManager:
         plants = []
         h, w = heightmap.shape
         
-        # Place plants - with chunk radius culling, we can have more plants
-        # ~625 nearby chunks (radius 12) * 10-18 plants = 6,250-11,250 rendered
-        num_plants = rng.integers(10, 18)
+        # Place plants - increased density since rendering is optimized
+        # ~625 nearby chunks (radius 12) * 15-25 plants = 9,375-15,625 rendered
+        num_plants = rng.integers(15, 25)
         
         # Underwater plants  
-        num_underwater = rng.integers(3, 8)
+        num_underwater = rng.integers(5, 12)
         
         for _ in range(num_plants + num_underwater):
             local_x = rng.integers(2, w - 2)

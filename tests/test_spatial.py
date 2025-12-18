@@ -304,6 +304,53 @@ class TestRadiusQueries:
         assert results[1][1] == 5.0
         assert results[2][1] == 10.0  # Farthest
     
+    def test_query_radius_sorted_max_results(self, empty_index):
+        """Test sorted radius query respects max_results limit."""
+        # Insert 10 plants at increasing distances
+        for i in range(1, 11):
+            p = MockPlant(x=i * 5, z=0, name=f"plant_{i}")
+            empty_index.insert(p, i * 5, 0, EntityType.PLANT)
+        
+        # Query with max_results=3
+        results = empty_index.query_radius_sorted(0, 0, 100, max_results=3)
+        
+        assert len(results) == 3
+        # Should be the 3 nearest
+        assert results[0][1] == 5.0   # Distance 5
+        assert results[1][1] == 10.0  # Distance 10
+        assert results[2][1] == 15.0  # Distance 15
+    
+    def test_query_radius_sorted_max_results_exceeds_total(self, empty_index):
+        """Test max_results larger than available entities."""
+        p1 = MockPlant(x=5, z=0)
+        p2 = MockPlant(x=10, z=0)
+        
+        empty_index.insert(p1, 5, 0, EntityType.PLANT)
+        empty_index.insert(p2, 10, 0, EntityType.PLANT)
+        
+        # Request more than available
+        results = empty_index.query_radius_sorted(0, 0, 20, max_results=10)
+        
+        assert len(results) == 2  # Only 2 available
+    
+    def test_query_radius_sorted_with_type_filter_and_max_results(self, empty_index):
+        """Test max_results works correctly with type filter."""
+        for i in range(5):
+            p = MockPlant(x=i * 3 + 1, z=0)
+            empty_index.insert(p, p.x, 0, EntityType.PLANT)
+        for i in range(5):
+            a = MockAnimal(x=i * 3 + 2, z=0)
+            empty_index.insert(a, a.x, 0, EntityType.ANIMAL)
+        
+        # Get 2 nearest plants only
+        results = empty_index.query_radius_sorted(
+            0, 0, 50, entity_type=EntityType.PLANT, max_results=2
+        )
+        
+        assert len(results) == 2
+        for entity, dist in results:
+            assert entity.entity_type == EntityType.PLANT
+    
     def test_query_nearest(self, empty_index):
         """Test finding the nearest entity."""
         p1 = MockPlant(x=5, z=0)

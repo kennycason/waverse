@@ -54,6 +54,8 @@ def main():
     parser.add_argument('--mountains', action='store_true', help='Mountain world')
     parser.add_argument('--psychedelic', '-p', action='store_true', help='Psychedelic world')
     parser.add_argument('--clear-cache', action='store_true', help='Clear chunk cache and exit')
+    parser.add_argument('--precompute-chunks', type=int, default=0, metavar='N',
+                        help='Precompute N chunks of flora/animals before starting (for perf testing)')
     
     args = parser.parse_args()
     
@@ -98,7 +100,7 @@ def main():
     config.seed = seed
     
     # Run!
-    run_explorer(config)
+    run_explorer(config, precompute_chunks=args.precompute_chunks)
 
 
 if __name__ == '__main__':
