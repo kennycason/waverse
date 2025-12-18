@@ -436,7 +436,8 @@ class LifeSimulator:
     def update(self, dt: float, camera_x: float, camera_z: float,
                is_raining: bool, is_day: bool, sun_intensity: float,
                plants_by_chunk: dict, animals_by_chunk: dict,
-               chunk_size: float = 128.0):
+               chunk_size: float = 128.0,
+               skip_flora: bool = False, skip_animals: bool = False):
         """
         Main update loop. Call every frame but only does work periodically.
         
@@ -449,6 +450,8 @@ class LifeSimulator:
             plants_by_chunk: Dict of (cx, cz) -> list of plants
             animals_by_chunk: Dict of (cx, cz) -> list of animals
             chunk_size: World units per chunk
+            skip_flora: If True, skip flora updates (debug)
+            skip_animals: If True, skip animal updates (debug)
         """
         self.update_timer += dt
         self.log_timer += dt
@@ -485,7 +488,7 @@ class LifeSimulator:
                 chunk_key = (cx, cz)
                 
                 # Update plants in this chunk (with limit)
-                if chunk_key in plants_by_chunk and plants_updated < max_plants:
+                if not skip_flora and chunk_key in plants_by_chunk and plants_updated < max_plants:
                     chunk_plants = plants_by_chunk[chunk_key]
                     plants_to_update = chunk_plants[:LifeConfig.MAX_PLANTS_PER_UPDATE]
                     self._update_plants(plants_to_update, dt_hours, 
@@ -494,7 +497,7 @@ class LifeSimulator:
                 
                 # Update animals in this chunk (with limit)
                 # Pass the chunk's plants for eating behavior
-                if chunk_key in animals_by_chunk and animals_updated < max_animals:
+                if not skip_animals and chunk_key in animals_by_chunk and animals_updated < max_animals:
                     chunk_animals = animals_by_chunk[chunk_key]
                     chunk_plants = plants_by_chunk.get(chunk_key, [])
                     animals_to_update = chunk_animals[:LifeConfig.MAX_ANIMALS_PER_UPDATE]
@@ -502,8 +505,9 @@ class LifeSimulator:
                                         is_day, chunk_plants, chunk_key)
                     animals_updated += len(animals_to_update)
         
-        # Update eggs
-        self._update_eggs(dt_hours, is_day)
+        # Update eggs (only if animals are enabled)
+        if not skip_animals:
+            self._update_eggs(dt_hours, is_day)
         
         _total_time = (time.perf_counter() - _perf_start) * 1000
         

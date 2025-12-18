@@ -3432,13 +3432,42 @@ def setup_opengl():
     glFogf(GL_FOG_END, 1500)    # Fog fades to horizon
 
 
-def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0):
+def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_flags: dict = None):
     """Main explorer loop.
     
     Args:
         config: World configuration
         precompute_chunks: Number of chunks to precompute flora/animals for before starting
+        debug_flags: Optional dict with debug toggles:
+            - no_flora_render: Skip rendering flora
+            - no_flora_update: Skip flora life sim
+            - no_animal_render: Skip rendering animals
+            - no_animal_update: Skip animal AI updates
     """
+    # Parse debug flags
+    debug_flags = debug_flags or {}
+    NO_FLORA_RENDER = debug_flags.get('no_flora_render', False)
+    NO_FLORA_UPDATE = debug_flags.get('no_flora_update', False)
+    NO_ANIMAL_RENDER = debug_flags.get('no_animal_render', False)
+    NO_ANIMAL_UPDATE = debug_flags.get('no_animal_update', False)
+    MAX_FLORA = debug_flags.get('max_flora')
+    MAX_ANIMALS = debug_flags.get('max_animals')
+    
+    # Apply max flora/animals if specified (will be set on managers after they're created)
+    if MAX_FLORA is not None:
+        print(f"  [CONFIG] max-flora={MAX_FLORA}")
+    if MAX_ANIMALS is not None:
+        from waverse.life import LifeConfig
+        LifeConfig.MAX_TOTAL_ANIMALS = MAX_ANIMALS
+        print(f"  [CONFIG] max-animals={MAX_ANIMALS}")
+    
+    if any([NO_FLORA_RENDER, NO_FLORA_UPDATE, NO_ANIMAL_RENDER, NO_ANIMAL_UPDATE]):
+        print("  [DEBUG FLAGS]", end="")
+        if NO_FLORA_RENDER: print(" no-flora-render", end="")
+        if NO_FLORA_UPDATE: print(" no-flora-update", end="")
+        if NO_ANIMAL_RENDER: print(" no-animal-render", end="")
+        if NO_ANIMAL_UPDATE: print(" no-animal-update", end="")
+        print()
     if not OPENGL_AVAILABLE:
         print("Error: OpenGL not available!")
         return
@@ -3483,6 +3512,8 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0):
     
     chunk_renderer = ChunkRenderer(chunk_manager, chunk_dna_manager)
     flora_manager = FloraManager(config.seed)
+    if MAX_FLORA is not None:
+        flora_manager.MAX_TOTAL_PLANTS = MAX_FLORA
     animal_manager = AnimalManager(config.seed)
     sky = SkySystem(chunk_dna_manager)
     water_level = config.water_level
@@ -3534,7 +3565,7 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0):
         # Calculate radius needed for requested chunk count
         # For a square grid: (2r+1)^2 = num_chunks, so r = (sqrt(num_chunks) - 1) / 2
         precompute_radius = int(_math.ceil((_math.sqrt(precompute_chunks) - 1) / 2))
-        precompute_radius = max(precompute_radius, chunk_renderer.radius)  # At least current radius
+        precompute_radius = max(precompute_radius, 30)  # At least the default load radius
         
         print(f"\n  Precomputing {precompute_chunks} chunks (radius={precompute_radius})...")
         
@@ -3977,35 +4008,40 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0):
             total_animals += len(animals)
         
         _life_start = time.perf_counter()
-        life_simulator.update(
-            dt,  # Already in seconds (from pygame clock.tick)
-            camera.x, camera.z,
-            is_raining, is_day, sun_intensity,
-            plants_by_chunk, animals_by_chunk,
-            chunk_size=CHUNK_SIZE * TERRAIN_SCALE
-        )
+        if not (NO_FLORA_UPDATE and NO_ANIMAL_UPDATE):
+            life_simulator.update(
+                dt,  # Already in seconds (from pygame clock.tick)
+                camera.x, camera.z,
+                is_raining, is_day, sun_intensity,
+                plants_by_chunk, animals_by_chunk,
+                chunk_size=CHUNK_SIZE * TERRAIN_SCALE,
+                skip_flora=NO_FLORA_UPDATE,
+                skip_animals=NO_ANIMAL_UPDATE
+            )
         perf.record_time('life', _life_start)
         
         # Refresh display lists for chunks where plants changed (eaten/died)
-        for chunk_key in life_simulator.chunks_needing_refresh:
-            if chunk_key in flora_manager.display_lists:
-                # Delete old display lists
-                for dl in flora_manager.display_lists[chunk_key]:
-                    glDeleteLists(dl, 1)
-                del flora_manager.display_lists[chunk_key]
-        life_simulator.chunks_needing_refresh.clear()
+        if not NO_FLORA_UPDATE:
+            for chunk_key in life_simulator.chunks_needing_refresh:
+                if chunk_key in flora_manager.display_lists:
+                    # Delete old display lists
+                    for dl in flora_manager.display_lists[chunk_key]:
+                        glDeleteLists(dl, 1)
+                    del flora_manager.display_lists[chunk_key]
+            life_simulator.chunks_needing_refresh.clear()
         
         # Process pending births - spawn animals from hatched eggs
-        for chunk_key, births in list(life_simulator.pending_births.items()):
-            for birth in births:
-                # Spawn new animal at the egg's position (on ground)
-                animal_manager.spawn_baby_animal(
-                    birth['x'], 
-                    birth['y'],  # Egg was on ground
-                    birth['z'],
-                    birth.get('parent_dna', {})
-                )
-        life_simulator.pending_births.clear()
+        if not NO_ANIMAL_UPDATE:
+            for chunk_key, births in list(life_simulator.pending_births.items()):
+                for birth in births:
+                    # Spawn new animal at the egg's position (on ground)
+                    animal_manager.spawn_baby_animal(
+                        birth['x'], 
+                        birth['y'],  # Egg was on ground
+                        birth['z'],
+                        birth.get('parent_dna', {})
+                    )
+            life_simulator.pending_births.clear()
         
         # Set sky color and fog based on time of day (now with DNA tint)
         sky_color = sky.get_sky_color()
@@ -4058,12 +4094,13 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0):
             chunk = chunk_manager.get_chunk(cx, cz)
             
             # render_chunk_flora handles display lists and LOD properly
-            flora_manager.render_chunk_flora(
-                cx, cz, cam_x, cam_z,
-                chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE
-            )
+            if not NO_FLORA_RENDER:
+                flora_manager.render_chunk_flora(
+                    cx, cz, cam_x, cam_z,
+                    chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE
+                )
             
-            # Spawn animals/structures for new chunks
+            # Spawn animals/structures for new chunks (still need to spawn even if not rendering)
             if key not in animal_manager.chunk_animals:
                 animal_manager.spawn_animals_for_chunk(
                     cx, cz, chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE
@@ -4078,11 +4115,12 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0):
         # Update animals every few frames for performance
         _animal_start = time.perf_counter()
         # Update animals every 3rd frame - AI is now optimized with velocity caching
-        if frame_count % 3 == 0:
+        if not NO_ANIMAL_UPDATE and frame_count % 3 == 0:
             animal_manager.update(dt, cam_pos, None)
         
         # Render animals
-        animal_manager.render(cam_pos[0], cam_pos[1], cam_pos[2])
+        if not NO_ANIMAL_RENDER:
+            animal_manager.render(cam_pos[0], cam_pos[1], cam_pos[2])
         perf.record_time('animal', _animal_start)
         
         # Render eggs from life simulation
