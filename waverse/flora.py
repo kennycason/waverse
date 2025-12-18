@@ -1197,16 +1197,60 @@ class PlantRenderer:
 class FloraManager:
     """Manages plant generation and rendering with LOD and DNA pooling."""
     
-    # LOD distances (in world units)
-    LOD_FULL = 120     # Full 3D geometry
-    LOD_SIMPLE = 300   # Simplified geometry
-    LOD_BILLBOARD = 600  # Just colored points
+    # LOD distances (in world units) - more aggressive for performance
+    LOD_FULL = 60      # Full 3D geometry (was 120)
+    LOD_SIMPLE = 150   # Simplified geometry (was 300)
+    LOD_BILLBOARD = 350  # Just colored points (was 600)
     
     def __init__(self, world_seed: int = 42):
         self.world_seed = world_seed
         self.dna_pool = DNAPool(world_seed)
         self.chunk_plants: Dict[Tuple[int, int], List[PlantInstance]] = {}
         self.display_lists: Dict[Tuple[int, int], Tuple[int, int, int]] = {}
+    
+    # Max plants for performance - 10k gives good visuals without lag
+    MAX_TOTAL_PLANTS = 10000
+    
+    def cleanup_distant_chunks(self, center_cx: int, center_cz: int, max_distance: int = 15):
+        """Remove plants from distant chunks to prevent memory bloat."""
+        to_remove = []
+        for (cx, cz) in list(self.chunk_plants.keys()):
+            if abs(cx - center_cx) > max_distance or abs(cz - center_cz) > max_distance:
+                to_remove.append((cx, cz))
+        
+        for key in to_remove:
+            if key in self.chunk_plants:
+                del self.chunk_plants[key]
+            if key in self.display_lists:
+                # Delete OpenGL display lists
+                for dl in self.display_lists[key]:
+                    try:
+                        glDeleteLists(dl, 1)
+                    except:
+                        pass
+                del self.display_lists[key]
+        
+        # Emergency cleanup if still over limit
+        total_plants = sum(len(p) for p in self.chunk_plants.values())
+        if total_plants > self.MAX_TOTAL_PLANTS:
+            # Remove furthest chunks until under limit
+            chunks_by_dist = sorted(
+                self.chunk_plants.keys(),
+                key=lambda c: max(abs(c[0] - center_cx), abs(c[1] - center_cz)),
+                reverse=True
+            )
+            for key in chunks_by_dist:
+                if total_plants <= self.MAX_TOTAL_PLANTS:
+                    break
+                total_plants -= len(self.chunk_plants[key])
+                del self.chunk_plants[key]
+                if key in self.display_lists:
+                    for dl in self.display_lists[key]:
+                        try:
+                            glDeleteLists(dl, 1)
+                        except:
+                            pass
+                    del self.display_lists[key]
     
     def get_plants_for_chunk(self, cx: int, cz: int, heightmap, 
                              chunk_world_x: float, chunk_world_z: float,
@@ -1215,6 +1259,12 @@ class FloraManager:
         key = (cx, cz)
         if key in self.chunk_plants:
             return self.chunk_plants[key]
+        
+        # Don't spawn if at capacity - return empty
+        total = sum(len(p) for p in self.chunk_plants.values())
+        if total >= self.MAX_TOTAL_PLANTS:
+            self.chunk_plants[key] = []  # Mark as processed but empty
+            return []
         
         # Get DNA species for this chunk (with neighbor crossover)
         chunk_dna_list = self.dna_pool.get_dna_for_chunk(cx, cz)
@@ -1226,11 +1276,12 @@ class FloraManager:
         plants = []
         h, w = heightmap.shape
         
-        # Place plants using chunk's DNA species (reduced 10% for perf)
-        num_plants = rng.integers(11, 25)
+        # Place plants - with chunk radius culling, we can have more plants
+        # ~625 nearby chunks (radius 12) * 10-18 plants = 6,250-11,250 rendered
+        num_plants = rng.integers(10, 18)
         
-        # Also spawn underwater plants (reduced 10%)
-        num_underwater = rng.integers(4, 13)
+        # Underwater plants  
+        num_underwater = rng.integers(3, 8)
         
         for _ in range(num_plants + num_underwater):
             local_x = rng.integers(2, w - 2)

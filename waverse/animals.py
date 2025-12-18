@@ -693,6 +693,9 @@ class AnimalManager:
             ]
         return templates
     
+    # Hard cap on total animals (can be higher now with chunk radius culling)
+    MAX_TOTAL_ANIMALS = 800
+    
     def spawn_animals_for_chunk(self, cx: int, cz: int, heightmap, 
                                  chunk_world_x: float, chunk_world_z: float,
                                  tile_scale: float, height_scale: float):
@@ -701,14 +704,18 @@ class AnimalManager:
         if key in self.chunk_animals:
             return
         
+        # Don't spawn if already at capacity
+        if len(self.animals) >= self.MAX_TOTAL_ANIMALS:
+            return
+        
         chunk_seed = abs(hash((self.world_seed, cx, cz, "animals"))) % (2**31)
         rng = np.random.default_rng(chunk_seed)
         
         h, w = heightmap.shape
         animals = []
         
-        # Animals per chunk - balanced for performance
-        num_animals = rng.integers(1, 5)  # 1-4 animals per chunk
+        # Animals per chunk - balanced with chunk radius culling
+        num_animals = rng.integers(2, 5)  # 2-4 animals per chunk
         
         for _ in range(num_animals):
             local_x = rng.integers(5, w - 5)
@@ -932,10 +939,10 @@ class AnimalManager:
         
         glEnable(GL_LIGHTING)
     
-    def cleanup_distant_chunks(self, center_cx: int, center_cz: int, max_distance: int = 25):
+    def cleanup_distant_chunks(self, center_cx: int, center_cz: int, max_distance: int = 15):
         """Remove animals from distant chunks."""
         to_remove = []
-        for (cx, cz), animals in self.chunk_animals.items():
+        for (cx, cz), animals in list(self.chunk_animals.items()):
             if abs(cx - center_cx) > max_distance or abs(cz - center_cz) > max_distance:
                 to_remove.append((cx, cz))
                 for animal in animals:
@@ -944,4 +951,17 @@ class AnimalManager:
         
         for key in to_remove:
             del self.chunk_animals[key]
+        
+        # Hard cap enforcement - if still over limit, aggressively cull
+        if len(self.animals) > self.MAX_TOTAL_ANIMALS:
+            # Keep only the most recent animals
+            excess = len(self.animals) - self.MAX_TOTAL_ANIMALS
+            removed = self.animals[:excess]
+            self.animals = self.animals[excess:]
+            
+            # Also clean up chunk_animals dict
+            for (cx, cz), chunk_list in list(self.chunk_animals.items()):
+                self.chunk_animals[(cx, cz)] = [a for a in chunk_list if a not in removed]
+                if not self.chunk_animals[(cx, cz)]:
+                    del self.chunk_animals[(cx, cz)]
 

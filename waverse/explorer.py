@@ -34,6 +34,170 @@ from .animals import AnimalManager
 from .chunk_worker import ChunkWorker
 
 
+# =============================================================================
+# PERFORMANCE MONITOR - Press SPACE to dump stats
+# =============================================================================
+class PerfMonitor:
+    """Lightweight performance monitoring - only tracks on demand."""
+    
+    def __init__(self):
+        self.enabled = False  # Full tracking off by default
+        self.show_overlay = False  # Mini HUD overlay
+        
+        # Ring buffers for rolling averages (last 60 frames)
+        self.frame_times = []
+        self.life_times = []
+        self.render_times = []
+        self.flora_times = []
+        self.animal_times = []
+        self.chunk_times = []
+        self.max_samples = 60
+        
+        # Current frame timing (temp storage)
+        self.current = {}
+        
+        # Counts
+        self.plant_count = 0
+        self.animal_count = 0
+        self.egg_count = 0
+        self.chunk_count = 0
+        self.structure_count = 0
+        
+        # Slow frame detection
+        self.slow_frames = 0
+        self.slow_threshold_ms = 33.0  # > 30fps = slow
+        
+        # Last dump time (avoid spam)
+        self.last_dump = 0
+    
+    def start_frame(self):
+        """Start timing a frame."""
+        self.current['frame_start'] = time.perf_counter()
+        
+    def end_frame(self):
+        """End frame timing and record."""
+        if 'frame_start' not in self.current:
+            return
+        frame_ms = (time.perf_counter() - self.current['frame_start']) * 1000
+        self.frame_times.append(frame_ms)
+        if len(self.frame_times) > self.max_samples:
+            self.frame_times.pop(0)
+        
+        # Track slow frames
+        if frame_ms > self.slow_threshold_ms:
+            self.slow_frames += 1
+    
+    def time_section(self, name: str):
+        """Context manager to time a section."""
+        return _PerfSection(self, name)
+    
+    def record_time(self, name: str, start_time: float):
+        """Record time for a named section."""
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+        buffer = getattr(self, f'{name}_times', None)
+        if buffer is not None:
+            buffer.append(elapsed_ms)
+            if len(buffer) > self.max_samples:
+                buffer.pop(0)
+    
+    def update_counts(self, plants: int, animals: int, eggs: int, chunks: int, structures: int):
+        """Update entity counts."""
+        self.plant_count = plants
+        self.animal_count = animals
+        self.egg_count = eggs
+        self.chunk_count = chunks
+        self.structure_count = structures
+    
+    def get_avg(self, times: list) -> float:
+        """Get average from buffer."""
+        return sum(times) / len(times) if times else 0.0
+    
+    def get_max(self, times: list) -> float:
+        """Get max from buffer."""
+        return max(times) if times else 0.0
+    
+    def dump_stats(self):
+        """Print detailed performance stats."""
+        now = time.time()
+        if now - self.last_dump < 0.5:  # Cooldown
+            return
+        self.last_dump = now
+        
+        print("\n" + "=" * 70)
+        print("  PERFORMANCE STATS (last 60 frames)")
+        print("=" * 70)
+        
+        # Frame times
+        avg_frame = self.get_avg(self.frame_times)
+        max_frame = self.get_max(self.frame_times)
+        fps = 1000 / avg_frame if avg_frame > 0 else 0
+        print(f"  FRAME TIME: avg={avg_frame:.1f}ms  max={max_frame:.1f}ms  fps={fps:.0f}")
+        print(f"  SLOW FRAMES: {self.slow_frames} (>{self.slow_threshold_ms:.0f}ms)")
+        
+        # Section breakdown
+        print("\n  BREAKDOWN (avg/max ms):")
+        print(f"    Life Sim:   {self.get_avg(self.life_times):6.1f} / {self.get_max(self.life_times):.1f}")
+        print(f"    Render:     {self.get_avg(self.render_times):6.1f} / {self.get_max(self.render_times):.1f}")
+        print(f"    Flora:      {self.get_avg(self.flora_times):6.1f} / {self.get_max(self.flora_times):.1f}")
+        print(f"    Animals:    {self.get_avg(self.animal_times):6.1f} / {self.get_max(self.animal_times):.1f}")
+        print(f"    Chunks:     {self.get_avg(self.chunk_times):6.1f} / {self.get_max(self.chunk_times):.1f}")
+        
+        # Entity counts
+        print("\n  ENTITY COUNTS:")
+        print(f"    Plants:     {self.plant_count:6d}")
+        print(f"    Animals:    {self.animal_count:6d}")
+        print(f"    Eggs:       {self.egg_count:6d}")
+        print(f"    Chunks:     {self.chunk_count:6d}")
+        print(f"    Structures: {self.structure_count:6d}")
+        
+        # Suggestions - realistic thresholds
+        print("\n  POTENTIAL ISSUES:")
+        issues_found = False
+        if self.get_avg(self.life_times) > 15:
+            print(f"    ⚠ Life sim slow ({self.get_avg(self.life_times):.1f}ms)")
+            issues_found = True
+        if self.plant_count > 12000:
+            print(f"    ⚠ High plant count ({self.plant_count}) - cleanup running?")
+            issues_found = True
+        if self.animal_count > 850:
+            print(f"    ⚠ High animal count ({self.animal_count})")
+            issues_found = True
+        if self.get_avg(self.flora_times) > 30:
+            print(f"    ⚠ Flora render slow ({self.get_avg(self.flora_times):.1f}ms)")
+            issues_found = True
+        if self.get_max(self.frame_times) > 200:
+            print(f"    ⚠ Frame spikes ({self.get_max(self.frame_times):.0f}ms max) - loading new areas?")
+            issues_found = True
+        if not issues_found:
+            print("    ✓ Performance looks good!")
+        
+        print("=" * 70 + "\n")
+    
+    def toggle_overlay(self):
+        """Toggle mini performance overlay."""
+        self.show_overlay = not self.show_overlay
+        print(f"  Perf overlay: {'ON' if self.show_overlay else 'OFF'}")
+    
+    def reset_slow_frames(self):
+        """Reset slow frame counter."""
+        self.slow_frames = 0
+
+
+class _PerfSection:
+    """Context manager for timing sections."""
+    def __init__(self, monitor: PerfMonitor, name: str):
+        self.monitor = monitor
+        self.name = name
+        self.start = 0
+        
+    def __enter__(self):
+        self.start = time.perf_counter()
+        return self
+        
+    def __exit__(self, *args):
+        self.monitor.record_time(self.name, self.start)
+
+
 # Configuration - open world style
 HEIGHT_SCALE = 3.5
 TERRAIN_SCALE = TILE_SCALE
@@ -2707,6 +2871,82 @@ def draw_menu(display: tuple, camera: Camera, hud_font=None):
     glMatrixMode(GL_MODELVIEW)
 
 
+def draw_perf_overlay(display: tuple, perf: PerfMonitor, hud_font=None):
+    """Draw mini performance overlay in top-right corner."""
+    if not perf.show_overlay:
+        return
+    
+    glMatrixMode(GL_PROJECTION)
+    glPushMatrix()
+    glLoadIdentity()
+    glOrtho(0, display[0], display[1], 0, -1, 1)
+    
+    glMatrixMode(GL_MODELVIEW)
+    glPushMatrix()
+    glLoadIdentity()
+    
+    glDisable(GL_LIGHTING)
+    glDisable(GL_DEPTH_TEST)
+    glEnable(GL_BLEND)
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+    
+    # Background box
+    box_w, box_h = 180, 140
+    box_x = display[0] - box_w - 10
+    box_y = 10
+    
+    glColor4f(0.0, 0.0, 0.0, 0.7)
+    glBegin(GL_QUADS)
+    glVertex2f(box_x, box_y)
+    glVertex2f(box_x + box_w, box_y)
+    glVertex2f(box_x + box_w, box_y + box_h)
+    glVertex2f(box_x, box_y + box_h)
+    glEnd()
+    
+    if hud_font:
+        y = box_y + 8
+        line_h = 16
+        
+        # FPS
+        avg_frame = perf.get_avg(perf.frame_times)
+        fps = 1000 / avg_frame if avg_frame > 0 else 0
+        color = (0, 255, 0) if fps >= 50 else (255, 255, 0) if fps >= 30 else (255, 100, 100)
+        _draw_text(hud_font, f"FPS: {fps:.0f} ({avg_frame:.1f}ms)", box_x + 8, y, color)
+        y += line_h
+        
+        # Life sim
+        life_avg = perf.get_avg(perf.life_times)
+        color = (0, 255, 0) if life_avg < 5 else (255, 255, 0) if life_avg < 15 else (255, 100, 100)
+        _draw_text(hud_font, f"Life: {life_avg:.1f}ms", box_x + 8, y, color)
+        y += line_h
+        
+        # Render
+        render_avg = perf.get_avg(perf.render_times)
+        _draw_text(hud_font, f"Render: {render_avg:.1f}ms", box_x + 8, y, (200, 200, 200))
+        y += line_h
+        
+        # Entity counts
+        _draw_text(hud_font, f"Plants: {perf.plant_count}", box_x + 8, y, (100, 200, 100))
+        y += line_h
+        _draw_text(hud_font, f"Animals: {perf.animal_count}", box_x + 8, y, (200, 150, 100))
+        y += line_h
+        _draw_text(hud_font, f"Chunks: {perf.chunk_count}", box_x + 8, y, (100, 150, 200))
+        y += line_h
+        
+        # Slow frames
+        color = (0, 255, 0) if perf.slow_frames < 5 else (255, 255, 0) if perf.slow_frames < 20 else (255, 100, 100)
+        _draw_text(hud_font, f"Slow: {perf.slow_frames}", box_x + 8, y, color)
+    
+    glDisable(GL_BLEND)
+    glEnable(GL_DEPTH_TEST)
+    glEnable(GL_LIGHTING)
+    
+    glPopMatrix()
+    glMatrixMode(GL_PROJECTION)
+    glPopMatrix()
+    glMatrixMode(GL_MODELVIEW)
+
+
 def draw_hud(display: tuple, camera: Camera, sky: SkySystem = None, climate: ClimateManager = None,
               hud_font=None):
     """Draw HUD."""
@@ -3253,6 +3493,9 @@ def run_explorer(config: WorldConfig = None):
     # Structure system (buildings, etc.)
     structure_manager = StructureManager(config.seed)
     
+    # Performance monitor
+    perf = PerfMonitor()
+    
     # Camera - try to load saved position
     camera = Camera()
     saved = load_position(config.seed)
@@ -3291,6 +3534,7 @@ def run_explorer(config: WorldConfig = None):
     print("    Camera: IJKL or Right-Click+Mouse")
     print("    Speed: [/- = slower | ]/= = faster")
     print("    R=ACTION | ,/.=Switch Tool | T=Tool Size | Tab=Menu | P=Screenshot | X=Tour | N=Warp")
+    print("    SPACE=Perf Stats | ENTER=Perf Overlay")
     if gamepad.is_connected():
         print(f"  GAMEPAD ({gamepad.name}):")
         print(f"    Config: L-Stick X={GamepadConfig.L_STICK_X} Y={GamepadConfig.L_STICK_Y}")
@@ -3312,6 +3556,7 @@ def run_explorer(config: WorldConfig = None):
     # Menu toggle handled via JOYBUTTONDOWN event
     
     while running:
+        perf.start_frame()
         frame_count += 1
         dt = clock.tick(60) / 16.67
         
@@ -3384,6 +3629,12 @@ def run_explorer(config: WorldConfig = None):
                                         flora_manager, animal_manager,
                                         chunk_dna_manager, climate_manager,
                                         structure_manager, config, life_simulator)
+                elif event.key == pygame.K_SPACE:
+                    # SPACE = dump performance stats
+                    perf.dump_stats()
+                elif event.key == pygame.K_RETURN:
+                    # ENTER = toggle perf overlay
+                    perf.toggle_overlay()
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 3:
                     mouse_look = True
@@ -3653,11 +3904,16 @@ def run_explorer(config: WorldConfig = None):
         # Build chunk lookups for life sim
         plants_by_chunk = {}
         animals_by_chunk = {}
+        total_plants = 0
+        total_animals = 0
         for (cx, cz), plants in flora_manager.chunk_plants.items():
             plants_by_chunk[(cx, cz)] = plants
+            total_plants += len(plants)
         for (cx, cz), animals in animal_manager.chunk_animals.items():
             animals_by_chunk[(cx, cz)] = animals
+            total_animals += len(animals)
         
+        _life_start = time.perf_counter()
         life_simulator.update(
             dt,  # Already in seconds (from pygame clock.tick)
             camera.x, camera.z,
@@ -3665,6 +3921,7 @@ def run_explorer(config: WorldConfig = None):
             plants_by_chunk, animals_by_chunk,
             chunk_size=CHUNK_SIZE * TERRAIN_SCALE
         )
+        perf.record_time('life', _life_start)
         
         # Refresh display lists for chunks where plants changed (eaten/died)
         for chunk_key in life_simulator.chunks_needing_refresh:
@@ -3694,6 +3951,7 @@ def run_explorer(config: WorldConfig = None):
         sky.apply_lighting()
         
         # Render
+        _render_start = time.perf_counter()
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         glLoadIdentity()
         camera.apply()
@@ -3708,30 +3966,55 @@ def run_explorer(config: WorldConfig = None):
                                        climate_manager.time,
                                        climate_manager.current_weather.visual_dna)
         
+        _chunk_start = time.perf_counter()
         chunk_renderer.render()
+        perf.record_time('chunk', _chunk_start)
         
-        # Render flora with LOD (cam_pos already set above)
+        # Render flora with LOD - ONLY nearby chunks for performance!
+        # Terrain renders all chunks via display lists (fast), but flora/animals are slower
+        _flora_start = time.perf_counter()
+        FLORA_RENDER_RADIUS = 12  # Only render flora within this chunk radius
+        MAX_NEW_FLORA_PER_FRAME = 2  # Limit new flora generation to prevent stutters
+        cam_cx, cam_cz = current_chunk
+        
+        new_flora_count = 0
         for (cx, cz), (display_list, lod) in chunk_renderer.display_lists.items():
+            # Skip distant chunks for flora/animals/structures
+            if abs(cx - cam_cx) > FLORA_RENDER_RADIUS or abs(cz - cam_cz) > FLORA_RENDER_RADIUS:
+                continue
+            
+            # Check if this chunk needs flora generation (expensive!)
+            needs_flora = (cx, cz) not in flora_manager.chunk_plants
+            if needs_flora:
+                if new_flora_count >= MAX_NEW_FLORA_PER_FRAME:
+                    continue  # Skip for now, will generate next frame
+                new_flora_count += 1
+                
             chunk = chunk_manager.get_chunk(cx, cz)
             flora_manager.render_chunk_flora(
                 cx, cz, cam_pos[0], cam_pos[2],
                 chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE
             )
-            # Spawn animals for this chunk if not already done
-            animal_manager.spawn_animals_for_chunk(
-                cx, cz, chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE
-            )
+            # Spawn animals for this chunk if not already done (also limit)
+            if (cx, cz) not in animal_manager.chunk_animals:
+                if new_flora_count < MAX_NEW_FLORA_PER_FRAME:
+                    animal_manager.spawn_animals_for_chunk(
+                        cx, cz, chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE
+                    )
             # Maybe spawn buildings
             structure_manager.spawn_random_buildings(
                 cx, cz, chunk.world_x, chunk.world_z, chunk.heightmap, HEIGHT_SCALE, TILE_SCALE
             )
+        perf.record_time('flora', _flora_start)
         
         # Update animals every few frames for performance
+        _animal_start = time.perf_counter()
         if frame_count % 3 == 0:  # Update AI every 3rd frame
             animal_manager.update(dt, cam_pos, None)  # dt is frame count, normalized in update
         
         # Render animals
         animal_manager.render(cam_pos[0], cam_pos[1], cam_pos[2])
+        perf.record_time('animal', _animal_start)
         
         # Render eggs from life simulation
         life_simulator.render_eggs(cam_pos[0], cam_pos[2])
@@ -3741,6 +4024,7 @@ def run_explorer(config: WorldConfig = None):
         
         # Cleanup distant chunks occasionally
         if frame_count % 60 == 0:
+            flora_manager.cleanup_distant_chunks(current_chunk[0], current_chunk[1])
             animal_manager.cleanup_distant_chunks(current_chunk[0], current_chunk[1])
             chunk_dna_manager.cleanup_distant(current_chunk[0], current_chunk[1])
             climate_manager.cleanup_distant(current_chunk[0], current_chunk[1])
@@ -3754,12 +4038,29 @@ def run_explorer(config: WorldConfig = None):
                                climate_manager.current_weather,
                                climate_manager.lightning_flash)
         
+        perf.record_time('render', _render_start)
+        
+        # Update perf counts (every 30 frames to save CPU)
+        if frame_count % 30 == 0:
+            perf.update_counts(
+                total_plants,
+                total_animals,
+                len(life_simulator.eggs),
+                len(chunk_renderer.display_lists),
+                len(structure_manager.structures)
+            )
+        
         draw_crosshair(display)
         draw_hud(display, camera, sky, climate_manager, hud_font)
         draw_menu(display, camera, hud_font)  # Draw menu overlay if open
         minimap.draw(display, camera.x, camera.z)
         
+        # Perf overlay (if enabled)
+        if perf.show_overlay:
+            draw_perf_overlay(display, perf, hud_font)
+        
         pygame.display.flip()
+        perf.end_frame()
     
     # Cleanup
     chunk_worker.stop()

@@ -78,6 +78,12 @@ class LifeConfig:
     MAX_PLANTS_PER_UPDATE = 50  # Max plants to update per chunk per cycle (was 60)
     MAX_ANIMALS_PER_UPDATE = 30 # Max animals to update per cycle (was 40)
     
+    # Adaptive throttling - if updates are slow, back off automatically
+    ADAPTIVE_THROTTLE = True    # Enable adaptive throttling
+    SLOW_THRESHOLD_MS = 25.0    # If update takes longer than this, throttle
+    MIN_UPDATE_INTERVAL = 0.5   # Never update faster than this
+    MAX_UPDATE_INTERVAL = 3.0   # Never update slower than this
+    
     # Logging (set to False to disable console spam)
     LOG_ENABLED = False
     LOG_INTERVAL = 15.0  # Log stats every 15 seconds
@@ -501,9 +507,23 @@ class LifeSimulator:
         
         _total_time = (time.perf_counter() - _perf_start) * 1000
         
+        # Adaptive throttling - slow down if updates are taking too long
+        if LifeConfig.ADAPTIVE_THROTTLE:
+            if _total_time > LifeConfig.SLOW_THRESHOLD_MS:
+                # Slow update - back off
+                new_interval = min(self.update_interval * 1.5, LifeConfig.MAX_UPDATE_INTERVAL)
+                if new_interval != self.update_interval:
+                    self.update_interval = new_interval
+                    if LifeConfig.LOG_ENABLED:
+                        print(f"[PERF] Throttling life updates: interval now {self.update_interval:.1f}s")
+            elif _total_time < LifeConfig.SLOW_THRESHOLD_MS * 0.5 and self.update_interval > LifeConfig.MIN_UPDATE_INTERVAL:
+                # Fast update - speed up slowly
+                new_interval = max(self.update_interval * 0.9, LifeConfig.MIN_UPDATE_INTERVAL)
+                self.update_interval = new_interval
+        
         # PERF LOGGING - only print if slow (>50ms)
         if _total_time > 50:
-            print(f"[PERF] Life update SLOW: {_total_time:.1f}ms ({plants_updated}p/{animals_updated}a)")
+            print(f"[PERF] Life update SLOW: {_total_time:.1f}ms ({plants_updated}p/{animals_updated}a) interval={self.update_interval:.1f}s")
         
         # Periodic logging
         if LifeConfig.LOG_ENABLED and self.log_timer >= LifeConfig.LOG_INTERVAL:
