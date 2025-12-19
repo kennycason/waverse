@@ -1212,8 +1212,8 @@ class Camera:
         self.jumping = False
         self.falling = False  # Triggered by steep drops (cliff/building edge)
         self.jump_velocity = 0.0
-        self.gravity = 12.0  # Faster gravity for snappier falls
-        self.jump_strength = 1.7  # 2x higher jump - can reach ~2 stories
+        self.gravity = 9.0   # Balanced gravity
+        self.jump_strength = 1.8  # ~2x normal - can reach 1st floor rooftops
         self.last_ground_y = 0.0  # Track previous ground height for cliff detection
         
         # Auto-fly / Tour mode: 0=off, 1=wander, 2=showcase
@@ -2870,7 +2870,7 @@ def draw_menu(display: tuple, camera: Camera, hud_font=None):
                 ("N", "Warp to new world"),
                 ("M", "Set marker"),
                 ("C", "Clear markers"),
-                ("S", "Save position"),
+                ("O", "Save position"),
             ]
             
             for key, action in controls_kb:
@@ -3729,7 +3729,7 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                     if new_level != camera.speed_level:
                         camera.set_speed(new_level)
                         print(f"  Speed: {SPEED_LEVELS[new_level]:.2f}x")
-                elif event.key == pygame.K_s:
+                elif event.key == pygame.K_o:  # O for Origin/Save
                     save_position(camera, config.seed)
                 elif event.key == pygame.K_p:  # P for Picture/Screenshot
                     take_screenshot(camera)

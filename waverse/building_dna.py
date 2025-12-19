@@ -205,7 +205,7 @@ class BuildingDNA:
             width = 8 + rng.random() * 8       # 8-16
             depth = 8 + rng.random() * 8       # 8-16
             floors = 1 if rng.random() < 0.4 else 2
-            floor_height = 4.0 + rng.random() * 1.5
+            floor_height = 6.0 + rng.random() * 2.0  # Taller ceilings for walkability
             roof_type = rng.choice([RoofType.GABLED, RoofType.HIPPED, RoofType.PYRAMID])
             wall_style = rng.choice([WallStyle.BRICK, WallStyle.WOOD, WallStyle.SOLID])
             colors = ColorPalette.random(rng, "residential")
@@ -216,7 +216,7 @@ class BuildingDNA:
             width = 15 + rng.random() * 15     # 15-30
             depth = 12 + rng.random() * 10     # 12-22
             floors = 3 + rng.integers(0, 5)    # 3-7
-            floor_height = 3.5 + rng.random()
+            floor_height = 5.5 + rng.random() * 1.5  # Taller ceilings
             roof_type = RoofType.FLAT
             wall_style = rng.choice([WallStyle.CONCRETE, WallStyle.BRICK, WallStyle.SOLID])
             colors = ColorPalette.random(rng, "modern")
@@ -227,7 +227,7 @@ class BuildingDNA:
             width = 18 + rng.random() * 12     # 18-30
             depth = 15 + rng.random() * 10     # 15-25
             floors = 2 + rng.integers(0, 2)    # 2-3
-            floor_height = 4.5 + rng.random()
+            floor_height = 6.5 + rng.random() * 1.5  # Taller ceilings
             roof_type = rng.choice([RoofType.HIPPED, RoofType.GABLED])
             wall_style = rng.choice([WallStyle.STONE, WallStyle.SOLID])
             colors = ColorPalette.random(rng, "residential")
@@ -238,7 +238,7 @@ class BuildingDNA:
             width = 10 + rng.random() * 10     # 10-20
             depth = 8 + rng.random() * 8       # 8-16
             floors = 1 if rng.random() < 0.5 else 2
-            floor_height = 4.0 + rng.random()
+            floor_height = 5.5 + rng.random() * 1.5  # Taller ceilings
             roof_type = rng.choice([RoofType.FLAT, RoofType.SHED])
             wall_style = rng.choice([WallStyle.BRICK, WallStyle.CONCRETE])
             colors = ColorPalette.random(rng, "commercial")
@@ -251,7 +251,7 @@ class BuildingDNA:
             width = 20 + rng.random() * 15     # 20-35
             depth = 15 + rng.random() * 12     # 15-27
             floors = 4 + rng.integers(0, 6)    # 4-9
-            floor_height = 4.0 + rng.random() * 0.5
+            floor_height = 5.5 + rng.random()  # Taller ceilings
             roof_type = RoofType.FLAT
             wall_style = rng.choice([WallStyle.GLASS, WallStyle.CONCRETE])
             colors = ColorPalette.random(rng, "commercial")
@@ -263,7 +263,7 @@ class BuildingDNA:
             width = 15 + rng.random() * 10     # 15-25
             depth = 15 + rng.random() * 10     # 15-25
             floors = 10 + rng.integers(0, 20)  # 10-29
-            floor_height = 3.5 + rng.random() * 0.5
+            floor_height = 5.0 + rng.random()  # Taller ceilings
             roof_type = rng.choice([RoofType.FLAT, RoofType.PYRAMID, RoofType.DOME])
             wall_style = WallStyle.GLASS
             colors = ColorPalette.random(rng, "modern")

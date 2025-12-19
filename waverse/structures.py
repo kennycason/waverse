@@ -1227,7 +1227,7 @@ class StructureManager:
         rng = np.random.default_rng(chunk_seed)
         
         # Low chance of building per chunk
-        if rng.random() > 0.03:  # 3% chance (slightly more buildings)
+        if rng.random() > 0.08:  # 8% chance - more buildings for exploration
             return
         
         # Find a spot

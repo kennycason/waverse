@@ -295,7 +295,7 @@ class AnimalDNA:
     secondary_color: Tuple[float, float, float] = (0.6, 0.5, 0.4)
     
     # Pattern variations
-    pattern_type: str = "solid"  # solid, spots, stripes, gradient, patches
+    pattern_type: str = "solid"  # solid, spots, stripes, gradient, patches, mottled, rings, chevrons, camo, scales
     pattern_scale: float = 1.0   # Size of pattern elements
     pattern_contrast: float = 0.3  # How much pattern color differs
     
@@ -378,7 +378,7 @@ class AnimalDNA:
         new_dna.pattern_scale = float(np.clip(self.pattern_scale + rng.normal(0, 0.1 * strength), 0.3, 3.0))
         new_dna.pattern_contrast = float(np.clip(self.pattern_contrast + rng.normal(0, rate), 0, 0.8))
         if rng.random() < 0.03 * strength:  # Rare pattern type change
-            new_dna.pattern_type = rng.choice(["solid", "spots", "stripes", "gradient", "patches"])
+            new_dna.pattern_type = rng.choice(["solid", "spots", "stripes", "gradient", "patches", "mottled", "rings", "chevrons", "camo", "scales"])
         
         # Mutate tail
         new_dna.tail_length = float(np.clip(self.tail_length + rng.normal(0, 0.1 * strength), 0, 2.0))
