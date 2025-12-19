@@ -1227,7 +1227,7 @@ class StructureManager:
         rng = np.random.default_rng(chunk_seed)
         
         # Low chance of building per chunk
-        if rng.random() > 0.08:  # 8% chance - more buildings for exploration
+        if rng.random() > 0.04:  # 4% chance - balanced building density
             return
         
         # Find a spot
@@ -1349,25 +1349,26 @@ class StructureManager:
             # Near water - industrial/warehouse
             building_types = [
                 BuildingType.WAREHOUSE, BuildingType.FACTORY, 
-                BuildingType.SHOP, BuildingType.HOUSE
+                BuildingType.SHOP, BuildingType.HOUSE, BuildingType.PARKOUR
             ]
         elif avg_height < 25:
             # Lowlands - mixed
             building_types = [
                 BuildingType.HOUSE, BuildingType.APARTMENT, BuildingType.SHOP,
-                BuildingType.OFFICE, BuildingType.WAREHOUSE, BuildingType.VILLA
+                BuildingType.OFFICE, BuildingType.WAREHOUSE, BuildingType.VILLA,
+                BuildingType.PARKOUR
             ]
         elif avg_height < 45:
             # Hills - residential
             building_types = [
                 BuildingType.HOUSE, BuildingType.VILLA, BuildingType.TEMPLE,
-                BuildingType.OBSERVATORY, BuildingType.APARTMENT
+                BuildingType.OBSERVATORY, BuildingType.APARTMENT, BuildingType.PARKOUR
             ]
         else:
             # Mountain - special
             building_types = [
                 BuildingType.TEMPLE, BuildingType.OBSERVATORY, 
-                BuildingType.RUINS, BuildingType.MONUMENT
+                BuildingType.RUINS, BuildingType.MONUMENT, BuildingType.PARKOUR
             ]
         
         building_type = rng.choice(building_types)

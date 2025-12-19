@@ -30,6 +30,10 @@ def generate_building_from_dna(
     Returns:
         Structure with all primitives ready for rendering
     """
+    # Special case: Parkour gets its own generator
+    if dna.building_type == BuildingType.PARKOUR:
+        return _generate_parkour(x, y, z, dna, terrain_heights)
+    
     rng = np.random.default_rng(dna.seed)
     structure = Structure(x=x, y=y, z=z)
     
@@ -587,4 +591,254 @@ def _add_chimney(structure: Structure, x: float, roof_y: float, z: float,
         z=cz, width=chimney_width,
         color=(0.45, 0.4, 0.38)
     ))
+
+
+def _generate_parkour(x: float, y: float, z: float, dna: BuildingDNA,
+                      terrain_heights: Optional[List[float]] = None) -> Structure:
+    """
+    Generate a parkour playground - a sequence of platforms, ramps, and poles
+    designed for jumping and traversing.
+    """
+    rng = np.random.default_rng(dna.seed)
+    structure = Structure(x=x, y=y, z=z)
+    
+    hw = dna.width / 2
+    hd = dna.depth / 2
+    
+    # Base height
+    if terrain_heights and len(terrain_heights) >= 4:
+        base_y = max(terrain_heights)
+    else:
+        base_y = y
+    
+    # Color palette for parkour - bright, varied
+    colors = [
+        dna.colors.primary,
+        dna.colors.secondary,
+        tuple(c * 1.2 for c in dna.colors.primary),  # Brighter version
+        (0.8, 0.3, 0.2),  # Red accent
+        (0.2, 0.6, 0.8),  # Blue accent
+        (0.3, 0.7, 0.3),  # Green accent
+        (0.9, 0.7, 0.2),  # Yellow/gold
+    ]
+    
+    # Generate a grid of potential platform positions
+    grid_size = 6  # 6x6 grid of potential positions
+    cell_w = dna.width / grid_size
+    cell_d = dna.depth / grid_size
+    
+    # Track placed platforms for connectivity
+    platforms = []
+    current_height = base_y + 1.5  # Start slightly above ground
+    
+    # =========================================================================
+    # ENTRY RAMP - from ground level
+    # =========================================================================
+    entry_x = x - hw + cell_w
+    entry_z = z - hd + cell_d
+    
+    # Entry platform - large starting area
+    structure.floors.append(Floor(
+        x=entry_x, y=base_y + 0.3, z=entry_z,
+        width=cell_w * 2.0, depth=cell_d * 2.0, thickness=0.5,
+        color=colors[0]
+    ))
+    platforms.append((entry_x, base_y + 0.3, entry_z, cell_w * 2.0))
+    
+    # Entry ramp going up - wide and gentle
+    structure.ramps.append(Ramp(
+        x=entry_x + cell_w * 0.8, y_bottom=base_y + 0.3, z=entry_z,
+        width=cell_w * 1.5, length=cell_w * 2.5, height=3.0,
+        rotation=0, color=colors[1]
+    ))
+    
+    # =========================================================================
+    # MAIN PLATFORMS - scattered at various heights
+    # =========================================================================
+    n_platforms = 12 + rng.integers(0, 8)
+    
+    for i in range(n_platforms):
+        # Pick a random grid position
+        gx = rng.integers(0, grid_size)
+        gz = rng.integers(0, grid_size)
+        
+        px = x - hw + (gx + 0.5) * cell_w + rng.uniform(-cell_w * 0.2, cell_w * 0.2)
+        pz = z - hd + (gz + 0.5) * cell_d + rng.uniform(-cell_d * 0.2, cell_d * 0.2)
+        
+        # Height follows a general upward trend with variation
+        base_progression = (i / n_platforms) * dna.floors * dna.floor_height
+        height_var = rng.uniform(-dna.floor_height, dna.floor_height)
+        py = base_y + 1.5 + base_progression + height_var
+        py = max(base_y + 0.5, py)  # Don't go below ground
+        
+        # Platform type selection
+        platform_type = rng.choice([
+            "square", "square", "rectangle", "small", "pole", "ramp_up", "ramp_down"
+        ])
+        
+        color = colors[rng.integers(0, len(colors))]
+        
+        if platform_type == "square":
+            # Large square platforms - easy to land on
+            size = 4.0 + rng.random() * 3.0
+            structure.floors.append(Floor(
+                x=px, y=py, z=pz,
+                width=size, depth=size, thickness=0.5,
+                color=color
+            ))
+            platforms.append((px, py, pz, size))
+            
+        elif platform_type == "rectangle":
+            # Long platforms - good for running jumps
+            w = 5.0 + rng.random() * 4.0
+            d = 3.0 + rng.random() * 2.0
+            if rng.random() < 0.5:
+                w, d = d, w  # Swap for variety
+            structure.floors.append(Floor(
+                x=px, y=py, z=pz,
+                width=w, depth=d, thickness=0.5,
+                color=color
+            ))
+            platforms.append((px, py, pz, max(w, d)))
+            
+        elif platform_type == "small":
+            # Medium platform - still challenging but landable
+            size = 2.5 + rng.random() * 1.5
+            structure.floors.append(Floor(
+                x=px, y=py, z=pz,
+                width=size, depth=size, thickness=0.6,
+                color=color
+            ))
+            platforms.append((px, py, pz, size))
+            
+        elif platform_type == "pole":
+            # Platform on a tall pole - generous landing area
+            pole_height = 3 + rng.random() * 5
+            pillar_y = base_y - 1
+            structure.pillars.append(Pillar(
+                x=px, y_bottom=pillar_y, y_top=py,
+                z=pz, width=0.8 + rng.random() * 0.4,
+                color=tuple(c * 0.6 for c in color)
+            ))
+            size = 3.5 + rng.random() * 2.0
+            structure.floors.append(Floor(
+                x=px, y=py, z=pz,
+                width=size, depth=size, thickness=0.4,
+                color=color
+            ))
+            platforms.append((px, py, pz, size))
+            
+        elif platform_type == "ramp_up":
+            # Ramp going up - wide and long for easy running
+            direction = rng.choice([0, 90, 180, 270])
+            ramp_len = 6 + rng.random() * 4
+            ramp_height = 2 + rng.random() * 3
+            structure.ramps.append(Ramp(
+                x=px, y_bottom=py, z=pz,
+                width=3.5 + rng.random() * 1.5, length=ramp_len, height=ramp_height,
+                rotation=direction, color=color
+            ))
+            platforms.append((px, py + ramp_height, pz, ramp_len))
+            
+        elif platform_type == "ramp_down":
+            # Ramp going down - with larger start platform
+            direction = rng.choice([0, 90, 180, 270])
+            ramp_len = 6 + rng.random() * 4
+            ramp_height = 2 + rng.random() * 3
+            # Start platform - large enough to stand on
+            structure.floors.append(Floor(
+                x=px, y=py, z=pz,
+                width=4.5, depth=4.5, thickness=0.4,
+                color=color
+            ))
+            # Ramp going down
+            structure.ramps.append(Ramp(
+                x=px, y_bottom=py - ramp_height, z=pz,
+                width=3.5 + rng.random() * 1.5, length=ramp_len, height=ramp_height,
+                rotation=direction, color=tuple(c * 0.9 for c in color)
+            ))
+            platforms.append((px, py, pz, 4.5))
+    
+    # =========================================================================
+    # CONNECTING BRIDGES (walkways between nearby platforms)
+    # =========================================================================
+    for i, (px1, py1, pz1, size1) in enumerate(platforms):
+        for px2, py2, pz2, size2 in platforms[i+1:]:
+            dist = math.sqrt((px2 - px1)**2 + (pz2 - pz1)**2)
+            height_diff = abs(py2 - py1)
+            
+            # Connect platforms that are close horizontally but not too different in height
+            if 6 < dist < 18 and height_diff < 4 and rng.random() < 0.2:
+                # Walkable bridge
+                mid_x = (px1 + px2) / 2
+                mid_z = (pz1 + pz2) / 2
+                mid_y = max(py1, py2) + 0.1
+                
+                angle = math.atan2(pz2 - pz1, px2 - px1)
+                
+                # Bridge as walkable floor - wider for easier crossing
+                structure.floors.append(Floor(
+                    x=mid_x, y=mid_y, z=mid_z,
+                    width=dist * 0.85, depth=2.5 + rng.random() * 1.0,
+                    thickness=0.4,
+                    color=colors[rng.integers(0, len(colors))]
+                ))
+    
+    # =========================================================================
+    # CLIMBING POLES (vertical pillars with platforms to jump between)
+    # =========================================================================
+    n_climb_poles = 3 + rng.integers(0, 4)
+    for _ in range(n_climb_poles):
+        pole_x = x + rng.uniform(-hw * 0.7, hw * 0.7)
+        pole_z = z + rng.uniform(-hd * 0.7, hd * 0.7)
+        pole_height = 8 + rng.random() * 10
+        
+        # Multiple platforms along the pole - larger for landing
+        n_pole_platforms = 2 + rng.integers(0, 3)
+        for p in range(n_pole_platforms):
+            plat_y = base_y + (p + 1) * pole_height / (n_pole_platforms + 1)
+            size = 3.0 + rng.random() * 1.5  # Larger platforms
+            structure.floors.append(Floor(
+                x=pole_x, y=plat_y, z=pole_z,
+                width=size, depth=size, thickness=0.4,
+                color=colors[rng.integers(0, len(colors))]
+            ))
+        
+        # The pole itself - thicker
+        structure.pillars.append(Pillar(
+            x=pole_x, y_bottom=base_y - 1, y_top=base_y + pole_height,
+            z=pole_z, width=0.8,
+            color=(0.4, 0.4, 0.45)
+        ))
+    
+    # =========================================================================
+    # FINAL GOAL PLATFORM (high and flashy - large victory area)
+    # =========================================================================
+    goal_x = x + hw * 0.5
+    goal_z = z + hd * 0.5
+    goal_y = base_y + dna.floors * dna.floor_height + 2
+    
+    # Tall support
+    structure.pillars.append(Pillar(
+        x=goal_x, y_bottom=base_y - 1, y_top=goal_y,
+        z=goal_z, width=1.5,
+        color=(0.3, 0.3, 0.35)
+    ))
+    
+    # Goal platform (gold/yellow) - large victory area!
+    structure.floors.append(Floor(
+        x=goal_x, y=goal_y, z=goal_z,
+        width=7.0, depth=7.0, thickness=0.7,
+        color=(0.9, 0.75, 0.2)  # Gold
+    ))
+    
+    # Victory pillar/trophy
+    structure.pillars.append(Pillar(
+        x=goal_x, y_bottom=goal_y, y_top=goal_y + 4,
+        z=goal_z, width=0.6,
+        color=(0.95, 0.85, 0.3)
+    ))
+    
+    structure.compute_bounds()
+    return structure
 

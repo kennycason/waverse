@@ -40,6 +40,7 @@ class BuildingType(Enum):
     MONUMENT = "monument"        # Statue/obelisk/memorial
     OBSERVATORY = "observatory"  # Dome-topped
     RUINS = "ruins"              # Partially destroyed ancient structure
+    PARKOUR = "parkour"          # Playground of platforms, ramps, gaps for jumping
 
 
 class RoofType(Enum):
@@ -325,6 +326,18 @@ class BuildingDNA:
             roof_type = RoofType.FLAT  # Ruins have no roof
             wall_style = WallStyle.STONE
             colors = ColorPalette.random(rng, "ancient")
+            has_balconies = False
+            has_chimney = False
+            
+        elif building_type == BuildingType.PARKOUR:
+            # Parkour playground - wide area with platforms at various heights
+            width = 25 + rng.random() * 30  # Large footprint
+            depth = 25 + rng.random() * 30
+            floors = 4 + rng.integers(0, 4)  # Multiple "levels" of platforms
+            floor_height = 3.0 + rng.random() * 2.0  # Jump-friendly heights
+            roof_type = RoofType.FLAT  # No roof, open air
+            wall_style = WallStyle.METAL  # Industrial/gym look
+            colors = ColorPalette.random(rng, rng.choice(["industrial", "commercial", "alien"]))
             has_balconies = False
             has_chimney = False
             

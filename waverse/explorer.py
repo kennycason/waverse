@@ -1212,8 +1212,8 @@ class Camera:
         self.jumping = False
         self.falling = False  # Triggered by steep drops (cliff/building edge)
         self.jump_velocity = 0.0
-        self.gravity = 9.0   # Balanced gravity
-        self.jump_strength = 1.8  # ~2x normal - can reach 1st floor rooftops
+        self.gravity = 6.0   # Balanced gravity
+        self.jump_strength = 1.7  # ~2x normal - can reach 1st floor rooftops
         self.last_ground_y = 0.0  # Track previous ground height for cliff detection
         
         # Auto-fly / Tour mode: 0=off, 1=wander, 2=showcase
