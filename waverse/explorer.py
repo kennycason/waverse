@@ -1241,6 +1241,8 @@ class Camera:
         self.showcase_target_yaw = 0.0    # For smooth camera transitions
         self.showcase_target_pitch = 0.0
         self.showcase_explore_dir = 0.0   # Direction to bias exploration (radians)
+        self.showcase_origin = None       # (x, z) starting point for outward exploration
+        self.showcase_total_distance = 0.0  # Track how far we've traveled
         self.showcase_is_structure = False  # Track if current target is a building
         self.showcase_pan_direction = 1   # -1 = pan left, +1 = pan right
         self.showcase_pan_speed = 8.0     # degrees per second
@@ -1802,9 +1804,12 @@ class Camera:
             self.showcase_target = None  # Will be set on first update
             self.showcase_phase = 0
             self.showcase_arc_progress = 0.0
-            # Start exploring in current facing direction
-            self.showcase_explore_dir = math.radians(self.yaw)
+            # Set the origin point - we'll always move OUTWARD from here
+            self.showcase_origin = (self.x, self.z)
+            self.showcase_explore_dir = math.radians(self.yaw)  # Initial direction
+            self.showcase_total_distance = 0.0
             self.showcase_is_structure = False
+            print(f"  Showcase origin: ({int(self.x)}, {int(self.z)})")
     
     def update_auto_fly(self, dt: float, chunk_manager: ChunkManager, 
                         flora_manager=None, animal_manager=None, structure_manager=None):
@@ -1958,11 +1963,19 @@ class Camera:
     
     def _pick_showcase_target(self, chunk_manager: ChunkManager, 
                               flora_manager, animal_manager, structure_manager):
-        """Pick a target in the direction we're currently facing (after pan)."""
+        """Pick a target that is FURTHER from origin - always exploring outward."""
         candidates = []
         
-        # Use current yaw as exploration direction (we're facing this way after pan)
-        self.showcase_explore_dir = math.radians(self.yaw)
+        # Calculate current distance from origin
+        if self.showcase_origin is None:
+            self.showcase_origin = (self.x, self.z)
+        origin_x, origin_z = self.showcase_origin
+        current_dist_from_origin = math.sqrt((self.x - origin_x)**2 + (self.z - origin_z)**2)
+        
+        # Update exploration direction: from origin through current position
+        if current_dist_from_origin > 100:
+            # Direction from origin to current position = outward direction
+            self.showcase_explore_dir = math.atan2(self.x - origin_x, self.z - origin_z)
         
         cx, cz = self.get_chunk_pos()
         search_range = 15  # Search much further for distant targets
@@ -2046,19 +2059,50 @@ class Camera:
         if not forward_candidates:
             forward_candidates = [(c, c[5], 0) for c in candidates]
         
-        # Score remaining candidates: prefer distant + well-aligned
+        # Score remaining candidates: STRONGLY prefer targets FURTHER from origin
         scored = []
+        origin_x, origin_z = self.showcase_origin if self.showcase_origin else (self.x, self.z)
+        current_dist_from_origin = math.sqrt((self.x - origin_x)**2 + (self.z - origin_z)**2)
+        
         for cand, dist, dir_diff in forward_candidates:
-            direction_score = 1.0 - (dir_diff / math.radians(45))  # 1.0 = perfect, 0 = 45° off
-            distance_score = dist / 3000.0  # Favor further targets
+            tx, ty, tz = cand[0], cand[1], cand[2]
             
-            score = max(0.1, (direction_score * 2.0) + (distance_score * 1.0))
+            # How far is this target from origin?
+            target_dist_from_origin = math.sqrt((tx - origin_x)**2 + (tz - origin_z)**2)
+            
+            # CRITICAL: Is this target FURTHER from origin than we are?
+            outward_progress = target_dist_from_origin - current_dist_from_origin
+            
+            # Skip targets that would take us backward (closer to origin)
+            if outward_progress < -100:  # Allow small backtracking (100 units)
+                continue
+            
+            # Score heavily based on outward progress
+            outward_score = max(0, outward_progress / 1000.0)  # Huge bonus for going outward
+            direction_score = 1.0 - (dir_diff / math.radians(90))  # Less strict on direction
+            
+            score = max(0.1, (outward_score * 5.0) + (direction_score * 1.0))
             
             # Slight bonus for structures
             if cand[3] == "structure":
                 score += 0.3
             
             scored.append((cand, score))
+        
+        # If all targets were rejected (going backward), pick the one that goes most outward
+        if not scored and forward_candidates:
+            # Fall back: pick the one with best outward progress even if negative
+            best_cand = None
+            best_progress = -99999
+            for cand, dist, dir_diff in forward_candidates:
+                tx, tz = cand[0], cand[2]
+                target_dist_from_origin = math.sqrt((tx - origin_x)**2 + (tz - origin_z)**2)
+                outward_progress = target_dist_from_origin - current_dist_from_origin
+                if outward_progress > best_progress:
+                    best_progress = outward_progress
+                    best_cand = cand
+            if best_cand:
+                scored.append((best_cand, 1.0))
         
         # Weighted random selection
         total_score = sum(s for _, s in scored)
@@ -2082,6 +2126,10 @@ class Camera:
         self.showcase_arc_progress = 0.0
         self.showcase_is_structure = (entity_type == "structure")
         
+        # Track total distance traveled
+        target_dist_from_origin = math.sqrt((target_x - origin_x)**2 + (target_z - origin_z)**2)
+        self.showcase_total_distance = target_dist_from_origin
+        
         # Calculate arc height based on distance
         horiz_dist = math.sqrt((target_x - self.x)**2 + (target_z - self.z)**2)
         height_diff = abs(target_y - self.y)
@@ -2100,8 +2148,11 @@ class Camera:
         else:
             self.showcase_view_distance = 9.0   # Animals
         
-        print(f"  Showcase: flying to {entity_type} ({horiz_dist:.0f}m away)")
-        self.set_status(f"Flying to {entity_type}...")
+        # Show progress from origin
+        origin_x, origin_z = self.showcase_origin if self.showcase_origin else (self.x, self.z)
+        dist_from_origin = math.sqrt((target_x - origin_x)**2 + (target_z - origin_z)**2)
+        print(f"  Showcase: flying to {entity_type} ({horiz_dist:.0f}m away, {dist_from_origin:.0f}m from origin)")
+        self.set_status(f"Flying to {entity_type}... ({int(dist_from_origin)}m explored)")
     
     def maintain_auto_fly_height(self, chunk_manager: ChunkManager):
         """Keep camera at consistent height above terrain during tour mode (wander only)."""

@@ -843,10 +843,61 @@ def generate_maze(x: float, y: float, z: float,
 
 
 class StructureRenderer:
-    """Renders structures efficiently."""
+    """Renders structures efficiently with display list caching."""
     
-    LOD_FULL = 80
-    LOD_SIMPLE = 200
+    LOD_FULL = 100       # Full detail
+    LOD_SIMPLE = 250     # Simplified (skip small details)
+    LOD_BILLBOARD = 500  # Just a colored box
+    
+    # Display list cache: structure id -> (full_list, simple_list)
+    _display_lists: Dict[int, Tuple[int, int]] = {}
+    
+    @classmethod
+    def create_display_list(cls, structure: Structure) -> Tuple[int, int]:
+        """Create display lists for a structure (full and simple)."""
+        struct_id = id(structure)
+        
+        # Check cache first
+        if struct_id in cls._display_lists:
+            return cls._display_lists[struct_id]
+        
+        # Create FULL detail display list
+        full_list = glGenLists(1)
+        glNewList(full_list, GL_COMPILE)
+        for wall in structure.walls:
+            cls._draw_wall(wall)
+        for floor in structure.floors:
+            cls._draw_floor(floor)
+        for ramp in structure.ramps:
+            cls._draw_ramp(ramp)
+        for pillar in structure.pillars:
+            cls._draw_pillar(pillar)
+        glEndList()
+        
+        # Create SIMPLE display list (skip small elements)
+        simple_list = glGenLists(1)
+        glNewList(simple_list, GL_COMPILE)
+        # Only draw major walls and floors
+        for wall in structure.walls:
+            if wall.height > 3 and wall.width > 2:  # Skip small walls
+                cls._draw_wall_simple(wall)
+        for floor in structure.floors:
+            if floor.width > 3 and floor.depth > 3:  # Skip small floors
+                cls._draw_floor_simple(floor)
+        glEndList()
+        
+        cls._display_lists[struct_id] = (full_list, simple_list)
+        return full_list, simple_list
+    
+    @classmethod
+    def cleanup_display_list(cls, structure: Structure):
+        """Delete display lists for a structure."""
+        struct_id = id(structure)
+        if struct_id in cls._display_lists:
+            full_list, simple_list = cls._display_lists[struct_id]
+            glDeleteLists(full_list, 1)
+            glDeleteLists(simple_list, 1)
+            del cls._display_lists[struct_id]
     
     @staticmethod
     def _draw_wall(wall: Wall):
@@ -1049,36 +1100,114 @@ class StructureRenderer:
         glPopMatrix()
     
     @staticmethod
-    def render_structure(structure: Structure, cam_x: float, cam_z: float):
-        """Render a structure with LOD."""
+    def _draw_wall_simple(wall: Wall):
+        """Draw a simplified wall (fewer vertices)."""
+        glPushMatrix()
+        glTranslatef(wall.x, wall.y + wall.height/2, wall.z)
+        glRotatef(wall.rotation, 0, 1, 0)
+        
+        hw = wall.width / 2
+        hh = wall.height / 2
+        
+        glColor3f(*wall.color)
+        glBegin(GL_QUADS)
+        # Just front face
+        glNormal3f(0, 0, 1)
+        glVertex3f(-hw, -hh, 0)
+        glVertex3f(hw, -hh, 0)
+        glVertex3f(hw, hh, 0)
+        glVertex3f(-hw, hh, 0)
+        glEnd()
+        glPopMatrix()
+    
+    @staticmethod
+    def _draw_floor_simple(floor: Floor):
+        """Draw a simplified floor (just top surface)."""
+        glPushMatrix()
+        glTranslatef(floor.x, floor.y + floor.thickness/2, floor.z)
+        
+        hw = floor.width / 2
+        hd = floor.depth / 2
+        
+        glColor3f(*floor.color)
+        glBegin(GL_QUADS)
+        glNormal3f(0, 1, 0)
+        glVertex3f(-hw, 0, -hd)
+        glVertex3f(-hw, 0, hd)
+        glVertex3f(hw, 0, hd)
+        glVertex3f(hw, 0, -hd)
+        glEnd()
+        glPopMatrix()
+    
+    @classmethod
+    def render_structure(cls, structure: Structure, cam_x: float, cam_z: float):
+        """Render a structure with LOD and display list caching."""
         # Distance check
         cx = (structure.bbox_min[0] + structure.bbox_max[0]) / 2
         cz = (structure.bbox_min[2] + structure.bbox_max[2]) / 2
         dist_sq = (cam_x - cx)**2 + (cam_z - cz)**2
         
-        if dist_sq > StructureRenderer.LOD_SIMPLE ** 2:
+        if dist_sq > cls.LOD_BILLBOARD ** 2:
             return  # Too far, don't render
         
-        for wall in structure.walls:
-            StructureRenderer._draw_wall(wall)
+        # Get or create display lists
+        full_list, simple_list = cls.create_display_list(structure)
         
-        for floor in structure.floors:
-            StructureRenderer._draw_floor(floor)
+        if dist_sq < cls.LOD_FULL ** 2:
+            # Full detail
+            glCallList(full_list)
+        elif dist_sq < cls.LOD_SIMPLE ** 2:
+            # Simple detail
+            glCallList(simple_list)
+        else:
+            # Billboard: just draw bounding box
+            cls._draw_bbox(structure)
+    
+    @staticmethod
+    def _draw_bbox(structure: Structure):
+        """Draw a simple bounding box for very distant structures."""
+        min_x, min_y, min_z = structure.bbox_min
+        max_x, max_y, max_z = structure.bbox_max
         
-        for ramp in structure.ramps:
-            StructureRenderer._draw_ramp(ramp)
+        # Estimate average color from first wall or floor
+        if structure.walls:
+            color = structure.walls[0].color
+        elif structure.floors:
+            color = structure.floors[0].color
+        else:
+            color = (0.5, 0.5, 0.5)
         
-        for pillar in structure.pillars:
-            StructureRenderer._draw_pillar(pillar)
+        glColor3f(*color)
+        glBegin(GL_QUADS)
+        # Front
+        glVertex3f(min_x, min_y, max_z)
+        glVertex3f(max_x, min_y, max_z)
+        glVertex3f(max_x, max_y, max_z)
+        glVertex3f(min_x, max_y, max_z)
+        # Back
+        glVertex3f(max_x, min_y, min_z)
+        glVertex3f(min_x, min_y, min_z)
+        glVertex3f(min_x, max_y, min_z)
+        glVertex3f(max_x, max_y, min_z)
+        # Top
+        glVertex3f(min_x, max_y, min_z)
+        glVertex3f(min_x, max_y, max_z)
+        glVertex3f(max_x, max_y, max_z)
+        glVertex3f(max_x, max_y, min_z)
+        glEnd()
 
 
 class StructureManager:
     """Manages all structures in the world."""
     
-    def __init__(self, seed: int = 42):
+    def __init__(self, seed: int = 42, use_dna_buildings: bool = True):
         self.seed = seed
         self.structures: List[Structure] = []
         self.spawned_chunks: set = set()  # Track which chunks we've processed
+        self.use_dna_buildings = use_dna_buildings
+        
+        # Display list cache for performance
+        self._display_lists: Dict[int, int] = {}  # structure_id -> display_list
     
     def add_structure(self, structure: Structure):
         """Add a structure to the world."""
@@ -1172,8 +1301,13 @@ class StructureManager:
                 seed=chunk_seed,
                 terrain_heights=corner_heights
             )
+        elif self.use_dna_buildings:
+            # NEW: DNA-based building system with rich variety
+            building = self._spawn_dna_building(
+                world_x, world_y, world_z, chunk_seed, corner_heights, rng
+            )
         else:
-            # Regular building
+            # Legacy: Regular tile-based building
             floor_roll = rng.random()
             if floor_roll < 0.2:
                 floors = 1  # 20% single floor
@@ -1200,6 +1334,49 @@ class StructureManager:
             )
         
         self.add_structure(building)
+    
+    def _spawn_dna_building(self, x: float, y: float, z: float, seed: int,
+                            terrain_heights: List[float], rng) -> Structure:
+        """Spawn a building using the DNA-based system for rich variety."""
+        from .building_dna import BuildingType, BuildingDNA, get_building_type_for_biome
+        from .building_generator import generate_building_from_dna
+        
+        # Choose building type based on terrain characteristics
+        # Higher terrain = more residential, lower = more commercial/industrial
+        avg_height = sum(terrain_heights) / len(terrain_heights)
+        
+        if avg_height < 8:
+            # Near water - industrial/warehouse
+            building_types = [
+                BuildingType.WAREHOUSE, BuildingType.FACTORY, 
+                BuildingType.SHOP, BuildingType.HOUSE
+            ]
+        elif avg_height < 25:
+            # Lowlands - mixed
+            building_types = [
+                BuildingType.HOUSE, BuildingType.APARTMENT, BuildingType.SHOP,
+                BuildingType.OFFICE, BuildingType.WAREHOUSE, BuildingType.VILLA
+            ]
+        elif avg_height < 45:
+            # Hills - residential
+            building_types = [
+                BuildingType.HOUSE, BuildingType.VILLA, BuildingType.TEMPLE,
+                BuildingType.OBSERVATORY, BuildingType.APARTMENT
+            ]
+        else:
+            # Mountain - special
+            building_types = [
+                BuildingType.TEMPLE, BuildingType.OBSERVATORY, 
+                BuildingType.RUINS, BuildingType.MONUMENT
+            ]
+        
+        building_type = rng.choice(building_types)
+        
+        # Create DNA for this building
+        dna = BuildingDNA.create_random(building_type, seed)
+        
+        # Generate the actual structure
+        return generate_building_from_dna(x, y, z, dna, terrain_heights)
     
     def check_collision(self, px: float, py: float, pz: float, 
                         radius: float = 0.5, player_height: float = 3.5) -> Tuple[bool, Optional[float]]:
@@ -1258,11 +1435,22 @@ class StructureManager:
             StructureRenderer.render_structure(structure, cam_x, cam_z)
     
     def cleanup_distant(self, cx: int, cz: int, chunk_size: float = 32, max_chunks: int = 40):
-        """Remove structures far from player."""
+        """Remove structures far from player and cleanup their display lists."""
         world_x = cx * chunk_size
         world_z = cz * chunk_size
         max_dist = max_chunks * chunk_size
         
+        # Find structures to remove
+        to_remove = [
+            s for s in self.structures
+            if abs(s.x - world_x) >= max_dist or abs(s.z - world_z) >= max_dist
+        ]
+        
+        # Cleanup display lists for removed structures
+        for structure in to_remove:
+            StructureRenderer.cleanup_display_list(structure)
+        
+        # Keep only nearby structures
         self.structures = [
             s for s in self.structures
             if abs(s.x - world_x) < max_dist and abs(s.z - world_z) < max_dist
