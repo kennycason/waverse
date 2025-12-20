@@ -433,6 +433,104 @@ class AnimalRenderer:
         glVertex3f(animal.x, animal.y + animal.dna.base_scale * 0.3, animal.z)
     
     @staticmethod
+    def draw_billboard(animal: AnimalInstance, scale: float = 1.0):
+        """Draw animal as a simple 2D shape that matches its silhouette.
+        
+        Different animal types get different shapes:
+        - Birds/flyers: Diamond/wing shape
+        - Fish/swimmers: Horizontal ellipse
+        - Spiders/bugs: Wide low shape
+        - Mammals/walkers: Rounded rectangle
+        - Snakes/worms: Horizontal line
+        """
+        atype = animal.dna.animal_type
+        # Scale down to match actual visual size (0.5 factor)
+        base_size = animal.dna.base_scale * 0.5 * scale
+        
+        # Position
+        cx, cy, cz = animal.x, animal.y + animal.dna.base_scale * 0.15, animal.z
+        
+        # Color
+        color = animal.dna.primary_color
+        glColor3f(*color)
+        
+        if atype in ('bird', 'moth', 'butterfly', 'bat'):
+            # Diamond/wing shape (wide horizontal)
+            hw = base_size * 1.2
+            hh = base_size * 0.4
+            glBegin(GL_QUADS)
+            glVertex3f(cx, cy + hh, cz)  # Top
+            glVertex3f(cx - hw, cy, cz)  # Left
+            glVertex3f(cx, cy - hh, cz)  # Bottom  
+            glVertex3f(cx + hw, cy, cz)  # Right
+            glEnd()
+            
+        elif atype in ('fish', 'shark', 'whale', 'manta'):
+            # Fish shape - horizontal diamond with tail
+            hw = base_size * 1.0
+            hh = base_size * 0.35
+            glBegin(GL_TRIANGLES)
+            # Body
+            glVertex3f(cx + hw, cy, cz)  # Nose
+            glVertex3f(cx - hw * 0.3, cy + hh, cz)
+            glVertex3f(cx - hw * 0.3, cy - hh, cz)
+            # Tail
+            glVertex3f(cx - hw * 0.3, cy, cz)
+            glVertex3f(cx - hw, cy + hh * 0.8, cz)
+            glVertex3f(cx - hw, cy - hh * 0.8, cz)
+            glEnd()
+            
+        elif atype in ('spider', 'crab', 'scorpion'):
+            # Wide low shape
+            hw = base_size * 0.8
+            hh = base_size * 0.25
+            glBegin(GL_QUADS)
+            glVertex3f(cx - hw, cy + hh, cz)
+            glVertex3f(cx + hw, cy + hh, cz)
+            glVertex3f(cx + hw, cy - hh, cz)
+            glVertex3f(cx - hw, cy - hh, cz)
+            glEnd()
+            
+        elif atype in ('snake', 'worm', 'eel'):
+            # Long horizontal line
+            hw = base_size * 1.5
+            hh = base_size * 0.15
+            glBegin(GL_QUADS)
+            glVertex3f(cx - hw, cy + hh, cz)
+            glVertex3f(cx + hw, cy + hh, cz)
+            glVertex3f(cx + hw, cy - hh, cz)
+            glVertex3f(cx - hw, cy - hh, cz)
+            glEnd()
+            
+        elif atype in ('jellyfish', 'octopus', 'squid'):
+            # Dome with tentacles
+            hw = base_size * 0.5
+            hh = base_size * 0.4
+            # Dome
+            glBegin(GL_TRIANGLES)
+            glVertex3f(cx, cy + hh, cz)
+            glVertex3f(cx - hw, cy, cz)
+            glVertex3f(cx + hw, cy, cz)
+            glEnd()
+            # Tentacles (small triangle below)
+            glBegin(GL_TRIANGLES)
+            glVertex3f(cx, cy - hh * 1.5, cz)
+            glVertex3f(cx - hw * 0.8, cy, cz)
+            glVertex3f(cx + hw * 0.8, cy, cz)
+            glEnd()
+            
+        else:
+            # Default: rounded rectangle (generic quadruped)
+            hw = base_size * 0.6
+            hh = base_size * 0.4
+            glBegin(GL_QUADS)
+            glVertex3f(cx - hw, cy + hh, cz)
+            glVertex3f(cx + hw, cy + hh, cz)
+            glVertex3f(cx + hw, cy - hh, cz)
+            glVertex3f(cx - hw, cy - hh, cz)
+            glEnd()
+    
+    @staticmethod
     def _draw_segment(seg: BodySegmentGene):
         """Draw a body segment."""
         color = seg.color[:3] if len(seg.color) >= 3 else seg.color
@@ -942,7 +1040,7 @@ class AnimalManager:
                 animal._cached_vz = getattr(animal, 'vz', 0)
     
     def render(self, camera_x: float, camera_y: float, camera_z: float):
-        """Render nearby animals with LOD - optimized with squared distances."""
+        """Render nearby animals with LOD - optimized with squared distances and shape-aware billboards."""
         glDisable(GL_LIGHTING)
         
         # Pre-compute squared thresholds (avoid sqrt per animal!)
@@ -950,14 +1048,18 @@ class AnimalManager:
         simple_sq = self.LOD_SIMPLE * self.LOD_SIMPLE
         point_sq = self.LOD_POINT * self.LOD_POINT
         
+        # Extended range for billboards
+        billboard_far_sq = (self.LOD_POINT * 1.5) ** 2  # 525 units
+        billboard_horizon_sq = (self.LOD_POINT * 2.0) ** 2  # 700 units
+        
         full_animals = []
         simple_animals = []
-        point_animals = []
+        billboard_animals = []  # (animal, scale) tuples
         
         for animal in self.animals:
             dist_sq = (animal.x - camera_x)**2 + (animal.z - camera_z)**2
             
-            if dist_sq > point_sq:
+            if dist_sq > billboard_horizon_sq:
                 continue
             
             # Use squared distances - no sqrt needed!
@@ -965,8 +1067,15 @@ class AnimalManager:
                 full_animals.append(animal)
             elif dist_sq < simple_sq:
                 simple_animals.append(animal)
+            elif dist_sq < point_sq:
+                # Full-size billboard
+                billboard_animals.append((animal, 1.0))
+            elif dist_sq < billboard_far_sq:
+                # Half-size billboard
+                billboard_animals.append((animal, 0.5))
             else:
-                point_animals.append(animal)
+                # Quarter-size billboard (horizon)
+                billboard_animals.append((animal, 0.25))
         
         # Render each LOD level
         for animal in full_animals:
@@ -975,12 +1084,9 @@ class AnimalManager:
         for animal in simple_animals:
             AnimalRenderer.draw_simple(animal)
         
-        if point_animals:
-            glPointSize(3)
-            glBegin(GL_POINTS)
-            for animal in point_animals:
-                AnimalRenderer.draw_point(animal)
-            glEnd()
+        # Render shape-aware billboards at appropriate scales
+        for animal, scale in billboard_animals:
+            AnimalRenderer.draw_billboard(animal, scale)
         
         glEnable(GL_LIGHTING)
     

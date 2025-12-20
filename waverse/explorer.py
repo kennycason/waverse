@@ -1710,6 +1710,20 @@ class Camera:
         self.prev_y = self.y
         self.prev_z = self.z
     
+    def get_speed(self) -> float:
+        """Get current movement speed (horizontal)."""
+        return math.sqrt(self.velocity_x**2 + self.velocity_z**2) * 60  # Per second
+    
+    def get_speed_3d(self) -> float:
+        """Get current 3D movement speed."""
+        return math.sqrt(self.velocity_x**2 + self.velocity_y**2 + self.velocity_z**2) * 60
+    
+    def get_speed_factor(self) -> float:
+        """Get normalized speed factor (0.0 = still, 1.0 = very fast)."""
+        speed = self.get_speed()
+        # Normalize: walking ~2-5, running ~10, flying fast ~50+
+        return min(1.0, speed / 30.0)
+    
     def jump(self):
         """Start a jump if on the ground and not already jumping/falling."""
         if not self.flying and not self.jumping and not self.falling:
@@ -4059,9 +4073,28 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
             total_animals += len(animals)
         
         _life_start = time.perf_counter()
-        if not (NO_FLORA_UPDATE and NO_ANIMAL_UPDATE):
+        # Graduated life simulation based on speed
+        # speed_factor: 0.0 = still, 0.3 = walking, 0.5 = running, 0.8 = flying fast, 1.0 = max
+        speed_factor = camera.get_speed_factor()
+        
+        # Determine update frequency based on speed (graduated stages)
+        # Normal: every frame, Fast: every 2nd, Faster: every 4th, Max: every 8th
+        if speed_factor < 0.6:
+            life_update_interval = 1  # Every frame (normal walking/running)
+        elif speed_factor < 0.75:
+            life_update_interval = 2  # Every 2nd frame (fast running)
+        elif speed_factor < 0.9:
+            life_update_interval = 4  # Every 4th frame (very fast/flying)
+        else:
+            life_update_interval = 8  # Every 8th frame (max speed flying)
+        
+        should_update_life = (frame_count % life_update_interval == 0)
+        
+        if not (NO_FLORA_UPDATE and NO_ANIMAL_UPDATE) and should_update_life:
+            # Scale dt to compensate for skipped frames
+            effective_dt = dt * life_update_interval
             life_simulator.update(
-                dt,  # Already in seconds (from pygame clock.tick)
+                effective_dt,
                 camera.x, camera.z,
                 is_raining, is_day, sun_intensity,
                 plants_by_chunk, animals_by_chunk,
@@ -4122,12 +4155,18 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
         
         # Render flora - call render_chunk_flora which handles LOD properly
         _flora_start = time.perf_counter()
-        FLORA_RENDER_RADIUS = 12
-        MAX_NEW_CHUNKS_PER_FRAME = 3
+        
+        # Fixed render radius - consistent to avoid flickering
+        # The LOD system handles distance-based simplification naturally
+        FLORA_RENDER_RADIUS = 18
+        height_above_ground = camera.y - chunk_manager.get_height_at(camera.x, camera.z)
+        
+        MAX_NEW_CHUNKS_PER_FRAME = 3  # Limit new chunk processing per frame
         cam_cx, cam_cz = current_chunk
         cam_x, cam_z = cam_pos[0], cam_pos[2]
         new_chunks = 0
         
+        # Render all flora chunks within radius (no frame budget - causes flickering)
         for (cx, cz), (display_list, lod) in chunk_renderer.display_lists.items():
             dx, dz = abs(cx - cam_cx), abs(cz - cam_cz)
             if dx > FLORA_RENDER_RADIUS or dz > FLORA_RENDER_RADIUS:
@@ -4148,7 +4187,8 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
             if not NO_FLORA_RENDER:
                 flora_manager.render_chunk_flora(
                     cx, cz, cam_x, cam_z,
-                    chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE
+                    chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE,
+                    height_above_ground=height_above_ground, speed_factor=speed_factor
                 )
             
             # Spawn animals/structures for new chunks (still need to spawn even if not rendering)
@@ -4165,12 +4205,19 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
         
         # Update animals every few frames for performance
         _animal_start = time.perf_counter()
-        # Update animals every 3rd frame - AI is now optimized with velocity caching
-        if not NO_ANIMAL_UPDATE and frame_count % 3 == 0:
+        # Graduated animal update frequency based on speed
+        if speed_factor < 0.6:
+            animal_update_interval = 3  # Every 3rd frame (normal)
+        elif speed_factor < 0.8:
+            animal_update_interval = 5  # Every 5th frame (fast)
+        else:
+            animal_update_interval = 8  # Every 8th frame (very fast)
+        
+        if not NO_ANIMAL_UPDATE and frame_count % animal_update_interval == 0:
             animal_manager.update(dt, cam_pos, None)
         
-        # Render animals
-        if not NO_ANIMAL_RENDER:
+        # Render animals (skip when very high up - they're invisible anyway)
+        if not NO_ANIMAL_RENDER and height_above_ground < 150:
             animal_manager.render(cam_pos[0], cam_pos[1], cam_pos[2])
         perf.record_time('animal', _animal_start)
         
