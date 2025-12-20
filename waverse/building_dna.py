@@ -330,11 +330,11 @@ class BuildingDNA:
             has_chimney = False
             
         elif building_type == BuildingType.PARKOUR:
-            # Parkour playground - wide area with platforms at various heights
-            width = 25 + rng.random() * 30  # Large footprint
-            depth = 25 + rng.random() * 30
-            floors = 4 + rng.integers(0, 4)  # Multiple "levels" of platforms
-            floor_height = 3.0 + rng.random() * 2.0  # Jump-friendly heights
+            # Parkour playground - MASSIVE play area like a giant cat tower
+            width = 80 + rng.random() * 60  # Huge footprint (80-140 units)
+            depth = 80 + rng.random() * 60
+            floors = 6 + rng.integers(0, 5)  # Many vertical levels (6-10)
+            floor_height = 4.0 + rng.random() * 2.0  # Jump-friendly heights
             roof_type = RoofType.FLAT  # No roof, open air
             wall_style = WallStyle.METAL  # Industrial/gym look
             colors = ColorPalette.random(rng, rng.choice(["industrial", "commercial", "alien"]))
