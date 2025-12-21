@@ -26,10 +26,14 @@ class PlantInstance:
     dna: PlantDNA
     scale: float = 1.0
     rotation: float = 0.0  # Y-axis rotation in degrees
+    render_fraction: float = 1.0  # 0.0-1.0, how much of plant to render (energy-based)
 
 
 class PlantRenderer:
     """Renders individual plants from DNA."""
+    
+    # Class variable for passing render_fraction to static methods
+    _current_render_fraction: float = 1.0
     
     @staticmethod
     def draw_full(plant: PlantInstance):
@@ -37,7 +41,16 @@ class PlantRenderer:
         glPushMatrix()
         glTranslatef(plant.x, plant.y, plant.z)
         glRotatef(plant.rotation, 0, 1, 0)
+        
+        # render_fraction controls how much of the plant to draw (1.0 = full, 0.5 = half)
+        # This is used to show damage/eating - branches disappear from top
+        render_frac = getattr(plant, 'render_fraction', 1.0)
+        
+        # Keep trunk full size - only affect branch rendering
         glScalef(plant.scale, plant.scale, plant.scale)
+        
+        # Store render_fraction for branch methods to use
+        PlantRenderer._current_render_fraction = render_frac
         
         dna = plant.dna
         
@@ -251,6 +264,123 @@ class PlantRenderer:
         glColor3f(*plant.dna.leaf_color.rgb)
         height = plant.dna.height_gene.value * plant.scale
         glVertex3f(plant.x, plant.y + height * 0.5, plant.z)
+    
+    @staticmethod
+    def draw_billboard(plant: PlantInstance, scale: float = 1.0):
+        """Draw plant as a simple 2D shape that matches its silhouette.
+        
+        Different plant types get different shapes:
+        - Trees/pines: Triangle (pointing up)
+        - Bushes/shrubs: Diamond/square
+        - Flowers/grass: Small triangle
+        - Mushrooms: Circle-ish (hexagon)
+        - Palms: Inverted triangle on stick
+        - Cacti: Vertical rectangle
+        """
+        ptype = plant.dna.plant_type
+        # Base size from plant DNA, scaled down to match actual visual size
+        # The 0.4 factor makes billboards more proportional to actual 3D geometry
+        base_height = plant.dna.height_gene.value * plant.scale * 0.4
+        height = base_height * scale
+        width = height * 0.5  # Narrower aspect ratio
+        
+        # Position at plant center
+        cx, cy, cz = plant.x, plant.y + base_height * 0.5, plant.z
+        
+        # Color - use leaf color
+        r, g, b = plant.dna.leaf_color.rgb
+        glColor3f(r, g, b)
+        
+        if ptype in ('tree', 'tall_tree', 'pine', 'willow'):
+            # Triangle pointing up (conifer shape)
+            glBegin(GL_TRIANGLES)
+            glVertex3f(cx, cy + height * 0.5, cz)  # Top
+            glVertex3f(cx - width, cy - height * 0.4, cz)  # Bottom left
+            glVertex3f(cx + width, cy - height * 0.4, cz)  # Bottom right
+            glEnd()
+            
+        elif ptype in ('bush', 'shrub', 'coral'):
+            # Diamond shape (rotated square)
+            hw = width * 0.8
+            glBegin(GL_QUADS)
+            glVertex3f(cx, cy + hw, cz)  # Top
+            glVertex3f(cx - hw, cy, cz)  # Left
+            glVertex3f(cx, cy - hw, cz)  # Bottom
+            glVertex3f(cx + hw, cy, cz)  # Right
+            glEnd()
+            
+        elif ptype == 'mushroom':
+            # Wide dome shape (trapezoid)
+            hw = width * 1.2
+            glBegin(GL_QUADS)
+            glVertex3f(cx - hw * 0.5, cy + height * 0.3, cz)
+            glVertex3f(cx + hw * 0.5, cy + height * 0.3, cz)
+            glVertex3f(cx + hw, cy - height * 0.2, cz)
+            glVertex3f(cx - hw, cy - height * 0.2, cz)
+            glEnd()
+            
+        elif ptype == 'palm':
+            # Trunk + crown (vertical line + triangle on top)
+            tw = width * 0.15
+            # Trunk
+            glBegin(GL_QUADS)
+            glVertex3f(cx - tw, cy + height * 0.3, cz)
+            glVertex3f(cx + tw, cy + height * 0.3, cz)
+            glVertex3f(cx + tw, cy - height * 0.5, cz)
+            glVertex3f(cx - tw, cy - height * 0.5, cz)
+            glEnd()
+            # Crown
+            glBegin(GL_TRIANGLES)
+            glVertex3f(cx, cy + height * 0.5, cz)
+            glVertex3f(cx - width, cy + height * 0.2, cz)
+            glVertex3f(cx + width, cy + height * 0.2, cz)
+            glEnd()
+            
+        elif ptype == 'cactus':
+            # Vertical rectangle
+            hw = width * 0.4
+            glBegin(GL_QUADS)
+            glVertex3f(cx - hw, cy + height * 0.5, cz)
+            glVertex3f(cx + hw, cy + height * 0.5, cz)
+            glVertex3f(cx + hw, cy - height * 0.5, cz)
+            glVertex3f(cx - hw, cy - height * 0.5, cz)
+            glEnd()
+            
+        elif ptype in ('flower', 'grass', 'fern'):
+            # Small triangle
+            hw = width * 0.5
+            hh = height * 0.4
+            glBegin(GL_TRIANGLES)
+            glVertex3f(cx, cy + hh, cz)
+            glVertex3f(cx - hw, cy - hh, cz)
+            glVertex3f(cx + hw, cy - hh, cz)
+            glEnd()
+            
+        elif ptype in ('alien', 'crystal', 'spiral', 'tentacle', 'octopus'):
+            # Star/burst shape (multiple triangles)
+            hw = width * 0.6
+            glBegin(GL_TRIANGLES)
+            # Vertical spike
+            glVertex3f(cx, cy + height * 0.5, cz)
+            glVertex3f(cx - hw * 0.3, cy, cz)
+            glVertex3f(cx + hw * 0.3, cy, cz)
+            # Horizontal spikes
+            glVertex3f(cx + hw, cy + height * 0.1, cz)
+            glVertex3f(cx, cy + height * 0.2, cz)
+            glVertex3f(cx, cy - height * 0.1, cz)
+            glVertex3f(cx - hw, cy + height * 0.1, cz)
+            glVertex3f(cx, cy + height * 0.2, cz)
+            glVertex3f(cx, cy - height * 0.1, cz)
+            glEnd()
+            
+        else:
+            # Default: simple triangle
+            hw = width * 0.5
+            glBegin(GL_TRIANGLES)
+            glVertex3f(cx, cy + height * 0.4, cz)
+            glVertex3f(cx - hw, cy - height * 0.3, cz)
+            glVertex3f(cx + hw, cy - height * 0.3, cz)
+            glEnd()
     
     # === Detailed Drawing Methods ===
     
@@ -925,7 +1055,14 @@ class PlantRenderer:
         # Use a seeded RNG for consistent randomness per plant
         branch_rng = np.random.default_rng(int(dna.species_id) & 0xFFFFFFFF)
         
-        for i in range(dna.branch_count):
+        # Get render_fraction - skip upper branches when damaged
+        render_frac = getattr(PlantRenderer, '_current_render_fraction', 1.0)
+        
+        # Calculate how many branches to draw based on render_fraction
+        # At 100% = all branches, at 50% = half branches (from bottom), at 0% = none
+        branches_to_draw = max(1, int(dna.branch_count * render_frac))
+        
+        for i in range(branches_to_draw):
             angle = (i / max(1, dna.branch_count)) * 360 * dna.branch_spread
             angle += dna.asymmetry * 30 * math.sin(i * 2.5)
             
@@ -1035,7 +1172,15 @@ class PlantRenderer:
     @staticmethod
     def _draw_canopy(dna: PlantDNA, height: float):
         """Draw tree canopy based on shape."""
-        spread = height * dna.canopy_spread * 0.5
+        # Get render_fraction - canopy shrinks when damaged
+        render_frac = getattr(PlantRenderer, '_current_render_fraction', 1.0)
+        
+        # Skip canopy entirely if very damaged
+        if render_frac < 0.2:
+            return
+        
+        # Scale canopy by render_fraction
+        spread = height * dna.canopy_spread * 0.5 * render_frac
         canopy_base = height * 0.5
         
         if dna.canopy_shape == "cone":
@@ -1169,16 +1314,62 @@ class PlantRenderer:
 class FloraManager:
     """Manages plant generation and rendering with LOD and DNA pooling."""
     
-    # LOD distances (in world units)
-    LOD_FULL = 120     # Full 3D geometry
-    LOD_SIMPLE = 300   # Simplified geometry
-    LOD_BILLBOARD = 600  # Just colored points
+    # LOD distances (in world units) - extended for better draw distance
+    LOD_FULL = 80       # Full 3D geometry
+    LOD_SIMPLE = 180    # Simplified geometry
+    LOD_BILLBOARD = 350  # Medium points (size 4)
+    LOD_DISTANT = 500    # Small points (size 2)
+    LOD_HORIZON = 700    # Tiny points (size 1) - just dots on horizon
     
     def __init__(self, world_seed: int = 42):
         self.world_seed = world_seed
         self.dna_pool = DNAPool(world_seed)
         self.chunk_plants: Dict[Tuple[int, int], List[PlantInstance]] = {}
         self.display_lists: Dict[Tuple[int, int], Tuple[int, int, int]] = {}
+    
+    # Max plants - higher cap since rendering is optimized
+    MAX_TOTAL_PLANTS = 16000
+    
+    def cleanup_distant_chunks(self, center_cx: int, center_cz: int, max_distance: int = 15):
+        """Remove plants from distant chunks to prevent memory bloat."""
+        to_remove = []
+        for (cx, cz) in list(self.chunk_plants.keys()):
+            if abs(cx - center_cx) > max_distance or abs(cz - center_cz) > max_distance:
+                to_remove.append((cx, cz))
+        
+        for key in to_remove:
+            if key in self.chunk_plants:
+                del self.chunk_plants[key]
+            if key in self.display_lists:
+                # Delete OpenGL display lists
+                for dl in self.display_lists[key]:
+                    try:
+                        glDeleteLists(dl, 1)
+                    except:
+                        pass
+                del self.display_lists[key]
+        
+        # Emergency cleanup if still over limit
+        total_plants = sum(len(p) for p in self.chunk_plants.values())
+        if total_plants > self.MAX_TOTAL_PLANTS:
+            # Remove furthest chunks until under limit
+            chunks_by_dist = sorted(
+                self.chunk_plants.keys(),
+                key=lambda c: max(abs(c[0] - center_cx), abs(c[1] - center_cz)),
+                reverse=True
+            )
+            for key in chunks_by_dist:
+                if total_plants <= self.MAX_TOTAL_PLANTS:
+                    break
+                total_plants -= len(self.chunk_plants[key])
+                del self.chunk_plants[key]
+                if key in self.display_lists:
+                    for dl in self.display_lists[key]:
+                        try:
+                            glDeleteLists(dl, 1)
+                        except:
+                            pass
+                    del self.display_lists[key]
     
     def get_plants_for_chunk(self, cx: int, cz: int, heightmap, 
                              chunk_world_x: float, chunk_world_z: float,
@@ -1187,6 +1378,12 @@ class FloraManager:
         key = (cx, cz)
         if key in self.chunk_plants:
             return self.chunk_plants[key]
+        
+        # Don't spawn if at capacity - return empty
+        total = sum(len(p) for p in self.chunk_plants.values())
+        if total >= self.MAX_TOTAL_PLANTS:
+            self.chunk_plants[key] = []  # Mark as processed but empty
+            return []
         
         # Get DNA species for this chunk (with neighbor crossover)
         chunk_dna_list = self.dna_pool.get_dna_for_chunk(cx, cz)
@@ -1198,11 +1395,12 @@ class FloraManager:
         plants = []
         h, w = heightmap.shape
         
-        # Place plants using chunk's DNA species (reduced for perf with new branching)
-        num_plants = rng.integers(12, 28)
+        # Place plants - increased density since rendering is optimized
+        # ~625 nearby chunks (radius 12) * 15-25 plants = 9,375-15,625 rendered
+        num_plants = rng.integers(15, 25)
         
-        # Also spawn underwater plants
-        num_underwater = rng.integers(5, 15)
+        # Underwater plants  
+        num_underwater = rng.integers(5, 12)
         
         for _ in range(num_plants + num_underwater):
             local_x = rng.integers(2, w - 2)
@@ -1306,23 +1504,40 @@ class FloraManager:
             PlantRenderer.draw_simple(plant)
         glEndList()
         
-        # Point sprites
-        point_list = glGenLists(1)
-        glNewList(point_list, GL_COMPILE)
-        glPointSize(4)
-        glBegin(GL_POINTS)
+        # Billboard list at scale 1.0 (for medium distance)
+        billboard_list = glGenLists(1)
+        glNewList(billboard_list, GL_COMPILE)
         for plant in plants:
-            PlantRenderer.draw_point(plant)
-        glEnd()
+            PlantRenderer.draw_billboard(plant, scale=1.0)
         glEndList()
         
-        self.display_lists[key] = (full_list, simple_list, point_list)
+        # Billboard list at scale 0.5 (for far distance)
+        billboard_small_list = glGenLists(1)
+        glNewList(billboard_small_list, GL_COMPILE)
+        for plant in plants:
+            PlantRenderer.draw_billboard(plant, scale=0.5)
+        glEndList()
+        
+        # Billboard list at scale 0.25 (for horizon)
+        billboard_tiny_list = glGenLists(1)
+        glNewList(billboard_tiny_list, GL_COMPILE)
+        for plant in plants:
+            PlantRenderer.draw_billboard(plant, scale=0.25)
+        glEndList()
+        
+        self.display_lists[key] = (full_list, simple_list, billboard_list, billboard_small_list, billboard_tiny_list)
         return self.display_lists[key]
     
     def render_chunk_flora(self, cx: int, cz: int, camera_x: float, camera_z: float,
                            heightmap, chunk_world_x: float, chunk_world_z: float,
-                           tile_scale: float, height_scale: float = 3.5):
-        """Render plants for a chunk with appropriate LOD."""
+                           tile_scale: float, height_scale: float = 3.5,
+                           height_above_ground: float = 0, speed_factor: float = 0):
+        """Render plants for a chunk with appropriate LOD.
+        
+        Args:
+            height_above_ground: Camera height above terrain (unused, kept for API compat)
+            speed_factor: Movement speed 0-1 (unused, kept for API compat)
+        """
         plants = self.get_plants_for_chunk(
             cx, cz, heightmap, chunk_world_x, chunk_world_z, tile_scale, height_scale
         )
@@ -1330,7 +1545,10 @@ class FloraManager:
         if not plants:
             return
         
-        full_list, simple_list, point_list = self.create_display_lists(cx, cz, plants)
+        lists = self.create_display_lists(cx, cz, plants)
+        full_list, simple_list, billboard_list = lists[0], lists[1], lists[2]
+        billboard_small = lists[3] if len(lists) > 3 else billboard_list
+        billboard_tiny = lists[4] if len(lists) > 4 else billboard_small
         
         # Distance to chunk center
         chunk_center_x = chunk_world_x + 16 * tile_scale
@@ -1339,12 +1557,18 @@ class FloraManager:
         
         glDisable(GL_LIGHTING)
         
+        # Simple distance-based LOD - no speed/height adjustments for consistent rendering
         if dist < self.LOD_FULL:
             glCallList(full_list)
         elif dist < self.LOD_SIMPLE:
             glCallList(simple_list)
         elif dist < self.LOD_BILLBOARD:
-            glCallList(point_list)
+            glCallList(billboard_list)  # Full-size billboards (scale 1.0)
+        elif dist < self.LOD_DISTANT:
+            glCallList(billboard_small)  # Half-size billboards (scale 0.5)
+        elif dist < self.LOD_HORIZON:
+            glCallList(billboard_tiny)  # Quarter-size billboards (scale 0.25)
+        # Beyond LOD_HORIZON: skip entirely
         
         glEnable(GL_LIGHTING)
     

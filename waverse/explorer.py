@@ -16,6 +16,7 @@ import random
 from .chunk_dna import ChunkDNAManager, ChunkDNA, TerrainPalette
 from .climate import ClimateManager, WeatherRenderer
 from .structures import StructureManager, Structure
+from .life import LifeSimulator
 
 try:
     from OpenGL.GL import *
@@ -33,6 +34,170 @@ from .animals import AnimalManager
 from .chunk_worker import ChunkWorker
 
 
+# =============================================================================
+# PERFORMANCE MONITOR - Press SPACE to dump stats
+# =============================================================================
+class PerfMonitor:
+    """Lightweight performance monitoring - only tracks on demand."""
+    
+    def __init__(self):
+        self.enabled = False  # Full tracking off by default
+        self.show_overlay = False  # Mini HUD overlay
+        
+        # Ring buffers for rolling averages (last 60 frames)
+        self.frame_times = []
+        self.life_times = []
+        self.render_times = []
+        self.flora_times = []
+        self.animal_times = []
+        self.chunk_times = []
+        self.max_samples = 60
+        
+        # Current frame timing (temp storage)
+        self.current = {}
+        
+        # Counts
+        self.plant_count = 0
+        self.animal_count = 0
+        self.egg_count = 0
+        self.chunk_count = 0
+        self.structure_count = 0
+        
+        # Slow frame detection
+        self.slow_frames = 0
+        self.slow_threshold_ms = 33.0  # > 30fps = slow
+        
+        # Last dump time (avoid spam)
+        self.last_dump = 0
+    
+    def start_frame(self):
+        """Start timing a frame."""
+        self.current['frame_start'] = time.perf_counter()
+        
+    def end_frame(self):
+        """End frame timing and record."""
+        if 'frame_start' not in self.current:
+            return
+        frame_ms = (time.perf_counter() - self.current['frame_start']) * 1000
+        self.frame_times.append(frame_ms)
+        if len(self.frame_times) > self.max_samples:
+            self.frame_times.pop(0)
+        
+        # Track slow frames
+        if frame_ms > self.slow_threshold_ms:
+            self.slow_frames += 1
+    
+    def time_section(self, name: str):
+        """Context manager to time a section."""
+        return _PerfSection(self, name)
+    
+    def record_time(self, name: str, start_time: float):
+        """Record time for a named section."""
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+        buffer = getattr(self, f'{name}_times', None)
+        if buffer is not None:
+            buffer.append(elapsed_ms)
+            if len(buffer) > self.max_samples:
+                buffer.pop(0)
+    
+    def update_counts(self, plants: int, animals: int, eggs: int, chunks: int, structures: int):
+        """Update entity counts."""
+        self.plant_count = plants
+        self.animal_count = animals
+        self.egg_count = eggs
+        self.chunk_count = chunks
+        self.structure_count = structures
+    
+    def get_avg(self, times: list) -> float:
+        """Get average from buffer."""
+        return sum(times) / len(times) if times else 0.0
+    
+    def get_max(self, times: list) -> float:
+        """Get max from buffer."""
+        return max(times) if times else 0.0
+    
+    def dump_stats(self):
+        """Print detailed performance stats."""
+        now = time.time()
+        if now - self.last_dump < 0.5:  # Cooldown
+            return
+        self.last_dump = now
+        
+        print("\n" + "=" * 70)
+        print("  PERFORMANCE STATS (last 60 frames)")
+        print("=" * 70)
+        
+        # Frame times
+        avg_frame = self.get_avg(self.frame_times)
+        max_frame = self.get_max(self.frame_times)
+        fps = 1000 / avg_frame if avg_frame > 0 else 0
+        print(f"  FRAME TIME: avg={avg_frame:.1f}ms  max={max_frame:.1f}ms  fps={fps:.0f}")
+        print(f"  SLOW FRAMES: {self.slow_frames} (>{self.slow_threshold_ms:.0f}ms)")
+        
+        # Section breakdown
+        print("\n  BREAKDOWN (avg/max ms):")
+        print(f"    Life Sim:   {self.get_avg(self.life_times):6.1f} / {self.get_max(self.life_times):.1f}")
+        print(f"    Render:     {self.get_avg(self.render_times):6.1f} / {self.get_max(self.render_times):.1f}")
+        print(f"    Flora:      {self.get_avg(self.flora_times):6.1f} / {self.get_max(self.flora_times):.1f}")
+        print(f"    Animals:    {self.get_avg(self.animal_times):6.1f} / {self.get_max(self.animal_times):.1f}")
+        print(f"    Chunks:     {self.get_avg(self.chunk_times):6.1f} / {self.get_max(self.chunk_times):.1f}")
+        
+        # Entity counts
+        print("\n  ENTITY COUNTS:")
+        print(f"    Plants:     {self.plant_count:6d}")
+        print(f"    Animals:    {self.animal_count:6d}")
+        print(f"    Eggs:       {self.egg_count:6d}")
+        print(f"    Chunks:     {self.chunk_count:6d}")
+        print(f"    Structures: {self.structure_count:6d}")
+        
+        # Suggestions - realistic thresholds
+        print("\n  POTENTIAL ISSUES:")
+        issues_found = False
+        if self.get_avg(self.life_times) > 15:
+            print(f"    ⚠ Life sim slow ({self.get_avg(self.life_times):.1f}ms)")
+            issues_found = True
+        if self.plant_count > 12000:
+            print(f"    ⚠ High plant count ({self.plant_count}) - cleanup running?")
+            issues_found = True
+        if self.animal_count > 850:
+            print(f"    ⚠ High animal count ({self.animal_count})")
+            issues_found = True
+        if self.get_avg(self.flora_times) > 30:
+            print(f"    ⚠ Flora render slow ({self.get_avg(self.flora_times):.1f}ms)")
+            issues_found = True
+        if self.get_max(self.frame_times) > 200:
+            print(f"    ⚠ Frame spikes ({self.get_max(self.frame_times):.0f}ms max) - loading new areas?")
+            issues_found = True
+        if not issues_found:
+            print("    ✓ Performance looks good!")
+        
+        print("=" * 70 + "\n")
+    
+    def toggle_overlay(self):
+        """Toggle mini performance overlay."""
+        self.show_overlay = not self.show_overlay
+        print(f"  Perf overlay: {'ON' if self.show_overlay else 'OFF'}")
+    
+    def reset_slow_frames(self):
+        """Reset slow frame counter."""
+        self.slow_frames = 0
+
+
+class _PerfSection:
+    """Context manager for timing sections."""
+    def __init__(self, monitor: PerfMonitor, name: str):
+        self.monitor = monitor
+        self.name = name
+        self.start = 0
+        
+    def __enter__(self):
+        self.start = time.perf_counter()
+        return self
+        
+    def __exit__(self, *args):
+        self.monitor.record_time(self.name, self.start)
+
+
 # Configuration - open world style
 HEIGHT_SCALE = 3.5
 TERRAIN_SCALE = TILE_SCALE
@@ -42,8 +207,12 @@ CHUNK_RENDER_DISTANCE = 20  # Massive view distance!
 PLAYER_HEIGHT = 2.5  # Eye height above ground (shorter = world feels bigger, fits through doors)
 WALK_SMOOTH_SPEED = 0.4  # Faster terrain following
 
-# Speed levels (keys: ` 1 2 3 4 5) - extended for faster flight
-SPEED_LEVELS = [0.05, 0.15, 0.3, 0.6, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0, 256.0]  # Ultra-slow to ludicrous
+# Speed levels - more granular at low end for smooth walking
+SPEED_LEVELS = [
+    0.02, 0.05, 0.08, 0.12, 0.18, 0.25, 0.35, 0.5,  # Walking speeds (8 levels)
+    0.7, 1.0, 1.5, 2.0, 3.0, 4.0,                    # Jogging/running (6 levels)
+    6.0, 10.0, 16.0, 32.0, 64.0, 128.0, 256.0        # Flying speeds (7 levels)
+]  # 21 total speed levels
 
 # LOD settings - aggressive LOD for huge view distance
 LOD_FULL_DISTANCE = 5      # Full detail within this range
@@ -676,15 +845,116 @@ def log_dna_at_cursor(camera, flora_manager, animal_manager):
         return None
 
 
-def modify_terrain_at_cursor(camera, chunk_manager, mode: str = "MINE", amount: float = 2.0, set_status: bool = True):
-    """Modify terrain at cursor position (MINE = lower, FILL = raise).
+def _set_terrain_height_at_world_pos(chunk_manager, world_x, world_z, delta, modified_chunks):
+    """Set terrain height at a world position, updating ALL chunks that share this vertex.
+    
+    Chunk boundaries share vertices - a vertex at (32*TILE_SCALE, z) is stored in both:
+    - chunk(0, cz).heightmap[z, 32] (right edge)
+    - chunk(1, cz).heightmap[z, 0] (left edge)
+    
+    We must update ALL chunks that contain this vertex to prevent rips.
+    """
+    # Chunk world size (32 tiles * TILE_SCALE per tile)
+    chunk_world_size = CHUNK_SIZE * TILE_SCALE
+    
+    # Find the primary chunk this point is in (use floor for correct negative handling)
+    primary_cx = int(np.floor(world_x / chunk_world_size))
+    primary_cz = int(np.floor(world_z / chunk_world_size))
+    
+    chunk = chunk_manager.get_chunk(primary_cx, primary_cz)
+    if chunk is None:
+        return
+    
+    h, w = chunk.heightmap.shape  # Should be 33x33 (CHUNK_SIZE+1)
+    
+    # Calculate local position within chunk (chunk origin is at cx * chunk_world_size)
+    local_x_float = (world_x - primary_cx * chunk_world_size) / TILE_SCALE
+    local_z_float = (world_z - primary_cz * chunk_world_size) / TILE_SCALE
+    
+    # Round to nearest integer vertex
+    local_x = int(round(local_x_float))
+    local_z = int(round(local_z_float))
+    
+    # Clamp to valid range
+    local_x = max(0, min(w - 1, local_x))
+    local_z = max(0, min(h - 1, local_z))
+    
+    # Modify the primary chunk
+    chunk = chunk_manager.get_chunk(primary_cx, primary_cz)
+    if chunk is not None:
+        chunk.heightmap[local_z, local_x] += delta
+        modified_chunks.add((primary_cx, primary_cz))
+        new_height = chunk.heightmap[local_z, local_x]
+    else:
+        return
+    
+    # If on left edge (local_x == 0), also update right edge of chunk to the left
+    if local_x == 0:
+        left_chunk = chunk_manager.get_chunk(primary_cx - 1, primary_cz)
+        if left_chunk is not None:
+            left_chunk.heightmap[local_z, w - 1] = new_height
+            modified_chunks.add((primary_cx - 1, primary_cz))
+    
+    # If on right edge (local_x == w-1), also update left edge of chunk to the right
+    if local_x == w - 1:
+        right_chunk = chunk_manager.get_chunk(primary_cx + 1, primary_cz)
+        if right_chunk is not None:
+            right_chunk.heightmap[local_z, 0] = new_height
+            modified_chunks.add((primary_cx + 1, primary_cz))
+    
+    # If on top edge (local_z == 0), also update bottom edge of chunk above
+    if local_z == 0:
+        top_chunk = chunk_manager.get_chunk(primary_cx, primary_cz - 1)
+        if top_chunk is not None:
+            top_chunk.heightmap[h - 1, local_x] = new_height
+            modified_chunks.add((primary_cx, primary_cz - 1))
+    
+    # If on bottom edge (local_z == h-1), also update top edge of chunk below
+    if local_z == h - 1:
+        bottom_chunk = chunk_manager.get_chunk(primary_cx, primary_cz + 1)
+        if bottom_chunk is not None:
+            bottom_chunk.heightmap[0, local_x] = new_height
+            modified_chunks.add((primary_cx, primary_cz + 1))
+    
+    # Handle corners (touch up to 4 chunks)
+    if local_x == 0 and local_z == 0:
+        corner = chunk_manager.get_chunk(primary_cx - 1, primary_cz - 1)
+        if corner is not None:
+            corner.heightmap[h - 1, w - 1] = new_height
+            modified_chunks.add((primary_cx - 1, primary_cz - 1))
+    
+    if local_x == w - 1 and local_z == 0:
+        corner = chunk_manager.get_chunk(primary_cx + 1, primary_cz - 1)
+        if corner is not None:
+            corner.heightmap[h - 1, 0] = new_height
+            modified_chunks.add((primary_cx + 1, primary_cz - 1))
+    
+    if local_x == 0 and local_z == h - 1:
+        corner = chunk_manager.get_chunk(primary_cx - 1, primary_cz + 1)
+        if corner is not None:
+            corner.heightmap[0, w - 1] = new_height
+            modified_chunks.add((primary_cx - 1, primary_cz + 1))
+    
+    if local_x == w - 1 and local_z == h - 1:
+        corner = chunk_manager.get_chunk(primary_cx + 1, primary_cz + 1)
+        if corner is not None:
+            corner.heightmap[0, 0] = new_height
+            modified_chunks.add((primary_cx + 1, primary_cz + 1))
+
+
+def modify_terrain_at_cursor(camera, chunk_manager, mode: str = "MINE", radius: int = 1, amount: float = 2.0, set_status: bool = True):
+    """Modify terrain at cursor position (MINE = lower, FILL = raise) with circular brush.
     
     Args:
         camera: Camera object
         chunk_manager: ChunkManager for terrain access
         mode: "MINE" to lower terrain, "FILL" to raise terrain
+        radius: Brush radius in tiles (1, 2, 4, 8)
         amount: How much to modify (default 2.0 units)
         set_status: Whether to show status message
+        
+    Returns:
+        Set of (cx, cz) chunk keys that were modified, or None if no terrain hit
     """
     # Get look direction
     look_x, look_y, look_z = camera.get_forward_vector()
@@ -718,32 +988,40 @@ def modify_terrain_at_cursor(camera, chunk_manager, mode: str = "MINE", amount: 
             
             # Check if ray is at or below terrain
             if py <= terrain_height:
-                # Found intersection! Modify terrain with smooth falloff
-                brush_radius = 3  # Larger brush for smoother dents
+                # Found intersection! Modify terrain with circular smooth falloff
+                # Brush radius maps: 1->3, 2->5, 4->9, 8->17 for smoother dents
+                brush_radius = radius * 2 + 1
                 delta_base = (-amount if mode == "MINE" else amount) / HEIGHT_SCALE
                 
-                # Apply Gaussian-like falloff over brush area
+                # Track all chunks that get modified
+                modified_chunks = set()
+                
+                # Apply Gaussian-like falloff over brush area using WORLD coordinates
                 for dz in range(-brush_radius, brush_radius + 1):
                     for dx in range(-brush_radius, brush_radius + 1):
-                        nx, nz = local_x + dx, local_z + dz
-                        if 0 <= nx < w and 0 <= nz < h:
-                            # Calculate distance-based falloff (smooth Gaussian-like)
-                            dist = math.sqrt(dx * dx + dz * dz)
-                            if dist <= brush_radius:
-                                # Smooth falloff: 1.0 at center, 0 at edge
-                                falloff = (1.0 - (dist / brush_radius)) ** 2
-                                chunk.heightmap[nz, nx] += delta_base * falloff
+                        # Calculate distance-based falloff (smooth Gaussian-like)
+                        dist = math.sqrt(dx * dx + dz * dz)
+                        if dist > brush_radius:
+                            continue
+                        
+                        # Smooth falloff: 1.0 at center, 0 at edge
+                        falloff = (1.0 - (dist / brush_radius)) ** 2
+                        delta = delta_base * falloff
+                        
+                        # Calculate world position for this brush point
+                        world_x = px + dx * TILE_SCALE
+                        world_z = pz + dz * TILE_SCALE
+                        
+                        # Modify terrain at this world position (handles all chunk boundaries)
+                        _set_terrain_height_at_world_pos(chunk_manager, world_x, world_z, delta, modified_chunks)
                 
                 action = "MINE" if mode == "MINE" else "FILL"
-                print(f"  [{action}] Modified terrain at ({px:.1f}, {pz:.1f})")
+                print(f"  [{action}] Modified terrain at ({px:.1f}, {pz:.1f}) - {len(modified_chunks)} chunks affected")
                 if set_status:
                     camera.set_status(f"{action} at ({px:.0f}, {pz:.0f})", 1.5)
                 
-                # Mark chunk as needing re-render
-                chunk_key = (cx, cz)
-                # The chunk renderer will need to regenerate the display list
-                # We'll handle this by removing from the cache
-                return (cx, cz)
+                # Return all modified chunks so they can be re-rendered
+                return modified_chunks
     
     print(f"  No terrain in range")
     return None
@@ -766,7 +1044,7 @@ def load_position(seed: int) -> dict:
 
 def warp_to_new_universe(camera, chunk_manager, chunk_renderer, flora_manager, 
                          animal_manager, chunk_dna_manager, climate_manager,
-                         structure_manager, config):
+                         structure_manager, config, life_simulator=None):
     """Warp to a far-away location with completely fresh DNA AND terrain - a new waverse!"""
     print("=" * 60)
     print("  WARPING TO NEW WAVERSE...")
@@ -797,6 +1075,11 @@ def warp_to_new_universe(camera, chunk_manager, chunk_renderer, flora_manager,
     chunk_renderer.display_lists.clear()
     flora_manager.chunk_plants.clear()
     flora_manager.display_lists.clear()
+    # Clear cached DNA values from old animals before clearing
+    for animal in animal_manager.animals:
+        for attr in ('_cached_growth', '_cached_metabolism', '_cached_type'):
+            if hasattr(animal, attr):
+                delattr(animal, attr)
     animal_manager.animals.clear()
     animal_manager.chunk_animals.clear()
     structure_manager.structures.clear()
@@ -810,6 +1093,24 @@ def warp_to_new_universe(camera, chunk_manager, chunk_renderer, flora_manager,
     climate_manager.biomes.clear()
     climate_manager.regional_weather.clear()
     climate_manager.seed = new_universe_seed
+    # Reset current weather to safe defaults to prevent HUD rendering bugs
+    from waverse.climate import WeatherState, BiomeDNA
+    climate_manager.current_weather = WeatherState()
+    climate_manager.current_biome = BiomeDNA()
+    climate_manager.lightning_flash = 0.0
+    
+    # Reset life simulator and pause it briefly to let world settle
+    if life_simulator:
+        life_simulator.plant_life.clear()
+        life_simulator.animal_life.clear()
+        life_simulator.eggs.clear()
+        life_simulator.pending_births.clear()
+        life_simulator.pending_plants.clear()
+        life_simulator.chunks_needing_refresh.clear()
+        life_simulator.seed = new_universe_seed
+        life_simulator.rng = random.Random(new_universe_seed)
+        # Pause life sim for 3 seconds to let chunks load
+        life_simulator.update_timer = -3.0
     
     # Reset flora DNA pool with new mutations
     flora_manager.dna_pool.seed = new_universe_seed
@@ -895,15 +1196,24 @@ class Camera:
         self.yaw = 0
         self.pitch = -20
         self.flying = False  # Start in walking mode
+        self.swimming = False  # In water, swim mode (fly but capped at surface)
         self.target_y = 40
-        self.speed_level = 3  # Default speed (0.6x) - index into SPEED_LEVELS
+        self.speed_level = 9  # Default speed (1.0x walking) - index into SPEED_LEVELS
+        
+        # Velocity tracking for HUD display
+        self.prev_x = 0
+        self.prev_y = 40
+        self.prev_z = 0
+        self.velocity_x = 0.0
+        self.velocity_y = 0.0
+        self.velocity_z = 0.0
         
         # Jump/fall physics
         self.jumping = False
         self.falling = False  # Triggered by steep drops (cliff/building edge)
         self.jump_velocity = 0.0
-        self.gravity = 12.0  # Faster gravity for snappier falls
-        self.jump_strength = 1.7  # 2x higher jump - can reach ~2 stories
+        self.gravity = 6.0   # Balanced gravity
+        self.jump_strength = 1.7  # ~2x normal - can reach 1st floor rooftops
         self.last_ground_y = 0.0  # Track previous ground height for cliff detection
         
         # Auto-fly / Tour mode: 0=off, 1=wander, 2=showcase
@@ -931,6 +1241,8 @@ class Camera:
         self.showcase_target_yaw = 0.0    # For smooth camera transitions
         self.showcase_target_pitch = 0.0
         self.showcase_explore_dir = 0.0   # Direction to bias exploration (radians)
+        self.showcase_origin = None       # (x, z) starting point for outward exploration
+        self.showcase_total_distance = 0.0  # Track how far we've traveled
         self.showcase_is_structure = False  # Track if current target is a building
         self.showcase_pan_direction = 1   # -1 = pan left, +1 = pan right
         self.showcase_pan_speed = 8.0     # degrees per second
@@ -943,6 +1255,11 @@ class Camera:
         # Tool system
         self.current_tool_index = 0  # Index into ToolType.ALL_TOOLS
         self.current_tool = ToolType.SCAN
+        self.tool_radius = 1  # Radius for MINE/FILL tools (1, 2, 4, 8)
+        self.tool_radius_sizes = [1, 2, 4, 8]  # Available radius sizes
+        
+        # Running mode
+        self.is_running = False  # B button held = double speed
         
         # Markers for compass (list of (x, z, color, name) tuples)
         self.markers = []
@@ -953,6 +1270,15 @@ class Camera:
         self.menu_tab = 0  # 0 = Inventory, 1 = Log, 2 = Controls
         self.log_index = 0  # Currently selected log item
         self.log_items = []  # List of logged DNA files
+        self.log_filter = 0  # 0 = ALL, 1 = PLANTS, 2 = ANIMALS
+        self.log_filter_names = ["ALL", "PLANTS", "ANIMALS"]
+        
+        # Scroll acceleration state
+        self.scroll_hold_time = 0.0  # How long scroll direction held
+        self.scroll_direction = 0    # -1 = up, 1 = down, 0 = none
+        self.scroll_cooldown = 0.0   # Time until next scroll step
+        self.favorites = set()  # Set of favorite log filenames
+        self._load_favorites()
     
     def set_status(self, message: str, duration: float = 3.0):
         """Set a status message to display at bottom of screen."""
@@ -975,15 +1301,30 @@ class Camera:
             self.refresh_log_items()
             print(f"  [Menu] Opened (was: {was_open})")
         else:
+            # Reset scroll state when closing
+            self.scroll_hold_time = 0.0
+            self.scroll_direction = 0
+            self.scroll_cooldown = 0.0
             print(f"  [Menu] Closed (was: {was_open})")
     
     def refresh_log_items(self):
-        """Refresh list of logged DNA items."""
-        self.log_items = []
+        """Refresh list of logged DNA items, filtered and sorted by favorites."""
+        all_items = []
         if os.path.exists(DNA_LOGS_DIR):
             for f in sorted(os.listdir(DNA_LOGS_DIR), reverse=True):
                 if f.endswith('.json'):
-                    self.log_items.append(f)
+                    # Apply filter
+                    if self.log_filter == 0:  # ALL
+                        all_items.append(f)
+                    elif self.log_filter == 1 and f.startswith('plant_'):  # PLANTS
+                        all_items.append(f)
+                    elif self.log_filter == 2 and f.startswith('animal_'):  # ANIMALS
+                        all_items.append(f)
+        
+        # Sort: favorites first (with star), then by date descending
+        favorites = [f for f in all_items if f in self.favorites]
+        non_favorites = [f for f in all_items if f not in self.favorites]
+        self.log_items = favorites + non_favorites
         self.log_index = min(self.log_index, max(0, len(self.log_items) - 1))
     
     def menu_navigate(self, direction: int):
@@ -991,10 +1332,116 @@ class Camera:
         if self.menu_tab == 1:  # Log tab
             self.log_index = max(0, min(len(self.log_items) - 1, self.log_index + direction))
     
+    def update_scroll(self, dt: float, is_scrolling_up: bool, is_scrolling_down: bool):
+        """Update accelerated scrolling. Returns number of items to scroll."""
+        # Determine current scroll direction
+        new_direction = 0
+        if is_scrolling_up:
+            new_direction = -1
+        elif is_scrolling_down:
+            new_direction = 1
+        
+        # If direction changed or stopped, reset
+        if new_direction != self.scroll_direction:
+            self.scroll_direction = new_direction
+            self.scroll_hold_time = 0.0
+            self.scroll_cooldown = 0.0
+            # Immediate first scroll when starting
+            if new_direction != 0:
+                return new_direction  # Scroll 1 item immediately
+            return 0
+        
+        # Not scrolling
+        if new_direction == 0:
+            return 0
+        
+        # Accumulate hold time
+        self.scroll_hold_time += dt
+        self.scroll_cooldown -= dt
+        
+        # Only scroll when cooldown expires
+        if self.scroll_cooldown > 0:
+            return 0
+        
+        # Calculate scroll speed based on hold time (acceleration)
+        # 0-0.3s: slow (1 item every 0.2s)
+        # 0.3-1s: medium (1 item every 0.1s)  
+        # 1-2s: fast (2 items every 0.08s)
+        # 2s+: very fast (3 items every 0.05s)
+        if self.scroll_hold_time < 0.3:
+            scroll_amount = 1
+            self.scroll_cooldown = 0.2
+        elif self.scroll_hold_time < 1.0:
+            scroll_amount = 1
+            self.scroll_cooldown = 0.1
+        elif self.scroll_hold_time < 2.0:
+            scroll_amount = 2
+            self.scroll_cooldown = 0.08
+        else:
+            scroll_amount = 3
+            self.scroll_cooldown = 0.05
+        
+        return scroll_amount * new_direction
+    
     def menu_switch_tab(self, direction: int):
         """Switch menu tab (direction: -1 = left, 1 = right)."""
         self.menu_tab = (self.menu_tab + direction) % 3  # 3 tabs: Inventory, Log, Controls
     
+    def log_filter_prev(self):
+        """Switch to previous log filter (ALL, PLANTS, ANIMALS)."""
+        self.log_filter = (self.log_filter - 1) % 3
+        self.refresh_log_items()
+        print(f"  Log filter: {self.log_filter_names[self.log_filter]}")
+    
+    def log_filter_next(self):
+        """Switch to next log filter (ALL, PLANTS, ANIMALS)."""
+        self.log_filter = (self.log_filter + 1) % 3
+        self.refresh_log_items()
+        print(f"  Log filter: {self.log_filter_names[self.log_filter]}")
+    
+    def _load_favorites(self):
+        """Load favorites from disk."""
+        favorites_file = os.path.join(WAVERSE_DIR, "favorites.json")
+        try:
+            if os.path.exists(favorites_file):
+                with open(favorites_file, "r") as f:
+                    self.favorites = set(json.load(f))
+        except Exception as e:
+            print(f"  Could not load favorites: {e}")
+            self.favorites = set()
+    
+    def _save_favorites(self):
+        """Save favorites to disk."""
+        favorites_file = os.path.join(WAVERSE_DIR, "favorites.json")
+        try:
+            os.makedirs(WAVERSE_DIR, exist_ok=True)
+            with open(favorites_file, "w") as f:
+                json.dump(list(self.favorites), f)
+        except Exception as e:
+            print(f"  Could not save favorites: {e}")
+    
+    def toggle_log_favorite(self):
+        """Toggle favorite status of currently selected log item."""
+        if 0 <= self.log_index < len(self.log_items):
+            item = self.log_items[self.log_index]
+            if item in self.favorites:
+                self.favorites.discard(item)
+                self.set_status(f"Removed from favorites", 1.5)
+            else:
+                self.favorites.add(item)
+                self.set_status(f"Added to favorites ★", 1.5)
+            self._save_favorites()
+            self.refresh_log_items()  # Re-sort with favorites at top
+    
+    def delete_log_favorite(self):
+        """Remove currently selected log item from favorites."""
+        if 0 <= self.log_index < len(self.log_items):
+            item = self.log_items[self.log_index]
+            if item in self.favorites:
+                self.favorites.discard(item)
+                self._save_favorites()
+                self.refresh_log_items()
+                self.set_status(f"Removed favorite", 1.5)
     
     def next_tool(self):
         """Switch to next tool (R1)."""
@@ -1003,10 +1450,18 @@ class Camera:
         print(f"  Tool: {self.current_tool}")
     
     def prev_tool(self):
-        """Switch to previous tool (L1)."""
+        """Switch to previous tool."""
         self.current_tool_index = (self.current_tool_index - 1) % len(ToolType.ALL_TOOLS)
         self.current_tool = ToolType.ALL_TOOLS[self.current_tool_index]
         print(f"  Tool: {self.current_tool}")
+    
+    def cycle_tool_radius(self):
+        """Cycle through tool radius sizes (for MINE/FILL)."""
+        current_idx = self.tool_radius_sizes.index(self.tool_radius) if self.tool_radius in self.tool_radius_sizes else 0
+        next_idx = (current_idx + 1) % len(self.tool_radius_sizes)
+        self.tool_radius = self.tool_radius_sizes[next_idx]
+        self.set_status(f"Tool radius: {self.tool_radius}", 2.0)
+        print(f"  Tool radius: {self.tool_radius}")
     
     def rotate(self, dx, dy):
         if self.auto_fly_mode > 0:
@@ -1040,14 +1495,21 @@ class Camera:
         """Get terrain height at current position."""
         return chunk_manager.get_height_at(self.x, self.z) * HEIGHT_SCALE
     
-    def move(self, forward, right, up, chunk_manager: ChunkManager, structure_manager=None):
-        # Get current speed based on level
+    def move(self, forward, right, up, chunk_manager: ChunkManager, structure_manager=None, water_level: float = 0.0):
+        # Get current speed based on level, with running multiplier
         speed = BASE_MOVE_SPEED * SPEED_LEVELS[self.speed_level]
+        if self.is_running:
+            speed *= 2.0  # Double speed while running (B held)
+        
+        # Swimming is slower
+        if self.swimming:
+            speed *= 0.7
         
         yaw_rad = math.radians(self.yaw)
         pitch_rad = math.radians(self.pitch)
         
-        if self.flying:
+        if self.flying or self.swimming:
+            # Flying/swimming: move in look direction
             forward_x = -math.sin(yaw_rad) * math.cos(pitch_rad)
             forward_y = math.sin(pitch_rad)
             forward_z = -math.cos(yaw_rad) * math.cos(pitch_rad)
@@ -1092,9 +1554,28 @@ class Camera:
         else:
             effective_ground = terrain_ground
         
-        if self.flying:
+        # Water surface height (scaled)
+        water_surface = water_level * HEIGHT_SCALE + PLAYER_HEIGHT
+        
+        # Check if we should enter/exit swimming mode
+        if not self.flying:
+            # Enter swimming if in water (below water surface and terrain is underwater)
+            if terrain_h < water_level * HEIGHT_SCALE and self.y <= water_surface + 1.0:
+                if not self.swimming:
+                    self.swimming = True
+                    self.set_status("Swimming", 1.5)
+            # Exit swimming if terrain is above water
+            elif terrain_h >= water_level * HEIGHT_SCALE:
+                if self.swimming:
+                    self.swimming = False
+        
+        if self.flying or self.swimming:
             # Calculate new Y position
             new_y = self.y + forward * forward_y * speed + up * speed
+            
+            # Swimming: cap at water surface
+            if self.swimming and new_y > water_surface:
+                new_y = water_surface
             
             # Check for collision at new height (both UP and DOWN movement)
             vertical_blocked = False
@@ -1124,11 +1605,16 @@ class Camera:
                 if new_floor is not None:
                     effective_ground = max(terrain_ground, new_floor + PLAYER_HEIGHT)
             
-            # Land when pressing down and at ground level
-            if up < 0 and self.y <= effective_ground + 0.5:
+            # Land when pressing down and at ground level (not when swimming)
+            if up < 0 and self.y <= effective_ground + 0.5 and not self.swimming:
                 self.y = effective_ground
                 self.flying = False
                 self.target_y = effective_ground
+            
+            # Swimming: exit water by pressing up when above surface and on land
+            if self.swimming and up > 0 and terrain_h >= water_level * HEIGHT_SCALE:
+                self.swimming = False
+                self.y = effective_ground
             
             # Don't go below ground/floor
             if self.y < effective_ground:
@@ -1200,7 +1686,10 @@ class Camera:
                         self.jump_velocity = 0.0
             
             # HARD FLOOR: Never let camera go below terrain on steep hills
-            min_height = terrain_h + PLAYER_HEIGHT + 0.5  # Extra 0.5 buffer
+            # Buffer increased to 2.5 to prevent seeing through ground on slopes
+            # (combined with near clip plane of 1.5, this keeps terrain visible)
+            slope_buffer = 2.5
+            min_height = terrain_h + PLAYER_HEIGHT + slope_buffer
             if self.y < min_height:
                 self.y = min_height
                 self.falling = False
@@ -1212,6 +1701,28 @@ class Camera:
                 self.flying = True
                 self.jumping = False
                 self.y += speed
+        
+        # Update velocity tracking for HUD
+        self.velocity_x = self.x - self.prev_x
+        self.velocity_y = self.y - self.prev_y
+        self.velocity_z = self.z - self.prev_z
+        self.prev_x = self.x
+        self.prev_y = self.y
+        self.prev_z = self.z
+    
+    def get_speed(self) -> float:
+        """Get current movement speed (horizontal)."""
+        return math.sqrt(self.velocity_x**2 + self.velocity_z**2) * 60  # Per second
+    
+    def get_speed_3d(self) -> float:
+        """Get current 3D movement speed."""
+        return math.sqrt(self.velocity_x**2 + self.velocity_y**2 + self.velocity_z**2) * 60
+    
+    def get_speed_factor(self) -> float:
+        """Get normalized speed factor (0.0 = still, 1.0 = very fast)."""
+        speed = self.get_speed()
+        # Normalize: walking ~2-5, running ~10, flying fast ~50+
+        return min(1.0, speed / 30.0)
     
     def jump(self):
         """Start a jump if on the ground and not already jumping/falling."""
@@ -1307,9 +1818,12 @@ class Camera:
             self.showcase_target = None  # Will be set on first update
             self.showcase_phase = 0
             self.showcase_arc_progress = 0.0
-            # Start exploring in current facing direction
-            self.showcase_explore_dir = math.radians(self.yaw)
+            # Set the origin point - we'll always move OUTWARD from here
+            self.showcase_origin = (self.x, self.z)
+            self.showcase_explore_dir = math.radians(self.yaw)  # Initial direction
+            self.showcase_total_distance = 0.0
             self.showcase_is_structure = False
+            print(f"  Showcase origin: ({int(self.x)}, {int(self.z)})")
     
     def update_auto_fly(self, dt: float, chunk_manager: ChunkManager, 
                         flora_manager=None, animal_manager=None, structure_manager=None):
@@ -1463,11 +1977,19 @@ class Camera:
     
     def _pick_showcase_target(self, chunk_manager: ChunkManager, 
                               flora_manager, animal_manager, structure_manager):
-        """Pick a target in the direction we're currently facing (after pan)."""
+        """Pick a target that is FURTHER from origin - always exploring outward."""
         candidates = []
         
-        # Use current yaw as exploration direction (we're facing this way after pan)
-        self.showcase_explore_dir = math.radians(self.yaw)
+        # Calculate current distance from origin
+        if self.showcase_origin is None:
+            self.showcase_origin = (self.x, self.z)
+        origin_x, origin_z = self.showcase_origin
+        current_dist_from_origin = math.sqrt((self.x - origin_x)**2 + (self.z - origin_z)**2)
+        
+        # Update exploration direction: from origin through current position
+        if current_dist_from_origin > 100:
+            # Direction from origin to current position = outward direction
+            self.showcase_explore_dir = math.atan2(self.x - origin_x, self.z - origin_z)
         
         cx, cz = self.get_chunk_pos()
         search_range = 15  # Search much further for distant targets
@@ -1551,19 +2073,50 @@ class Camera:
         if not forward_candidates:
             forward_candidates = [(c, c[5], 0) for c in candidates]
         
-        # Score remaining candidates: prefer distant + well-aligned
+        # Score remaining candidates: STRONGLY prefer targets FURTHER from origin
         scored = []
+        origin_x, origin_z = self.showcase_origin if self.showcase_origin else (self.x, self.z)
+        current_dist_from_origin = math.sqrt((self.x - origin_x)**2 + (self.z - origin_z)**2)
+        
         for cand, dist, dir_diff in forward_candidates:
-            direction_score = 1.0 - (dir_diff / math.radians(45))  # 1.0 = perfect, 0 = 45° off
-            distance_score = dist / 3000.0  # Favor further targets
+            tx, ty, tz = cand[0], cand[1], cand[2]
             
-            score = max(0.1, (direction_score * 2.0) + (distance_score * 1.0))
+            # How far is this target from origin?
+            target_dist_from_origin = math.sqrt((tx - origin_x)**2 + (tz - origin_z)**2)
+            
+            # CRITICAL: Is this target FURTHER from origin than we are?
+            outward_progress = target_dist_from_origin - current_dist_from_origin
+            
+            # Skip targets that would take us backward (closer to origin)
+            if outward_progress < -100:  # Allow small backtracking (100 units)
+                continue
+            
+            # Score heavily based on outward progress
+            outward_score = max(0, outward_progress / 1000.0)  # Huge bonus for going outward
+            direction_score = 1.0 - (dir_diff / math.radians(90))  # Less strict on direction
+            
+            score = max(0.1, (outward_score * 5.0) + (direction_score * 1.0))
             
             # Slight bonus for structures
             if cand[3] == "structure":
                 score += 0.3
             
             scored.append((cand, score))
+        
+        # If all targets were rejected (going backward), pick the one that goes most outward
+        if not scored and forward_candidates:
+            # Fall back: pick the one with best outward progress even if negative
+            best_cand = None
+            best_progress = -99999
+            for cand, dist, dir_diff in forward_candidates:
+                tx, tz = cand[0], cand[2]
+                target_dist_from_origin = math.sqrt((tx - origin_x)**2 + (tz - origin_z)**2)
+                outward_progress = target_dist_from_origin - current_dist_from_origin
+                if outward_progress > best_progress:
+                    best_progress = outward_progress
+                    best_cand = cand
+            if best_cand:
+                scored.append((best_cand, 1.0))
         
         # Weighted random selection
         total_score = sum(s for _, s in scored)
@@ -1587,6 +2140,10 @@ class Camera:
         self.showcase_arc_progress = 0.0
         self.showcase_is_structure = (entity_type == "structure")
         
+        # Track total distance traveled
+        target_dist_from_origin = math.sqrt((target_x - origin_x)**2 + (target_z - origin_z)**2)
+        self.showcase_total_distance = target_dist_from_origin
+        
         # Calculate arc height based on distance
         horiz_dist = math.sqrt((target_x - self.x)**2 + (target_z - self.z)**2)
         height_diff = abs(target_y - self.y)
@@ -1605,8 +2162,11 @@ class Camera:
         else:
             self.showcase_view_distance = 9.0   # Animals
         
-        print(f"  Showcase: flying to {entity_type} ({horiz_dist:.0f}m away)")
-        self.set_status(f"Flying to {entity_type}...")
+        # Show progress from origin
+        origin_x, origin_z = self.showcase_origin if self.showcase_origin else (self.x, self.z)
+        dist_from_origin = math.sqrt((target_x - origin_x)**2 + (target_z - origin_z)**2)
+        print(f"  Showcase: flying to {entity_type} ({horiz_dist:.0f}m away, {dist_from_origin:.0f}m from origin)")
+        self.set_status(f"Flying to {entity_type}... ({int(dist_from_origin)}m explored)")
     
     def maintain_auto_fly_height(self, chunk_manager: ChunkManager):
         """Keep camera at consistent height above terrain during tour mode (wander only)."""
@@ -1637,8 +2197,8 @@ class Camera:
             self.y = min_height
     
     def set_speed(self, level: int):
-        """Set speed level (0-4, corresponds to keys 1-5)."""
-        self.speed_level = max(0, min(4, level))
+        """Set speed level (0 to len(SPEED_LEVELS)-1)."""
+        self.speed_level = max(0, min(len(SPEED_LEVELS) - 1, level))
     
     def apply(self):
         glRotatef(-self.pitch, 1, 0, 0)
@@ -2232,15 +2792,23 @@ def draw_menu(display: tuple, camera: Camera, hud_font=None):
             _draw_text(hud_font, "Inventory (Coming Soon)", menu_x + 20, content_y, (200, 200, 200))
     
     elif camera.menu_tab == 1:  # Log
+        # Draw filter header
+        filter_y = content_y
+        if hud_font:
+            filter_text = f"Filter: [{camera.log_filter_names[camera.log_filter]}]  (D-PAD L/R to change)"
+            _draw_text(hud_font, filter_text, menu_x + 20, filter_y, (150, 200, 255))
+        content_y += 25
+        content_h -= 25
+        
         if len(camera.log_items) == 0:
             if hud_font:
-                _draw_text(hud_font, "No DNA logs yet. Use SCAN tool to log creatures!", 
+                _draw_text(hud_font, "No DNA logs yet. Use SCAN tool (R or R1) to log creatures!", 
                           menu_x + 20, content_y, (200, 200, 200))
         else:
-            # Split: list on left, image preview on right
-            list_width = menu_w * 0.5
-            image_x = menu_x + list_width + 20
-            image_size = min(content_h - 20, menu_w * 0.4)
+            # Split: list on left (narrower), image preview on right (wider)
+            list_width = menu_w * 0.4
+            image_x = menu_x + list_width + 10
+            image_size = min(content_h - 10, menu_w * 0.55)  # Wider image
             
             # Show list of log items on left
             item_h = 24
@@ -2260,8 +2828,9 @@ def draw_menu(display: tuple, camera: Camera, hud_font=None):
                     glVertex2f(menu_x + 10, iy + item_h - 4)
                     glEnd()
                 
-                # Item text
+                # Item text with star for favorites
                 if hud_font:
+                    is_favorite = item in camera.favorites
                     parts = item.replace('.json', '').split('_')
                     if len(parts) >= 3:
                         entity_type = parts[0]
@@ -2271,7 +2840,11 @@ def draw_menu(display: tuple, camera: Camera, hud_font=None):
                     else:
                         display_text = item
                     
-                    color = (100, 200, 255) if start_idx + i == camera.log_index else (180, 180, 180)
+                    # Add star for favorites
+                    if is_favorite:
+                        display_text = "★ " + display_text
+                    
+                    color = (255, 215, 0) if is_favorite else (100, 200, 255) if start_idx + i == camera.log_index else (180, 180, 180)
                     _draw_text(hud_font, display_text, menu_x + 20, iy, color)
             
             # Draw image preview on right side
@@ -2301,15 +2874,17 @@ def draw_menu(display: tuple, camera: Camera, hud_font=None):
                 ("F / Shift", "Go down"),
                 ("[ / -", "Slower speed"),
                 ("] / =", "Faster speed"),
-                ("P", "Screenshot"),
-                ("B", "Use tool"),
+                ("B (hold)", "Run (2x speed)"),
+                ("R", "Use tool (ACTION)"),
                 (", / .", "Switch tool"),
+                ("T", "Cycle tool radius"),
+                ("P", "Screenshot"),
                 ("Tab", "Menu"),
                 ("X", "Tour mode"),
                 ("N", "Warp to new world"),
                 ("M", "Set marker"),
                 ("C", "Clear markers"),
-                ("S", "Save position"),
+                ("O", "Save position"),
             ]
             
             for key, action in controls_kb:
@@ -2328,8 +2903,10 @@ def draw_menu(display: tuple, camera: Camera, hud_font=None):
                 ("R3", "Go up"),
                 ("L2 / R2", "Speed down/up"),
                 ("A", "Jump"),
-                ("B", "Use tool"),
-                ("L1 / R1", "Switch tool"),
+                ("B (hold)", "Run (2x speed)"),
+                ("R1", "Use tool (ACTION)"),
+                ("D-PAD L/R", "Switch tool"),
+                ("L1", "Cycle tool radius"),
                 ("Y", "Screenshot"),
                 ("START", "Menu"),
                 ("SELECT", "Warp to new world"),
@@ -2340,11 +2917,90 @@ def draw_menu(display: tuple, camera: Camera, hud_font=None):
                 _draw_text(hud_font, f"{btn}: {action}", right_col, y, (200, 200, 200))
                 y += line_h
     
-    # Help text at bottom
+    # Help text at bottom (different per tab)
     if hud_font:
         help_y = menu_y + menu_h - 25
-        _draw_text(hud_font, "D-Pad/Stick: Navigate | START: Close", 
-                  menu_x + 20, help_y, (150, 150, 150))
+        if camera.menu_tab == 1:  # LOG tab
+            help_text = "UP/DN: Scroll | L/R: Filter | A: Favorite | SEL: Unfav | L1/R1: Tabs | START: Close"
+        else:
+            help_text = "UP/DN: Navigate | L1/R1: Tabs | START: Close"
+        _draw_text(hud_font, help_text, menu_x + 20, help_y, (150, 150, 150))
+    
+    glDisable(GL_BLEND)
+    glEnable(GL_DEPTH_TEST)
+    glEnable(GL_LIGHTING)
+    
+    glPopMatrix()
+    glMatrixMode(GL_PROJECTION)
+    glPopMatrix()
+    glMatrixMode(GL_MODELVIEW)
+
+
+def draw_perf_overlay(display: tuple, perf: PerfMonitor, hud_font=None):
+    """Draw mini performance overlay in top-right corner."""
+    if not perf.show_overlay:
+        return
+    
+    glMatrixMode(GL_PROJECTION)
+    glPushMatrix()
+    glLoadIdentity()
+    glOrtho(0, display[0], display[1], 0, -1, 1)
+    
+    glMatrixMode(GL_MODELVIEW)
+    glPushMatrix()
+    glLoadIdentity()
+    
+    glDisable(GL_LIGHTING)
+    glDisable(GL_DEPTH_TEST)
+    glEnable(GL_BLEND)
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+    
+    # Background box
+    box_w, box_h = 180, 140
+    box_x = display[0] - box_w - 10
+    box_y = 10
+    
+    glColor4f(0.0, 0.0, 0.0, 0.7)
+    glBegin(GL_QUADS)
+    glVertex2f(box_x, box_y)
+    glVertex2f(box_x + box_w, box_y)
+    glVertex2f(box_x + box_w, box_y + box_h)
+    glVertex2f(box_x, box_y + box_h)
+    glEnd()
+    
+    if hud_font:
+        y = box_y + 8
+        line_h = 16
+        
+        # FPS
+        avg_frame = perf.get_avg(perf.frame_times)
+        fps = 1000 / avg_frame if avg_frame > 0 else 0
+        color = (0, 255, 0) if fps >= 50 else (255, 255, 0) if fps >= 30 else (255, 100, 100)
+        _draw_text(hud_font, f"FPS: {fps:.0f} ({avg_frame:.1f}ms)", box_x + 8, y, color)
+        y += line_h
+        
+        # Life sim
+        life_avg = perf.get_avg(perf.life_times)
+        color = (0, 255, 0) if life_avg < 5 else (255, 255, 0) if life_avg < 15 else (255, 100, 100)
+        _draw_text(hud_font, f"Life: {life_avg:.1f}ms", box_x + 8, y, color)
+        y += line_h
+        
+        # Render
+        render_avg = perf.get_avg(perf.render_times)
+        _draw_text(hud_font, f"Render: {render_avg:.1f}ms", box_x + 8, y, (200, 200, 200))
+        y += line_h
+        
+        # Entity counts
+        _draw_text(hud_font, f"Plants: {perf.plant_count}", box_x + 8, y, (100, 200, 100))
+        y += line_h
+        _draw_text(hud_font, f"Animals: {perf.animal_count}", box_x + 8, y, (200, 150, 100))
+        y += line_h
+        _draw_text(hud_font, f"Chunks: {perf.chunk_count}", box_x + 8, y, (100, 150, 200))
+        y += line_h
+        
+        # Slow frames
+        color = (0, 255, 0) if perf.slow_frames < 5 else (255, 255, 0) if perf.slow_frames < 20 else (255, 100, 100)
+        _draw_text(hud_font, f"Slow: {perf.slow_frames}", box_x + 8, y, color)
     
     glDisable(GL_BLEND)
     glEnable(GL_DEPTH_TEST)
@@ -2377,24 +3033,44 @@ def draw_hud(display: tuple, camera: Camera, sky: SkySystem = None, climate: Cli
     top_bar_h = 36
     
     # Coordinates background (left side, after minimap ~190px)
+    # Expanded to show X, Y, Z positions and dx, dy, dz velocities
     coord_x = 200
-    coord_w = 130  # Sized for ~12 digit coordinates
+    coord_w = 220  # Wider to fit position + velocity columns
+    coord_h = 52   # Taller for 3 rows (X, Y, Z)
     glColor4f(0, 0, 0, 0.6)
     glBegin(GL_QUADS)
-    glVertex2f(coord_x, 10)
-    glVertex2f(coord_x + coord_w, 10)
-    glVertex2f(coord_x + coord_w, 10 + top_bar_h)
-    glVertex2f(coord_x, 10 + top_bar_h)
+    glVertex2f(coord_x, 6)
+    glVertex2f(coord_x + coord_w, 6)
+    glVertex2f(coord_x + coord_w, 6 + coord_h)
+    glVertex2f(coord_x, 6 + coord_h)
     glEnd()
     
     # Draw coordinate text using pygame font if available
+    # Format: X: 123.4  dx: 0.5
+    #         Y: 567.8  dy: 0.0
+    #         Z:  45.2  dz: 0.3
     if hud_font:
-        # X coordinate
-        x_text = f"X: {camera.x:.1f}"
-        y_text = f"Y: {camera.z:.1f}"  # Z is the "Y" in top-down view
+        # Scale velocity for display (multiply by ~60 for per-second)
+        vx = camera.velocity_x * 60
+        vy = camera.velocity_y * 60
+        vz = camera.velocity_z * 60
         
-        _draw_text(hud_font, x_text, coord_x + 10, 14, (255, 180, 100))
-        _draw_text(hud_font, y_text, coord_x + 10, 28, (100, 200, 255))
+        # Position column
+        x_text = f"X: {camera.x:7.1f}"
+        y_text = f"Y: {camera.z:7.1f}"  # Z is the "Y" in top-down view
+        z_text = f"Z: {camera.y:7.1f}"  # Y is height, shown as Z
+        
+        # Velocity column
+        dx_text = f"∂X: {vx:+5.1f}"
+        dy_text = f"∂Y: {vz:+5.1f}"
+        dz_text = f"∂Z: {vy:+5.1f}"
+        
+        _draw_text(hud_font, x_text, coord_x + 5, 10, (255, 180, 100))
+        _draw_text(hud_font, dx_text, coord_x + 115, 10, (200, 150, 80))
+        _draw_text(hud_font, y_text, coord_x + 5, 24, (100, 200, 255))
+        _draw_text(hud_font, dy_text, coord_x + 115, 24, (80, 160, 200))
+        _draw_text(hud_font, z_text, coord_x + 5, 38, (150, 255, 150))
+        _draw_text(hud_font, dz_text, coord_x + 115, 38, (120, 200, 120))
     else:
         # Fallback: draw simple coordinate indicators
         glColor4f(1.0, 0.7, 0.4, 1.0)
@@ -2402,9 +3078,9 @@ def draw_hud(display: tuple, camera: Camera, sky: SkySystem = None, climate: Cli
         glColor4f(0.4, 0.8, 1.0, 1.0)
         _draw_number(coord_x + 10, 32, camera.z)
     
-    # Compass background (2x wider)
+    # Compass background (adjusted position for wider coord box)
     compass_x = coord_x + coord_w + 10
-    compass_w = 400  # 2x wider
+    compass_w = 350  # Slightly narrower to fit
     glColor4f(0, 0, 0, 0.6)
     glBegin(GL_QUADS)
     glVertex2f(compass_x, 10)
@@ -2588,7 +3264,14 @@ def draw_hud(display: tuple, camera: Camera, sky: SkySystem = None, climate: Cli
     glVertex2f(box_x + 10, bar_y + 8)
     glEnd()
     
-    height_pct = min(1, max(0, camera.y / 100))
+    # Clamp height_pct to prevent rendering bugs on bad values
+    try:
+        height_pct = min(1.0, max(0.0, float(camera.y) / 100.0))
+        if not (0.0 <= height_pct <= 1.0):  # Catch NaN
+            height_pct = 0.5
+    except:
+        height_pct = 0.5
+    
     glColor4f(1, 0.8, 0.2, 0.9)
     glBegin(GL_QUADS)
     glVertex2f(box_x + 10, bar_y)
@@ -2624,8 +3307,13 @@ def draw_hud(display: tuple, camera: Camera, sky: SkySystem = None, climate: Cli
         glVertex2f(box_x + box_w/2, time_y + 8)
         glEnd()
         
-        # Time marker
-        time_pct = sky.time
+        # Time marker - clamp to prevent rendering bugs
+        try:
+            time_pct = min(1.0, max(0.0, float(sky.time)))
+            if not (0.0 <= time_pct <= 1.0):  # Catch NaN
+                time_pct = 0.5
+        except:
+            time_pct = 0.5
         marker_x = box_x + 10 + time_pct * (box_w - 20)
         if sky.is_night():
             glColor4f(0.9, 0.9, 1.0, 1.0)  # Moon color
@@ -2656,8 +3344,14 @@ def draw_hud(display: tuple, camera: Camera, sky: SkySystem = None, climate: Cli
         glVertex2f(box_x + 10, climate_y + 6)
         glEnd()
         
-        # Temperature marker
-        temp_x = box_x + 10 + biome.temperature * (box_w - 20)
+        # Temperature marker - clamp to prevent rendering bugs
+        try:
+            temp_val = min(1.0, max(0.0, float(biome.temperature)))
+            if not (0.0 <= temp_val <= 1.0):  # Catch NaN
+                temp_val = 0.5
+        except:
+            temp_val = 0.5
+        temp_x = box_x + 10 + temp_val * (box_w - 20)
         glColor4f(1, 1, 1, 1)
         glBegin(GL_TRIANGLES)
         glVertex2f(temp_x, climate_y - 2)
@@ -2675,14 +3369,21 @@ def draw_hud(display: tuple, camera: Camera, sky: SkySystem = None, climate: Cli
         glVertex2f(box_x + 10, weather_y + 6)
         glEnd()
         
-        # Precipitation fill
-        if weather.precipitation > 0.05:
+        # Precipitation fill - clamp to prevent rendering bugs
+        try:
+            precip_val = min(1.0, max(0.0, float(weather.precipitation)))
+            if not (0.0 <= precip_val <= 1.0):  # Catch NaN
+                precip_val = 0.0
+        except:
+            precip_val = 0.0
+        
+        if precip_val > 0.05:
             if weather.precipitation_type == "snow":
                 glColor4f(0.9, 0.95, 1.0, 0.9)  # White for snow
             else:
                 glColor4f(0.4, 0.6, 0.9, 0.9)  # Blue for rain
             
-            precip_w = weather.precipitation * (box_w - 20)
+            precip_w = precip_val * (box_w - 20)
             glBegin(GL_QUADS)
             glVertex2f(box_x + 10, weather_y)
             glVertex2f(box_x + 10 + precip_w, weather_y)
@@ -2700,7 +3401,15 @@ def draw_hud(display: tuple, camera: Camera, sky: SkySystem = None, climate: Cli
         glVertex2f(box_x + 10, cloud_y + 4)
         glEnd()
         
-        cloud_w = weather.cloud_cover * (box_w - 20)
+        # Cloud cover fill - CLAMP to prevent the white line bug!
+        try:
+            cloud_val = min(1.0, max(0.0, float(weather.cloud_cover)))
+            if not (0.0 <= cloud_val <= 1.0):  # Catch NaN
+                cloud_val = 0.3
+        except:
+            cloud_val = 0.3
+        
+        cloud_w = cloud_val * (box_w - 20)
         glColor4f(0.8, 0.8, 0.85, 0.9)
         glBegin(GL_QUADS)
         glVertex2f(box_x + 10, cloud_y)
@@ -2788,8 +3497,42 @@ def setup_opengl():
     glFogf(GL_FOG_END, 1500)    # Fog fades to horizon
 
 
-def run_explorer(config: WorldConfig = None):
-    """Main explorer loop."""
+def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_flags: dict = None):
+    """Main explorer loop.
+    
+    Args:
+        config: World configuration
+        precompute_chunks: Number of chunks to precompute flora/animals for before starting
+        debug_flags: Optional dict with debug toggles:
+            - no_flora_render: Skip rendering flora
+            - no_flora_update: Skip flora life sim
+            - no_animal_render: Skip rendering animals
+            - no_animal_update: Skip animal AI updates
+    """
+    # Parse debug flags
+    debug_flags = debug_flags or {}
+    NO_FLORA_RENDER = debug_flags.get('no_flora_render', False)
+    NO_FLORA_UPDATE = debug_flags.get('no_flora_update', False)
+    NO_ANIMAL_RENDER = debug_flags.get('no_animal_render', False)
+    NO_ANIMAL_UPDATE = debug_flags.get('no_animal_update', False)
+    MAX_FLORA = debug_flags.get('max_flora')
+    MAX_ANIMALS = debug_flags.get('max_animals')
+    
+    # Apply max flora/animals if specified (will be set on managers after they're created)
+    if MAX_FLORA is not None:
+        print(f"  [CONFIG] max-flora={MAX_FLORA}")
+    if MAX_ANIMALS is not None:
+        from waverse.life import LifeConfig
+        LifeConfig.MAX_TOTAL_ANIMALS = MAX_ANIMALS
+        print(f"  [CONFIG] max-animals={MAX_ANIMALS}")
+    
+    if any([NO_FLORA_RENDER, NO_FLORA_UPDATE, NO_ANIMAL_RENDER, NO_ANIMAL_UPDATE]):
+        print("  [DEBUG FLAGS]", end="")
+        if NO_FLORA_RENDER: print(" no-flora-render", end="")
+        if NO_FLORA_UPDATE: print(" no-flora-update", end="")
+        if NO_ANIMAL_RENDER: print(" no-animal-render", end="")
+        if NO_ANIMAL_UPDATE: print(" no-animal-update", end="")
+        print()
     if not OPENGL_AVAILABLE:
         print("Error: OpenGL not available!")
         return
@@ -2818,7 +3561,9 @@ def run_explorer(config: WorldConfig = None):
     setup_opengl()
     
     glMatrixMode(GL_PROJECTION)
-    gluPerspective(75, display[0]/display[1], 1.0, 2000)  # Wide FOV, near clip at 1.0 to prevent terrain clipping
+    # Near clip at 1.0 - balance between close visibility and z-fighting
+    # Combined with slope_buffer of 2.5, camera stays ~5 units above terrain minimum
+    gluPerspective(75, display[0]/display[1], 1.0, 2000)
     glMatrixMode(GL_MODELVIEW)
     
     # Create world with background chunk worker
@@ -2832,6 +3577,8 @@ def run_explorer(config: WorldConfig = None):
     
     chunk_renderer = ChunkRenderer(chunk_manager, chunk_dna_manager)
     flora_manager = FloraManager(config.seed)
+    if MAX_FLORA is not None:
+        flora_manager.MAX_TOTAL_PLANTS = MAX_FLORA
     animal_manager = AnimalManager(config.seed)
     sky = SkySystem(chunk_dna_manager)
     water_level = config.water_level
@@ -2841,8 +3588,14 @@ def run_explorer(config: WorldConfig = None):
     climate_manager = ClimateManager(config.seed)
     weather_renderer = WeatherRenderer()
     
+    # Life simulation system (growth, death, reproduction)
+    life_simulator = LifeSimulator(config.seed)
+    
     # Structure system (buildings, etc.)
     structure_manager = StructureManager(config.seed)
+    
+    # Performance monitor
+    perf = PerfMonitor()
     
     # Camera - try to load saved position
     camera = Camera()
@@ -2853,11 +3606,16 @@ def run_explorer(config: WorldConfig = None):
         camera.z = saved.get("z", 0)
         camera.yaw = saved.get("yaw", 0)
         camera.pitch = saved.get("pitch", -20)
-        camera.flying = saved.get("flying", True)
-        camera.speed_level = saved.get("speed_level", 2)
+        # ALWAYS start in walking mode - flying is for tour/explore only
+        camera.flying = False
+        camera.speed_level = saved.get("speed_level", 9)  # Default to 1.0x speed
         print(f"  Loaded position: ({camera.x:.0f}, {camera.y:.0f}, {camera.z:.0f})")
+        print(f"  (Starting in WALK mode)")
     else:
+        # New game - start in walking mode at spawn
         camera.y = chunk_manager.get_height_at(0, 0) * HEIGHT_SCALE + 30
+        camera.flying = False  # Walking mode
+        camera.speed_level = 9  # 1.0x speed (comfortable walking pace)
     
     # Pre-load chunks around camera position
     start_chunk = camera.get_chunk_pos()
@@ -2866,6 +3624,64 @@ def run_explorer(config: WorldConfig = None):
     total_chunks = len(chunk_renderer.display_lists)
     print(f"  Loaded {total_chunks} chunks!")
     
+    # Precompute flora/animals if requested (for performance testing)
+    if precompute_chunks > 0:
+        import math as _math
+        # Calculate radius needed for requested chunk count
+        # For a square grid: (2r+1)^2 = num_chunks, so r = (sqrt(num_chunks) - 1) / 2
+        precompute_radius = int(_math.ceil((_math.sqrt(precompute_chunks) - 1) / 2))
+        precompute_radius = max(precompute_radius, 30)  # At least the default load radius
+        
+        print(f"\n  Precomputing {precompute_chunks} chunks (radius={precompute_radius})...")
+        
+        # Generate chunks in expanding spiral from start position
+        scx, scz = start_chunk
+        precomputed = 0
+        
+        # Generate in square rings outward
+        for ring in range(precompute_radius + 1):
+            if precomputed >= precompute_chunks:
+                break
+            
+            # Generate all chunks at this ring distance
+            for dx in range(-ring, ring + 1):
+                for dz in range(-ring, ring + 1):
+                    # Only process chunks on the edge of this ring (or ring 0)
+                    if ring == 0 or abs(dx) == ring or abs(dz) == ring:
+                        if precomputed >= precompute_chunks:
+                            break
+                        
+                        cx, cz = scx + dx, scz + dz
+                        
+                        # Get or generate the terrain chunk
+                        chunk = chunk_manager.get_chunk(cx, cz)
+                        if chunk is None:
+                            continue
+                        
+                        # Generate flora
+                        flora_manager.get_plants_for_chunk(
+                            cx, cz, chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE
+                        )
+                        # Create flora display lists
+                        plants = flora_manager.chunk_plants.get((cx, cz), [])
+                        if plants:
+                            flora_manager.create_display_lists(cx, cz, plants)
+                        # Spawn animals
+                        animal_manager.spawn_animals_for_chunk(
+                            cx, cz, chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE
+                        )
+                        # Spawn structures
+                        structure_manager.spawn_random_buildings(
+                            cx, cz, chunk.world_x, chunk.world_z, chunk.heightmap, HEIGHT_SCALE, TILE_SCALE
+                        )
+                        precomputed += 1
+                        
+                        if precomputed % 500 == 0:
+                            print(f"    Precomputed {precomputed}/{precompute_chunks}...")
+        
+        total_plants = sum(len(p) for p in flora_manager.chunk_plants.values())
+        print(f"  Precomputed {precomputed} chunks: {total_plants} plants, {len(animal_manager.animals)} animals")
+    
     # Initial minimap
     minimap.update(0, 0)
     
@@ -2873,17 +3689,18 @@ def run_explorer(config: WorldConfig = None):
     print(f"  WAVERSE - {config.name}")
     print("=" * 60)
     print("  KEYBOARD:")
-    print("    Movement: WASD/Arrows | H/Space=Up F/Shift=Down")
+    print("    Movement: WASD/Arrows | H/Space=Up F/Shift=Down | B(hold)=Run")
     print("    Camera: IJKL or Right-Click+Mouse")
     print("    Speed: [/- = slower | ]/= = faster")
-    print("    P=Screenshot | B=Use Tool | Tab=Menu | ,/.=Switch Tool | X=Tour | N=Warp")
+    print("    R=ACTION | ,/.=Switch Tool | T=Tool Size | Tab=Menu | P=Screenshot | X=Tour | N=Warp")
+    print("    SPACE=Perf Stats | ENTER=Perf Overlay")
     if gamepad.is_connected():
         print(f"  GAMEPAD ({gamepad.name}):")
         print(f"    Config: L-Stick X={GamepadConfig.L_STICK_X} Y={GamepadConfig.L_STICK_Y}")
         print(f"    Config: R-Stick X={GamepadConfig.R_STICK_X} Y={GamepadConfig.R_STICK_Y}")
-        print("    Left Stick=Move | Right Stick=Look")
-        print("    L3=Down | R3=Up | L2/R2=Speed | A=Jump | B=Use Tool | Y=Screenshot")
-        print("    L1/R1=Switch Tool | START=Menu | SELECT=Warp")
+        print("    Left Stick=Move | Right Stick=Look | B(hold)=Run")
+        print("    L3=Down | R3=Up | L2/R2=Speed | A=Jump | R1=ACTION | Y=Screenshot")
+        print("    DPAD L/R=Switch Tool | L1=Tool Size | START=Menu | SELECT=Warp")
     print("=" * 60 + "\n")
     
     clock = pygame.time.Clock()
@@ -2898,6 +3715,7 @@ def run_explorer(config: WorldConfig = None):
     # Menu toggle handled via JOYBUTTONDOWN event
     
     while running:
+        perf.start_frame()
         frame_count += 1
         dt = clock.tick(60) / 16.67
         
@@ -2925,27 +3743,32 @@ def run_explorer(config: WorldConfig = None):
                     if new_level != camera.speed_level:
                         camera.set_speed(new_level)
                         print(f"  Speed: {SPEED_LEVELS[new_level]:.2f}x")
-                elif event.key == pygame.K_s:
+                elif event.key == pygame.K_o:  # O for Origin/Save
                     save_position(camera, config.seed)
                 elif event.key == pygame.K_p:  # P for Picture/Screenshot
                     take_screenshot(camera)
                 elif event.key == pygame.K_TAB:  # Tab = toggle menu
                     print("  [KEYDOWN] Tab pressed")
                     camera.toggle_menu()
-                elif event.key == pygame.K_b:  # B = use current tool
+                elif event.key == pygame.K_r:  # R = use current tool (ACTION)
                     if camera.current_tool == ToolType.SCAN:
                         log_dna_at_cursor(camera, flora_manager, animal_manager)
                     elif camera.current_tool == ToolType.MINE:
-                        result = modify_terrain_at_cursor(camera, chunk_manager, "MINE")
-                        if result:
-                            # Invalidate chunk display list to force re-render
-                            if result in chunk_renderer.display_lists:
-                                del chunk_renderer.display_lists[result]
+                        modified_chunks = modify_terrain_at_cursor(camera, chunk_manager, "MINE", camera.tool_radius)
+                        if modified_chunks:
+                            # Invalidate all modified chunk display lists to force re-render
+                            for chunk_key in modified_chunks:
+                                if chunk_key in chunk_renderer.display_lists:
+                                    del chunk_renderer.display_lists[chunk_key]
                     elif camera.current_tool == ToolType.FILL:
-                        result = modify_terrain_at_cursor(camera, chunk_manager, "FILL")
-                        if result:
-                            if result in chunk_renderer.display_lists:
-                                del chunk_renderer.display_lists[result]
+                        modified_chunks = modify_terrain_at_cursor(camera, chunk_manager, "FILL", camera.tool_radius)
+                        if modified_chunks:
+                            for chunk_key in modified_chunks:
+                                if chunk_key in chunk_renderer.display_lists:
+                                    del chunk_renderer.display_lists[chunk_key]
+                elif event.key == pygame.K_t:  # T = cycle tool radius (for MINE/FILL)
+                    if camera.current_tool in (ToolType.MINE, ToolType.FILL):
+                        camera.cycle_tool_radius()
                 elif event.key == pygame.K_COMMA:  # , = previous tool
                     camera.prev_tool()
                 elif event.key == pygame.K_PERIOD:  # . = next tool
@@ -2964,7 +3787,13 @@ def run_explorer(config: WorldConfig = None):
                     warp_to_new_universe(camera, chunk_manager, chunk_renderer, 
                                         flora_manager, animal_manager,
                                         chunk_dna_manager, climate_manager,
-                                        structure_manager, config)
+                                        structure_manager, config, life_simulator)
+                elif event.key == pygame.K_SPACE:
+                    # SPACE = dump performance stats
+                    perf.dump_stats()
+                elif event.key == pygame.K_RETURN:
+                    # ENTER = toggle perf overlay
+                    perf.toggle_overlay()
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 3:
                     mouse_look = True
@@ -3032,28 +3861,51 @@ def run_explorer(config: WorldConfig = None):
             # Menu navigation when menu is open
             if camera.menu_open:
                 gp_move = gamepad.get_movement()
+                
+                # Accelerated scrolling for UP/DOWN (DPAD or Left Stick)
+                is_scrolling_up = gp_move[0] < -0.5 or gamepad.get_dpad(GamepadConfig.DPAD_UP)
+                is_scrolling_down = gp_move[0] > 0.5 or gamepad.get_dpad(GamepadConfig.DPAD_DOWN)
+                
+                scroll_amount = camera.update_scroll(dt / 60.0, is_scrolling_up, is_scrolling_down)
+                if scroll_amount != 0:
+                    camera.menu_navigate(scroll_amount)
+                
+                # Other menu controls use cooldown
                 if gamepad_speed_cooldown <= 0:
-                    if gp_move[0] < -0.5 or gamepad.get_dpad(GamepadConfig.DPAD_UP):
-                        camera.menu_navigate(-1)
-                        gamepad_speed_cooldown = 10
-                    elif gp_move[0] > 0.5 or gamepad.get_dpad(GamepadConfig.DPAD_DOWN):
-                        camera.menu_navigate(1)
-                        gamepad_speed_cooldown = 10
-                    if gp_move[1] < -0.5 or gamepad.get_dpad(GamepadConfig.DPAD_LEFT):
+                    # DPAD LEFT/RIGHT = filter between PLANTS and ANIMALS (in LOG tab)
+                    if gamepad.get_dpad(GamepadConfig.DPAD_LEFT):
+                        camera.log_filter_prev()
+                        gamepad_speed_cooldown = 15
+                    elif gamepad.get_dpad(GamepadConfig.DPAD_RIGHT):
+                        camera.log_filter_next()
+                        gamepad_speed_cooldown = 15
+                    
+                    # L1/R1 = switch tabs
+                    if gamepad.get_button(GamepadConfig.L1):
                         camera.menu_switch_tab(-1)
                         gamepad_speed_cooldown = 15
-                    elif gp_move[1] > 0.5 or gamepad.get_dpad(GamepadConfig.DPAD_RIGHT):
+                    elif gamepad.get_button(GamepadConfig.R1):
                         camera.menu_switch_tab(1)
                         gamepad_speed_cooldown = 15
+                    
+                    # A = favorite selected log item
+                    if gamepad.get_button(GamepadConfig.A) and camera.menu_tab == 1:
+                        camera.toggle_log_favorite()
+                        gamepad_speed_cooldown = 20
+                    
+                    # SELECT = delete favorite (in LOG tab)
+                    if gamepad.get_button(GamepadConfig.SELECT) and camera.menu_tab == 1:
+                        camera.delete_log_favorite()
+                        gamepad_speed_cooldown = 20
             
             # Left stick = movement (WASD) - only when menu closed
             if not camera.menu_open:
                 gp_move = gamepad.get_movement()
                 gp_speed = SPEED_LEVELS[camera.speed_level]
-                # Debug: print if movement detected
-                if abs(gp_move[0]) > 0.1 or abs(gp_move[1]) > 0.1:
-                    if frame_count % 30 == 0:  # Print every 0.5 sec
-                        print(f"  [GP] L-Stick: fwd={gp_move[0]:.2f} right={gp_move[1]:.2f}")
+                # Debug: print if movement detected (commented out)
+                # if abs(gp_move[0]) > 0.1 or abs(gp_move[1]) > 0.1:
+                #     if frame_count % 30 == 0:  # Print every 0.5 sec
+                #         print(f"  [GP] L-Stick: fwd={gp_move[0]:.2f} right={gp_move[1]:.2f}")
                 forward += gp_move[0] * dt * gp_speed
                 right += gp_move[1] * dt * gp_speed
             
@@ -3069,6 +3921,11 @@ def run_explorer(config: WorldConfig = None):
             # L2/R2 behavior depends on mode
             l2_val, r2_val = gamepad.get_triggers()
             
+            # Debug ALL axes to find the right one for R2
+            # if frame_count % 60 == 0:
+            #     axes_str = " ".join([f"{i}:{gamepad.get_axis_raw(i):+.2f}" for i in range(6)])
+            #     print(f"  [GP] Axes: {axes_str} | L2={l2_val:.2f} R2={r2_val:.2f}")
+            
             if camera.auto_fly_mode > 0:
                 # TOUR MODE: L2/R2 adjust flight height
                 if l2_val > 0.3:  # L2 = lower height
@@ -3080,44 +3937,64 @@ def run_explorer(config: WorldConfig = None):
             else:
                 # NORMAL MODE: L2/R2 for speed changes (with cooldown)
                 if gamepad_speed_cooldown <= 0:
-                    if l2_val > 0.7:  # L2 = decrease speed
+                    if l2_val > 0.7:  # L2 = decrease speed (faster response)
                         new_level = max(0, camera.speed_level - 1)
                         if new_level != camera.speed_level:
                             camera.set_speed(new_level)
                             print(f"  Speed: {SPEED_LEVELS[new_level]:.2f}x")
-                            gamepad_speed_cooldown = 20  # ~0.33 seconds
-                    elif r2_val > 0.7:  # R2 = increase speed
+                            gamepad_speed_cooldown = 12  # ~0.2 seconds - quick slow down
+                    elif r2_val > 0.7:  # R2 = increase speed (slower response)
                         new_level = min(len(SPEED_LEVELS) - 1, camera.speed_level + 1)
                         if new_level != camera.speed_level:
                             camera.set_speed(new_level)
                             print(f"  Speed: {SPEED_LEVELS[new_level]:.2f}x")
-                            gamepad_speed_cooldown = 20
+                            gamepad_speed_cooldown = 30  # ~0.5 seconds - gradual speed up
             
             # A button = jump (in walk mode) - only when menu closed
             if not camera.menu_open and gamepad.get_button(GamepadConfig.A):
                 camera.jump()
             
-            # B button = use current tool - only when menu closed
-            if not camera.menu_open and gamepad.get_button(GamepadConfig.B) and gamepad_speed_cooldown <= 0:
+            # B button = RUN (doubles speed while held) - only when menu closed
+            b_pressed = gamepad.get_button(GamepadConfig.B)
+            if not camera.menu_open and b_pressed:
+                camera.is_running = True
+                # if frame_count % 30 == 0:
+                #     print(f"  [GP] B pressed - RUNNING")
+            else:
+                camera.is_running = False
+            
+            # R1 button = use current tool (ACTION) - only when menu closed
+            if not camera.menu_open and gamepad.get_button(GamepadConfig.R1) and gamepad_speed_cooldown <= 0:
                 if camera.current_tool == ToolType.SCAN:
                     log_dna_at_cursor(camera, flora_manager, animal_manager)
                 elif camera.current_tool == ToolType.MINE:
-                    result = modify_terrain_at_cursor(camera, chunk_manager, "MINE")
-                    if result and result in chunk_renderer.display_lists:
-                        del chunk_renderer.display_lists[result]
+                    modified_chunks = modify_terrain_at_cursor(camera, chunk_manager, "MINE", camera.tool_radius)
+                    if modified_chunks:
+                        for chunk_key in modified_chunks:
+                            if chunk_key in chunk_renderer.display_lists:
+                                del chunk_renderer.display_lists[chunk_key]
                 elif camera.current_tool == ToolType.FILL:
-                    result = modify_terrain_at_cursor(camera, chunk_manager, "FILL")
-                    if result and result in chunk_renderer.display_lists:
-                        del chunk_renderer.display_lists[result]
+                    modified_chunks = modify_terrain_at_cursor(camera, chunk_manager, "FILL", camera.tool_radius)
+                    if modified_chunks:
+                        for chunk_key in modified_chunks:
+                            if chunk_key in chunk_renderer.display_lists:
+                                del chunk_renderer.display_lists[chunk_key]
                 gamepad_speed_cooldown = 20  # Faster for terrain tools
             
-            # L1 = previous tool, R1 = next tool - only when menu closed
+            # DPAD LEFT/RIGHT = cycle tools - only when menu closed
+            if not camera.menu_open and gamepad_speed_cooldown <= 0:
+                if gamepad.get_dpad(GamepadConfig.DPAD_LEFT):
+                    camera.prev_tool()
+                    gamepad_speed_cooldown = 15
+                elif gamepad.get_dpad(GamepadConfig.DPAD_RIGHT):
+                    camera.next_tool()
+                    gamepad_speed_cooldown = 15
+            
+            # L1 = cycle tool radius (for MINE/FILL) - only when menu closed
             if not camera.menu_open and gamepad.get_button(GamepadConfig.L1) and gamepad_speed_cooldown <= 0:
-                camera.prev_tool()
-                gamepad_speed_cooldown = 15
-            if not camera.menu_open and gamepad.get_button(GamepadConfig.R1) and gamepad_speed_cooldown <= 0:
-                camera.next_tool()
-                gamepad_speed_cooldown = 15
+                if camera.current_tool in (ToolType.MINE, ToolType.FILL):
+                    camera.cycle_tool_radius()
+                    gamepad_speed_cooldown = 15
             
             # Y button = screenshot
             if gamepad.get_button(GamepadConfig.Y) and gamepad_speed_cooldown <= 0:
@@ -3131,13 +4008,18 @@ def run_explorer(config: WorldConfig = None):
                 warp_to_new_universe(camera, chunk_manager, chunk_renderer, 
                                     flora_manager, animal_manager,
                                     chunk_dna_manager, climate_manager,
-                                    structure_manager, config)
+                                    structure_manager, config, life_simulator)
                 gamepad_speed_cooldown = 60  # Longer cooldown for warp
             
         
         # Keyboard space = jump (in walk mode) - only when menu closed
         if not camera.menu_open and keys[pygame.K_SPACE] and not camera.flying:
             camera.jump()
+        
+        # Keyboard B = run (double speed while held) - OR with gamepad B
+        if keys[pygame.K_b]:
+            camera.is_running = True
+        # Don't reset if keyboard B not pressed - gamepad B may have set it
         
         # Auto-fly mode - overrides manual movement
         if camera.auto_fly_mode > 0:
@@ -3147,7 +4029,7 @@ def run_explorer(config: WorldConfig = None):
             right += auto_right
             up += auto_up
         
-        camera.move(forward, right, up, chunk_manager, structure_manager)
+        camera.move(forward, right, up, chunk_manager, structure_manager, water_level)
         
         # Maintain height during auto-fly
         camera.maintain_auto_fly_height(chunk_manager)
@@ -3173,6 +4055,78 @@ def run_explorer(config: WorldConfig = None):
                                climate_manager.current_weather,
                                climate_manager.current_biome)
         
+        # Update life simulation (growth, death, reproduction)
+        is_raining = climate_manager.current_weather in ('rain', 'heavy_rain', 'storm')
+        is_day = sky.time > 0.25 and sky.time < 0.75
+        sun_intensity = max(0, math.sin(sky.time * math.pi * 2 - math.pi/2)) if is_day else 0
+        
+        # Build chunk lookups for life sim
+        plants_by_chunk = {}
+        animals_by_chunk = {}
+        total_plants = 0
+        total_animals = 0
+        for (cx, cz), plants in flora_manager.chunk_plants.items():
+            plants_by_chunk[(cx, cz)] = plants
+            total_plants += len(plants)
+        for (cx, cz), animals in animal_manager.chunk_animals.items():
+            animals_by_chunk[(cx, cz)] = animals
+            total_animals += len(animals)
+        
+        _life_start = time.perf_counter()
+        # Graduated life simulation based on speed
+        # speed_factor: 0.0 = still, 0.3 = walking, 0.5 = running, 0.8 = flying fast, 1.0 = max
+        speed_factor = camera.get_speed_factor()
+        
+        # Determine update frequency based on speed (graduated stages)
+        # Normal: every frame, Fast: every 2nd, Faster: every 4th, Max: every 8th
+        if speed_factor < 0.6:
+            life_update_interval = 1  # Every frame (normal walking/running)
+        elif speed_factor < 0.75:
+            life_update_interval = 2  # Every 2nd frame (fast running)
+        elif speed_factor < 0.9:
+            life_update_interval = 4  # Every 4th frame (very fast/flying)
+        else:
+            life_update_interval = 8  # Every 8th frame (max speed flying)
+        
+        should_update_life = (frame_count % life_update_interval == 0)
+        
+        if not (NO_FLORA_UPDATE and NO_ANIMAL_UPDATE) and should_update_life:
+            # Scale dt to compensate for skipped frames
+            effective_dt = dt * life_update_interval
+            life_simulator.update(
+                effective_dt,
+                camera.x, camera.z,
+                is_raining, is_day, sun_intensity,
+                plants_by_chunk, animals_by_chunk,
+                chunk_size=CHUNK_SIZE * TERRAIN_SCALE,
+                skip_flora=NO_FLORA_UPDATE,
+                skip_animals=NO_ANIMAL_UPDATE
+            )
+        perf.record_time('life', _life_start)
+        
+        # Refresh display lists for chunks where plants changed (eaten/died)
+        if not NO_FLORA_UPDATE:
+            for chunk_key in life_simulator.chunks_needing_refresh:
+                if chunk_key in flora_manager.display_lists:
+                    # Delete old display lists
+                    for dl in flora_manager.display_lists[chunk_key]:
+                        glDeleteLists(dl, 1)
+                    del flora_manager.display_lists[chunk_key]
+            life_simulator.chunks_needing_refresh.clear()
+        
+        # Process pending births - spawn animals from hatched eggs
+        if not NO_ANIMAL_UPDATE:
+            for chunk_key, births in list(life_simulator.pending_births.items()):
+                for birth in births:
+                    # Spawn new animal at the egg's position (on ground)
+                    animal_manager.spawn_baby_animal(
+                        birth['x'], 
+                        birth['y'],  # Egg was on ground
+                        birth['z'],
+                        birth.get('parent_dna', {})
+                    )
+            life_simulator.pending_births.clear()
+        
         # Set sky color and fog based on time of day (now with DNA tint)
         sky_color = sky.get_sky_color()
         glClearColor(*sky_color, 1.0)
@@ -3180,6 +4134,7 @@ def run_explorer(config: WorldConfig = None):
         sky.apply_lighting()
         
         # Render
+        _render_start = time.perf_counter()
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         glLoadIdentity()
         camera.apply()
@@ -3188,41 +4143,93 @@ def run_explorer(config: WorldConfig = None):
         cam_pos = camera.get_pos()
         sky.render(cam_pos[0], cam_pos[1], cam_pos[2])
         
-        # Render clouds
+        # Render clouds with DNA-based visuals
         weather_renderer.render_clouds(cam_pos[0], cam_pos[1], cam_pos[2],
                                        climate_manager.current_weather.cloud_cover,
-                                       climate_manager.time)
+                                       climate_manager.time,
+                                       climate_manager.current_weather.visual_dna)
         
+        _chunk_start = time.perf_counter()
         chunk_renderer.render()
+        perf.record_time('chunk', _chunk_start)
         
-        # Render flora with LOD (cam_pos already set above)
+        # Render flora - call render_chunk_flora which handles LOD properly
+        _flora_start = time.perf_counter()
+        
+        # Fixed render radius - consistent to avoid flickering
+        # The LOD system handles distance-based simplification naturally
+        FLORA_RENDER_RADIUS = 18
+        height_above_ground = camera.y - chunk_manager.get_height_at(camera.x, camera.z)
+        
+        MAX_NEW_CHUNKS_PER_FRAME = 3  # Limit new chunk processing per frame
+        cam_cx, cam_cz = current_chunk
+        cam_x, cam_z = cam_pos[0], cam_pos[2]
+        new_chunks = 0
+        
+        # Render all flora chunks within radius (no frame budget - causes flickering)
         for (cx, cz), (display_list, lod) in chunk_renderer.display_lists.items():
+            dx, dz = abs(cx - cam_cx), abs(cz - cam_cz)
+            if dx > FLORA_RENDER_RADIUS or dz > FLORA_RENDER_RADIUS:
+                continue
+            
+            key = (cx, cz)
+            
+            # Limit new chunk generation per frame to prevent stutters
+            needs_generation = key not in flora_manager.chunk_plants
+            if needs_generation:
+                if new_chunks >= MAX_NEW_CHUNKS_PER_FRAME:
+                    continue
+                new_chunks += 1
+            
             chunk = chunk_manager.get_chunk(cx, cz)
-            flora_manager.render_chunk_flora(
-                cx, cz, cam_pos[0], cam_pos[2],
-                chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE
-            )
-            # Spawn animals for this chunk if not already done
-            animal_manager.spawn_animals_for_chunk(
-                cx, cz, chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE
-            )
-            # Maybe spawn buildings
-            structure_manager.spawn_random_buildings(
-                cx, cz, chunk.world_x, chunk.world_z, chunk.heightmap, HEIGHT_SCALE, TILE_SCALE
-            )
+            
+            # render_chunk_flora handles display lists and LOD properly
+            if not NO_FLORA_RENDER:
+                flora_manager.render_chunk_flora(
+                    cx, cz, cam_x, cam_z,
+                    chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE,
+                    height_above_ground=height_above_ground, speed_factor=speed_factor
+                )
+            
+            # Spawn animals/structures for new chunks (still need to spawn even if not rendering)
+            if key not in animal_manager.chunk_animals:
+                animal_manager.spawn_animals_for_chunk(
+                    cx, cz, chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE
+                )
+            if needs_generation:
+                structure_manager.spawn_random_buildings(
+                    cx, cz, chunk.world_x, chunk.world_z, chunk.heightmap, HEIGHT_SCALE, TILE_SCALE
+                )
+        
+        perf.record_time('flora', _flora_start)
         
         # Update animals every few frames for performance
-        if frame_count % 3 == 0:  # Update AI every 3rd frame
-            animal_manager.update(dt, cam_pos, None)  # dt is frame count, normalized in update
+        _animal_start = time.perf_counter()
+        # Graduated animal update frequency based on speed
+        if speed_factor < 0.6:
+            animal_update_interval = 3  # Every 3rd frame (normal)
+        elif speed_factor < 0.8:
+            animal_update_interval = 5  # Every 5th frame (fast)
+        else:
+            animal_update_interval = 8  # Every 8th frame (very fast)
         
-        # Render animals
-        animal_manager.render(cam_pos[0], cam_pos[1], cam_pos[2])
+        if not NO_ANIMAL_UPDATE and frame_count % animal_update_interval == 0:
+            animal_manager.update(dt, cam_pos, None)
+        
+        # Render animals (skip when very high up - they're invisible anyway)
+        if not NO_ANIMAL_RENDER and height_above_ground < 150:
+            animal_manager.render(cam_pos[0], cam_pos[1], cam_pos[2])
+        perf.record_time('animal', _animal_start)
+        
+        # Render eggs from life simulation
+        life_simulator.render_eggs(cam_pos[0], cam_pos[2])
         
         # Render structures (buildings)
         structure_manager.render(cam_pos[0], cam_pos[1], cam_pos[2])
         
         # Cleanup distant chunks occasionally
         if frame_count % 60 == 0:
+            flora_manager.cleanup_distant_chunks(current_chunk[0], current_chunk[1])
             animal_manager.cleanup_distant_chunks(current_chunk[0], current_chunk[1])
             chunk_dna_manager.cleanup_distant(current_chunk[0], current_chunk[1])
             climate_manager.cleanup_distant(current_chunk[0], current_chunk[1])
@@ -3236,12 +4243,29 @@ def run_explorer(config: WorldConfig = None):
                                climate_manager.current_weather,
                                climate_manager.lightning_flash)
         
+        perf.record_time('render', _render_start)
+        
+        # Update perf counts (every 30 frames to save CPU)
+        if frame_count % 30 == 0:
+            perf.update_counts(
+                total_plants,
+                total_animals,
+                len(life_simulator.eggs),
+                len(chunk_renderer.display_lists),
+                len(structure_manager.structures)
+            )
+        
         draw_crosshair(display)
         draw_hud(display, camera, sky, climate_manager, hud_font)
         draw_menu(display, camera, hud_font)  # Draw menu overlay if open
         minimap.draw(display, camera.x, camera.z)
         
+        # Perf overlay (if enabled)
+        if perf.show_overlay:
+            draw_perf_overlay(display, perf, hud_font)
+        
         pygame.display.flip()
+        perf.end_frame()
     
     # Cleanup
     chunk_worker.stop()

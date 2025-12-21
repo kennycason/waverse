@@ -256,6 +256,149 @@ def wave_mountain_range(x: np.ndarray, z: np.ndarray, freq: float, amp: float,
     return height * peak_noise * amp
 
 
+def wave_dunes(x: np.ndarray, z: np.ndarray, freq: float, amp: float,
+               direction: float = 0, seed: int = 0) -> np.ndarray:
+    """Rolling sand dune formations with asymmetric profiles."""
+    cos_d, sin_d = np.cos(direction), np.sin(direction)
+    
+    # Rotate coordinates to align with dune direction
+    aligned = x * cos_d + z * sin_d
+    perp = -x * sin_d + z * cos_d
+    
+    # Dune wave with asymmetric profile (gentle windward, steep leeward)
+    dune_phase = aligned * freq + _smooth_noise(perp * freq * 0.3, aligned * freq * 0.1, seed) * 2
+    
+    # Sawtooth-like profile: slow rise, quick drop
+    dune = np.mod(dune_phase, 2 * np.pi) / (2 * np.pi)
+    dune = dune ** 0.7  # Asymmetric
+    
+    # Add some height variation between dunes
+    height_var = 0.7 + 0.3 * _smooth_noise(perp * freq * 0.5, aligned * freq * 0.2, seed + 1)
+    
+    return dune * height_var * amp
+
+
+def wave_mesa(x: np.ndarray, z: np.ndarray, freq: float, amp: float,
+              seed: int = 0, steepness: float = 8.0) -> np.ndarray:
+    """Flat-topped elevated terrain with steep cliff sides."""
+    # Use noise to define mesa regions
+    noise = _smooth_noise(x * freq, z * freq, seed)
+    
+    # Apply sigmoid to create flat tops and steep transitions
+    mesa = 1.0 / (1.0 + np.exp(-steepness * (noise - 0.3)))
+    
+    # Add slight surface variation on top
+    top_detail = _smooth_noise(x * freq * 4, z * freq * 4, seed + 500) * 0.1
+    mesa = mesa + mesa * top_detail
+    
+    return mesa * amp
+
+
+def wave_staircases(x: np.ndarray, z: np.ndarray, freq: float, amp: float,
+                    steps: int = 6, seed: int = 0) -> np.ndarray:
+    """Stepped terrain like rice terraces or geological layers."""
+    # Base slope
+    slope = _smooth_noise(x * freq, z * freq, seed)
+    
+    # Quantize to steps
+    terraced = np.floor(slope * steps) / steps
+    
+    # Add slight slope within each terrace
+    within_step = np.mod(slope * steps, 1.0) * 0.15
+    
+    return (terraced + within_step) * amp
+
+
+def wave_ripples(x: np.ndarray, z: np.ndarray, freq: float, amp: float,
+                 cx: float = 0, cz: float = 0, seed: int = 0) -> np.ndarray:
+    """Concentric ripple patterns with decay."""
+    # Multiple ripple centers from noise
+    n_centers = 3
+    height = np.zeros_like(x)
+    
+    for i in range(n_centers):
+        # Offset center based on seed
+        offset_x = _smooth_noise(i * 100 + seed, 0, seed) * 500
+        offset_z = _smooth_noise(0, i * 100 + seed, seed + 1) * 500
+        
+        dist = np.sqrt((x - cx - offset_x)**2 + (z - cz - offset_z)**2)
+        
+        # Ripple with decay
+        decay = np.exp(-dist * freq * 0.15)
+        ripple = np.sin(dist * freq) * decay
+        height += ripple
+    
+    return height * amp / n_centers
+
+
+def wave_fractured(x: np.ndarray, z: np.ndarray, freq: float, amp: float,
+                   seed: int = 0) -> np.ndarray:
+    """Broken plate-like terrain with visible fracture lines."""
+    # Create voronoi-like regions
+    # Use noise to create cell centers
+    cell_x = np.floor(x * freq + 0.5)
+    cell_z = np.floor(z * freq + 0.5)
+    
+    # Height per cell (constant within cell)
+    cell_height = _smooth_noise(cell_x, cell_z, seed)
+    
+    # Create fracture lines at cell edges using distance to cell center
+    frac_x = np.abs(np.mod(x * freq + 0.5, 1.0) - 0.5) * 2
+    frac_z = np.abs(np.mod(z * freq + 0.5, 1.0) - 0.5) * 2
+    
+    # Combine: lower near edges (fractures)
+    edge_factor = np.minimum(frac_x, frac_z)
+    edge_factor = np.clip(edge_factor * 3, 0, 1)  # Narrow the edge depression
+    
+    return cell_height * edge_factor * amp
+
+
+def wave_eroded(x: np.ndarray, z: np.ndarray, freq: float, amp: float,
+                seed: int = 0) -> np.ndarray:
+    """Simulates eroded terrain with smooth valleys and weathered peaks."""
+    # Base terrain
+    base = _smooth_noise(x * freq, z * freq, seed)
+    
+    # Simulate erosion: smooth the lows, sharpen the highs
+    eroded = np.where(base < 0.5,
+                      base * 0.8,  # Flatten valleys
+                      0.4 + (base - 0.5) * 1.4)  # Preserve peaks
+    
+    # Add drainage patterns (subtle channels)
+    channel_noise = _smooth_noise(x * freq * 3, z * freq * 0.5, seed + 100)
+    channels = np.abs(channel_noise) ** 2
+    
+    return (eroded - channels * 0.1) * amp
+
+
+def wave_volcanic(x: np.ndarray, z: np.ndarray, freq: float, amp: float,
+                  seed: int = 0) -> np.ndarray:
+    """Volcanic terrain with cones and calderas."""
+    height = np.zeros_like(x)
+    
+    # Create several volcanic cones
+    n_volcanoes = 4
+    for i in range(n_volcanoes):
+        # Random volcano position
+        vx = _smooth_noise(i * 1000, seed, seed) * 300 / freq
+        vz = _smooth_noise(seed, i * 1000, seed + 1) * 300 / freq
+        
+        dist = np.sqrt((x - vx)**2 + (z - vz)**2) * freq
+        
+        # Cone shape with caldera (depression at top)
+        cone = np.maximum(0, 1.0 - dist * 1.5)
+        cone = cone ** 1.5  # Steeper sides
+        
+        # Add caldera for larger cones
+        if i == 0:  # Main volcano has caldera
+            caldera = np.exp(-(dist * 8)**2) * 0.4
+            cone = cone - caldera
+        
+        height = np.maximum(height, cone)
+    
+    return height * amp
+
+
 # =============================================================================
 # Simple DNA - Just a list of wave configs
 # =============================================================================
@@ -264,7 +407,8 @@ def wave_mountain_range(x: np.ndarray, z: np.ndarray, freq: float, amp: float,
 class WaveConfig:
     """Configuration for a single wave."""
     # Wave types: sin, cos, sin2d, radial, perlin, ridged, terraces, voronoi,
-    #             cliff, plateau, canyon, crater, mountain_range
+    #             cliff, plateau, canyon, crater, mountain_range,
+    #             dunes, mesa, staircases, ripples, fractured, eroded, volcanic
     wave_type: str = "sin"
     freq: float = 0.01      # Frequency (lower = larger features)
     freq_z: float = None    # Optional separate Z frequency (for sin2d)
@@ -305,8 +449,14 @@ class WorldConfig:
                 # LARGE PLATEAUS - flat elevated regions with sharp edges
                 WaveConfig("plateau", freq=0.0003, amp=18, flatness=0.5),
                 
+                # MESAS - dramatic flat-topped buttes
+                WaveConfig("mesa", freq=0.0005, amp=22, sharpness=10.0),
+                
                 # OCEAN TRENCHES / DEEP LAKES - crater-like depressions
                 WaveConfig("crater", freq=0.0004, amp=-12),  # Negative = depressions
+                
+                # VOLCANIC REGIONS - cones and calderas
+                WaveConfig("volcanic", freq=0.0006, amp=35),
                 
                 # REGIONAL SCALE - large features like mountain ranges, basins
                 WaveConfig("sin", freq=0.0005, amp=6, phase=0.2),
@@ -318,6 +468,9 @@ class WorldConfig:
                 # SECONDARY MOUNTAIN RANGE - different direction
                 WaveConfig("mountain_range", freq=0.0008, amp=18, direction=1.8),
                 
+                # DUNES - rolling sand dune fields
+                WaveConfig("dunes", freq=0.003, amp=8, direction=0.4),
+                
                 # CLIFF LINES - sharp elevation changes
                 WaveConfig("cliff", freq=0.0012, amp=10, direction=0.9, sharpness=6.0),
                 WaveConfig("cliff", freq=0.0015, amp=6, direction=2.2, sharpness=5.0),
@@ -325,12 +478,21 @@ class WorldConfig:
                 # CANYONS - deep linear cuts
                 WaveConfig("canyon", freq=0.001, amp=15, direction=0.5, width=0.12),
                 
+                # FRACTURED TERRAIN - tectonic plate-like regions
+                WaveConfig("fractured", freq=0.002, amp=6),
+                
                 # LOCAL HILLS - smaller undulations
                 WaveConfig("sin2d", freq=0.002, freq_z=0.0018, amp=4),
                 WaveConfig("perlin", freq=0.003, amp=5, octaves=2),
                 
+                # ERODED TERRAIN - weathered valleys
+                WaveConfig("eroded", freq=0.005, amp=4),
+                
                 # RIDGED PEAKS - sharp mountain peaks
                 WaveConfig("ridged", freq=0.004, amp=12, octaves=3),
+                
+                # STEPPED TERRAIN - natural terraces
+                WaveConfig("staircases", freq=0.008, amp=3, levels=5),
                 
                 # DETAIL - small bumps and texture
                 WaveConfig("perlin", freq=0.012, amp=2, octaves=2),
@@ -440,6 +602,14 @@ WAVE_FUNCS = {
     "canyon": wave_canyon,
     "crater": wave_crater,
     "mountain_range": wave_mountain_range,
+    # New creative wave types
+    "dunes": wave_dunes,
+    "mesa": wave_mesa,
+    "staircases": wave_staircases,
+    "ripples": wave_ripples,
+    "fractured": wave_fractured,
+    "eroded": wave_eroded,
+    "volcanic": wave_volcanic,
 }
 
 
@@ -475,6 +645,21 @@ def get_height(config: WorldConfig, x: np.ndarray, z: np.ndarray) -> np.ndarray:
             height += wave_crater(x, z, wave.freq, wave.amp, config.seed)
         elif wave.wave_type == "mountain_range":
             height += wave_mountain_range(x, z, wave.freq, wave.amp, wave.direction, config.seed)
+        # New creative wave types
+        elif wave.wave_type == "dunes":
+            height += wave_dunes(x, z, wave.freq, wave.amp, wave.direction, config.seed)
+        elif wave.wave_type == "mesa":
+            height += wave_mesa(x, z, wave.freq, wave.amp, config.seed, wave.sharpness)
+        elif wave.wave_type == "staircases":
+            height += wave_staircases(x, z, wave.freq, wave.amp, wave.levels, config.seed)
+        elif wave.wave_type == "ripples":
+            height += wave_ripples(x, z, wave.freq, wave.amp, wave.cx, wave.cz, config.seed)
+        elif wave.wave_type == "fractured":
+            height += wave_fractured(x, z, wave.freq, wave.amp, config.seed)
+        elif wave.wave_type == "eroded":
+            height += wave_eroded(x, z, wave.freq, wave.amp, config.seed)
+        elif wave.wave_type == "volcanic":
+            height += wave_volcanic(x, z, wave.freq, wave.amp, config.seed)
         else:
             height += func(x, z, wave.freq, wave.amp, wave.phase, wave.direction)
     

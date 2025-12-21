@@ -384,19 +384,27 @@ def generate_tile_building(x: float, y: float, z: float,
     # =========================================================================
     # GENERATE FLOORS
     # =========================================================================
+    # Check if building is on a slope - needs ground floor if so
+    has_slope = False
+    if terrain_heights is not None:
+        slope = max(terrain_heights) - min(terrain_heights)
+        has_slope = slope > 2.0
+    
     for floor_idx in range(floors):
         floor_y = y + floor_idx * floor_height
         
-        # --- Floor tiles (except ground floor) ---
-        if floor_idx > 0:
+        # --- Floor tiles ---
+        # Add floor for upper floors OR ground floor on slopes (to close the gap)
+        if floor_idx > 0 or has_slope:
             for tx in range(tiles_x):
                 for tz in range(tiles_z):
-                    # Skip ramp opening from below
+                    # Skip ramp opening from below (upper floors only)
                     is_ramp_opening = False
-                    if ramp_direction == "x" and tx in [ramp_tile_x, ramp_tile_x + 1] and tz == ramp_tile_z:
-                        is_ramp_opening = True
-                    elif ramp_direction == "z" and tz in [ramp_tile_z, ramp_tile_z + 1] and tx == ramp_tile_x:
-                        is_ramp_opening = True
+                    if floor_idx > 0:
+                        if ramp_direction == "x" and tx in [ramp_tile_x, ramp_tile_x + 1] and tz == ramp_tile_z:
+                            is_ramp_opening = True
+                        elif ramp_direction == "z" and tz in [ramp_tile_z, ramp_tile_z + 1] and tx == ramp_tile_x:
+                            is_ramp_opening = True
                     
                     if is_ramp_opening:
                         continue
@@ -413,7 +421,16 @@ def generate_tile_building(x: float, y: float, z: float,
                     ))
         
         # --- Walls ---
-        wall_height = floor_height
+        wall_height_base = floor_height
+        
+        # For ground floor on slopes, walls extend down to min terrain
+        if floor_idx == 0 and has_slope and terrain_heights is not None:
+            min_terrain = min(terrain_heights)
+            wall_base = min_terrain - 1.0  # Extend below for safety
+            extended_wall_height = (floor_y + wall_height_base) - wall_base
+        else:
+            wall_base = floor_y
+            extended_wall_height = wall_height_base
         
         def add_wall_segment(wx, wz, rotation, is_door_pos):
             """Add a wall segment, handling doors, windows, and open walls."""
@@ -432,8 +449,8 @@ def generate_tile_building(x: float, y: float, z: float,
                 ))
                 return
             
-            # WINDOW: Add wall with gap in middle
-            if rng.random() < window_chance:
+            # WINDOW: Add wall with gap in middle (only if not ground floor on slope)
+            if rng.random() < window_chance and floor_idx > 0:
                 window_bottom = 1.5
                 window_height = 2.0
                 # Wall below window
@@ -445,15 +462,15 @@ def generate_tile_building(x: float, y: float, z: float,
                 # Wall above window
                 structure.walls.append(Wall(
                     x=wx, y=floor_y + window_bottom + window_height, z=wz,
-                    width=tile_size - 0.2, height=wall_height - window_bottom - window_height,
+                    width=tile_size - 0.2, height=wall_height_base - window_bottom - window_height,
                     thickness=wall_thickness, rotation=rotation, color=wall_color
                 ))
                 return
             
-            # SOLID WALL
+            # SOLID WALL - extend to ground on slopes for floor 0
             structure.walls.append(Wall(
-                x=wx, y=floor_y, z=wz,
-                width=tile_size - 0.2, height=wall_height,
+                x=wx, y=wall_base, z=wz,
+                width=tile_size - 0.2, height=extended_wall_height,
                 thickness=wall_thickness, rotation=rotation, color=wall_color
             ))
         
@@ -540,11 +557,347 @@ def generate_tile_building(x: float, y: float, z: float,
     return structure
 
 
-class StructureRenderer:
-    """Renders structures efficiently."""
+def generate_maze(x: float, y: float, z: float,
+                  width: int = 10, depth: int = 10,
+                  floors: int = 1,
+                  cell_size: float = 6.0,
+                  wall_height: float = 10.0,
+                  seed: int = 42,
+                  terrain_heights: List[float] = None) -> Structure:
+    """Generate a maze structure using recursive backtracking.
     
-    LOD_FULL = 80
-    LOD_SIMPLE = 200
+    Args:
+        x, y, z: World position (center)
+        width, depth: Number of cells in X and Z
+        floors: Number of vertical floors (1 = 2D maze, >1 = 3D maze)
+        cell_size: Size of each cell in world units
+        wall_height: Height of maze walls
+        seed: Random seed for reproducible mazes
+        terrain_heights: Corner heights for pillar generation
+    
+    Returns:
+        Structure with maze walls, floors, and entrance/exit
+    """
+    rng = np.random.default_rng(seed)
+    structure = Structure(x=x, y=y, z=z)
+    
+    # Colors for maze
+    wall_colors = [
+        (0.5, 0.4, 0.3),   # Brown stone
+        (0.55, 0.55, 0.5), # Gray stone
+        (0.4, 0.45, 0.35), # Mossy
+        (0.6, 0.5, 0.4),   # Sandy
+    ]
+    wall_color = wall_colors[rng.integers(0, len(wall_colors))]
+    floor_color = (wall_color[0] * 0.8, wall_color[1] * 0.8, wall_color[2] * 0.8)
+    
+    wall_thickness = 0.5
+    
+    # Maze dimensions in world units
+    maze_width = width * cell_size
+    maze_depth = depth * cell_size
+    half_width = maze_width / 2
+    half_depth = maze_depth / 2
+    
+    # Generate maze using recursive backtracking
+    # Grid: True = wall, False = passage
+    # We use a grid where odd cells are passages and even cells are walls
+    grid_w = width * 2 + 1
+    grid_h = depth * 2 + 1
+    
+    def generate_maze_grid(floor_num: int) -> np.ndarray:
+        """Generate a maze grid for one floor."""
+        floor_seed = seed + floor_num * 1000
+        floor_rng = np.random.default_rng(floor_seed)
+        
+        grid = np.ones((grid_h, grid_w), dtype=bool)  # All walls
+        
+        # Start from random cell
+        start_x = floor_rng.integers(0, width) * 2 + 1
+        start_z = floor_rng.integers(0, depth) * 2 + 1
+        grid[start_z, start_x] = False
+        
+        # Stack for backtracking
+        stack = [(start_x, start_z)]
+        
+        while stack:
+            cx, cz = stack[-1]
+            
+            # Find unvisited neighbors (2 cells away)
+            neighbors = []
+            for dx, dz in [(0, -2), (0, 2), (-2, 0), (2, 0)]:
+                nx, nz = cx + dx, cz + dz
+                if 0 < nx < grid_w - 1 and 0 < nz < grid_h - 1:
+                    if grid[nz, nx]:  # Still a wall (unvisited)
+                        neighbors.append((nx, nz, dx // 2, dz // 2))
+            
+            if neighbors:
+                # Choose random neighbor
+                nx, nz, dx, dz = neighbors[floor_rng.integers(0, len(neighbors))]
+                # Carve path
+                grid[cz + dz, cx + dx] = False  # Wall between
+                grid[nz, nx] = False  # Cell
+                stack.append((nx, nz))
+            else:
+                stack.pop()
+        
+        return grid
+    
+    # Generate each floor
+    for floor_num in range(floors):
+        floor_y = y + floor_num * wall_height
+        grid = generate_maze_grid(floor_num)
+        
+        # Add entrance on first floor (south wall)
+        if floor_num == 0:
+            entrance_x = rng.integers(1, width) * 2
+            grid[0, entrance_x] = False
+            grid[1, entrance_x] = False
+        
+        # Add exit on first floor (north wall)
+        if floor_num == 0:
+            exit_x = rng.integers(1, width) * 2
+            grid[grid_h - 1, exit_x] = False
+            grid[grid_h - 2, exit_x] = False
+        
+        # Add stairs between floors (for 3D maze)
+        if floor_num < floors - 1:
+            # Find a few open cells to add stairs
+            stair_count = max(1, min(3, (width * depth) // 20))
+            stair_cells = []
+            for _ in range(stair_count):
+                for attempt in range(50):
+                    sx = rng.integers(0, width) * 2 + 1
+                    sz = rng.integers(0, depth) * 2 + 1
+                    if not grid[sz, sx] and (sx, sz) not in stair_cells:
+                        stair_cells.append((sx, sz))
+                        break
+            
+            # Add ramps at stair positions
+            for sx, sz in stair_cells:
+                cell_world_x = x - half_width + sx * cell_size / 2
+                cell_world_z = z - half_depth + sz * cell_size / 2
+                
+                structure.ramps.append(Ramp(
+                    x=cell_world_x,
+                    y_bottom=floor_y,
+                    z=cell_world_z,
+                    width=cell_size * 0.8,
+                    length=cell_size * 0.8,
+                    height=wall_height,
+                    rotation=rng.choice([0, 90, 180, 270]),
+                    color=(0.4, 0.35, 0.3)
+                ))
+        
+        # Calculate wall base height - walls should extend to lowest terrain
+        min_terrain = y
+        if terrain_heights and len(terrain_heights) >= 4:
+            min_terrain = min(terrain_heights)
+        
+        # For ground floor, walls extend from min terrain to floor + wall_height
+        if floor_num == 0:
+            wall_base_y = min_terrain - 1.0  # Extend slightly below for safety
+            total_wall_height = (floor_y + wall_height) - wall_base_y
+        else:
+            wall_base_y = floor_y
+            total_wall_height = wall_height
+        
+        # Generate walls from grid - create individual wall segments for each wall cell
+        # This ensures proper maze structure with walls in both directions
+        cell_world_size = cell_size / 2  # Each grid cell is half the cell_size
+        
+        for gz in range(grid_h):
+            for gx in range(grid_w):
+                if not grid[gz, gx]:  # Skip passages
+                    continue
+                    
+                # World position for this wall cell
+                wx = x - half_width + gx * cell_world_size
+                wz = z - half_depth + gz * cell_world_size
+                
+                # Check which neighbors are also walls to determine wall orientation
+                left_wall = gx > 0 and grid[gz, gx - 1]
+                right_wall = gx < grid_w - 1 and grid[gz, gx + 1]
+                up_wall = gz > 0 and grid[gz - 1, gx]
+                down_wall = gz < grid_h - 1 and grid[gz + 1, gx]
+                
+                # Create wall segment based on connectivity
+                horiz = left_wall or right_wall
+                vert = up_wall or down_wall
+                
+                if horiz and not vert:
+                    # Horizontal wall segment
+                    structure.walls.append(Wall(
+                        x=wx, y=wall_base_y, z=wz,
+                        width=cell_world_size + wall_thickness,
+                        height=total_wall_height,
+                        thickness=wall_thickness,
+                        rotation=0,
+                        color=wall_color
+                    ))
+                elif vert and not horiz:
+                    # Vertical wall segment (rotated 90 degrees)
+                    structure.walls.append(Wall(
+                        x=wx, y=wall_base_y, z=wz,
+                        width=cell_world_size + wall_thickness,
+                        height=total_wall_height,
+                        thickness=wall_thickness,
+                        rotation=90,
+                        color=wall_color
+                    ))
+                else:
+                    # Junction or corner - create a small pillar/post
+                    structure.walls.append(Wall(
+                        x=wx, y=wall_base_y, z=wz,
+                        width=wall_thickness * 1.5,
+                        height=total_wall_height,
+                        thickness=wall_thickness * 1.5,
+                        rotation=0,
+                        color=wall_color
+                    ))
+        
+        # ALWAYS add floor for mazes (they need bounded walkspace)
+        structure.floors.append(Floor(
+            x=x, y=floor_y, z=z,
+            width=maze_width + 2,
+            depth=maze_depth + 2,
+            thickness=0.5,  # Thicker for better collision
+            color=floor_color
+        ))
+        
+        # Add ceiling for top floor
+        if floor_num == floors - 1:
+            structure.floors.append(Floor(
+                x=x, y=floor_y + wall_height, z=z,
+                width=maze_width + 2,
+                depth=maze_depth + 2,
+                thickness=0.3,
+                color=floor_color
+            ))
+    
+    # Add support pillars at corners if on slope
+    if terrain_heights and len(terrain_heights) >= 4:
+        min_terrain = min(terrain_heights)
+        if y - min_terrain > 2:
+            corners = [
+                (x - half_width, z - half_depth, terrain_heights[0]),  # -X -Z
+                (x + half_width, z - half_depth, terrain_heights[1]),  # +X -Z
+                (x - half_width, z + half_depth, terrain_heights[2]),  # -X +Z
+                (x + half_width, z + half_depth, terrain_heights[3]),  # +X +Z
+            ]
+            for px, pz, local_ground in corners:
+                if y - local_ground > 1:
+                    structure.pillars.append(Pillar(
+                        x=px, y_bottom=local_ground - 1.0, y_top=y + 0.5, z=pz,
+                        width=1.0,
+                        color=(wall_color[0] * 0.7, wall_color[1] * 0.7, wall_color[2] * 0.7)
+                    ))
+        
+        # Add entry ramp from lowest terrain point to maze floor
+        # Find which edge has lowest terrain
+        edge_heights = [
+            (terrain_heights[0] + terrain_heights[2]) / 2,  # -X edge (west)
+            (terrain_heights[1] + terrain_heights[3]) / 2,  # +X edge (east)
+            (terrain_heights[0] + terrain_heights[1]) / 2,  # -Z edge (south)
+            (terrain_heights[2] + terrain_heights[3]) / 2,  # +Z edge (north)
+        ]
+        lowest_edge = edge_heights.index(min(edge_heights))
+        lowest_height = min(edge_heights)
+        ramp_height_diff = y - lowest_height
+        
+        # Only add ramp if there's a significant height difference
+        if ramp_height_diff > 1.5:
+            ramp_length = max(ramp_height_diff * 2, cell_size * 2)  # 45° or gentler
+            ramp_width = cell_size * 0.8
+            
+            if lowest_edge == 0:  # West edge (-X)
+                rx = x - half_width - ramp_length / 2
+                rz = z
+                ramp_rot = 90
+            elif lowest_edge == 1:  # East edge (+X)
+                rx = x + half_width + ramp_length / 2
+                rz = z
+                ramp_rot = 270
+            elif lowest_edge == 2:  # South edge (-Z)
+                rx = x
+                rz = z - half_depth - ramp_length / 2
+                ramp_rot = 0
+            else:  # North edge (+Z)
+                rx = x
+                rz = z + half_depth + ramp_length / 2
+                ramp_rot = 180
+            
+            structure.ramps.append(Ramp(
+                x=rx,
+                y_bottom=lowest_height,
+                z=rz,
+                width=ramp_width,
+                length=ramp_length,
+                height=ramp_height_diff,
+                rotation=ramp_rot,
+                color=(floor_color[0] * 0.9, floor_color[1] * 0.9, floor_color[2] * 0.9)
+            ))
+    
+    structure.compute_bounds()
+    return structure
+
+
+class StructureRenderer:
+    """Renders structures efficiently with display list caching."""
+    
+    LOD_FULL = 100       # Full detail
+    LOD_SIMPLE = 250     # Simplified (skip small details)
+    LOD_BILLBOARD = 500  # Just a colored box
+    
+    # Display list cache: structure id -> (full_list, simple_list)
+    _display_lists: Dict[int, Tuple[int, int]] = {}
+    
+    @classmethod
+    def create_display_list(cls, structure: Structure) -> Tuple[int, int]:
+        """Create display lists for a structure (full and simple)."""
+        struct_id = id(structure)
+        
+        # Check cache first
+        if struct_id in cls._display_lists:
+            return cls._display_lists[struct_id]
+        
+        # Create FULL detail display list
+        full_list = glGenLists(1)
+        glNewList(full_list, GL_COMPILE)
+        for wall in structure.walls:
+            cls._draw_wall(wall)
+        for floor in structure.floors:
+            cls._draw_floor(floor)
+        for ramp in structure.ramps:
+            cls._draw_ramp(ramp)
+        for pillar in structure.pillars:
+            cls._draw_pillar(pillar)
+        glEndList()
+        
+        # Create SIMPLE display list (skip small elements)
+        simple_list = glGenLists(1)
+        glNewList(simple_list, GL_COMPILE)
+        # Only draw major walls and floors
+        for wall in structure.walls:
+            if wall.height > 3 and wall.width > 2:  # Skip small walls
+                cls._draw_wall_simple(wall)
+        for floor in structure.floors:
+            if floor.width > 3 and floor.depth > 3:  # Skip small floors
+                cls._draw_floor_simple(floor)
+        glEndList()
+        
+        cls._display_lists[struct_id] = (full_list, simple_list)
+        return full_list, simple_list
+    
+    @classmethod
+    def cleanup_display_list(cls, structure: Structure):
+        """Delete display lists for a structure."""
+        struct_id = id(structure)
+        if struct_id in cls._display_lists:
+            full_list, simple_list = cls._display_lists[struct_id]
+            glDeleteLists(full_list, 1)
+            glDeleteLists(simple_list, 1)
+            del cls._display_lists[struct_id]
     
     @staticmethod
     def _draw_wall(wall: Wall):
@@ -747,36 +1100,135 @@ class StructureRenderer:
         glPopMatrix()
     
     @staticmethod
-    def render_structure(structure: Structure, cam_x: float, cam_z: float):
-        """Render a structure with LOD."""
+    def _draw_wall_simple(wall: Wall):
+        """Draw a simplified wall (fewer vertices)."""
+        glPushMatrix()
+        glTranslatef(wall.x, wall.y + wall.height/2, wall.z)
+        glRotatef(wall.rotation, 0, 1, 0)
+        
+        hw = wall.width / 2
+        hh = wall.height / 2
+        
+        glColor3f(*wall.color)
+        glBegin(GL_QUADS)
+        # Just front face
+        glNormal3f(0, 0, 1)
+        glVertex3f(-hw, -hh, 0)
+        glVertex3f(hw, -hh, 0)
+        glVertex3f(hw, hh, 0)
+        glVertex3f(-hw, hh, 0)
+        glEnd()
+        glPopMatrix()
+    
+    @staticmethod
+    def _draw_floor_simple(floor: Floor):
+        """Draw a simplified floor (just top surface)."""
+        glPushMatrix()
+        glTranslatef(floor.x, floor.y + floor.thickness/2, floor.z)
+        
+        hw = floor.width / 2
+        hd = floor.depth / 2
+        
+        glColor3f(*floor.color)
+        glBegin(GL_QUADS)
+        glNormal3f(0, 1, 0)
+        glVertex3f(-hw, 0, -hd)
+        glVertex3f(-hw, 0, hd)
+        glVertex3f(hw, 0, hd)
+        glVertex3f(hw, 0, -hd)
+        glEnd()
+        glPopMatrix()
+    
+    @classmethod
+    def render_structure(cls, structure: Structure, cam_x: float, cam_z: float):
+        """Render a structure with LOD and display list caching."""
         # Distance check
         cx = (structure.bbox_min[0] + structure.bbox_max[0]) / 2
         cz = (structure.bbox_min[2] + structure.bbox_max[2]) / 2
         dist_sq = (cam_x - cx)**2 + (cam_z - cz)**2
         
-        if dist_sq > StructureRenderer.LOD_SIMPLE ** 2:
+        if dist_sq > cls.LOD_BILLBOARD ** 2:
             return  # Too far, don't render
         
-        for wall in structure.walls:
-            StructureRenderer._draw_wall(wall)
+        # Get or create display lists
+        full_list, simple_list = cls.create_display_list(structure)
         
-        for floor in structure.floors:
-            StructureRenderer._draw_floor(floor)
+        if dist_sq < cls.LOD_FULL ** 2:
+            # Full detail
+            glCallList(full_list)
+        elif dist_sq < cls.LOD_SIMPLE ** 2:
+            # Simple detail
+            glCallList(simple_list)
+        else:
+            # Billboard: just draw bounding box
+            cls._draw_bbox(structure)
+    
+    @staticmethod
+    def _draw_bbox(structure: Structure):
+        """Draw a solid bounding box for very distant structures."""
+        min_x, min_y, min_z = structure.bbox_min
+        max_x, max_y, max_z = structure.bbox_max
         
-        for ramp in structure.ramps:
-            StructureRenderer._draw_ramp(ramp)
+        # Estimate average color from first wall or floor
+        if structure.walls:
+            color = structure.walls[0].color
+        elif structure.floors:
+            color = structure.floors[0].color
+        else:
+            color = (0.5, 0.5, 0.5)
         
-        for pillar in structure.pillars:
-            StructureRenderer._draw_pillar(pillar)
+        # Slightly darker for sides to give depth
+        side_color = tuple(c * 0.85 for c in color)
+        bottom_color = tuple(c * 0.7 for c in color)
+        
+        glBegin(GL_QUADS)
+        # Front (bright)
+        glColor3f(*color)
+        glVertex3f(min_x, min_y, max_z)
+        glVertex3f(max_x, min_y, max_z)
+        glVertex3f(max_x, max_y, max_z)
+        glVertex3f(min_x, max_y, max_z)
+        # Back (bright)
+        glVertex3f(max_x, min_y, min_z)
+        glVertex3f(min_x, min_y, min_z)
+        glVertex3f(min_x, max_y, min_z)
+        glVertex3f(max_x, max_y, min_z)
+        # Top (brightest)
+        glVertex3f(min_x, max_y, min_z)
+        glVertex3f(min_x, max_y, max_z)
+        glVertex3f(max_x, max_y, max_z)
+        glVertex3f(max_x, max_y, min_z)
+        # Left side (darker)
+        glColor3f(*side_color)
+        glVertex3f(min_x, min_y, min_z)
+        glVertex3f(min_x, min_y, max_z)
+        glVertex3f(min_x, max_y, max_z)
+        glVertex3f(min_x, max_y, min_z)
+        # Right side (darker)
+        glVertex3f(max_x, min_y, max_z)
+        glVertex3f(max_x, min_y, min_z)
+        glVertex3f(max_x, max_y, min_z)
+        glVertex3f(max_x, max_y, max_z)
+        # Bottom (darkest - usually not visible but completes the box)
+        glColor3f(*bottom_color)
+        glVertex3f(min_x, min_y, max_z)
+        glVertex3f(min_x, min_y, min_z)
+        glVertex3f(max_x, min_y, min_z)
+        glVertex3f(max_x, min_y, max_z)
+        glEnd()
 
 
 class StructureManager:
     """Manages all structures in the world."""
     
-    def __init__(self, seed: int = 42):
+    def __init__(self, seed: int = 42, use_dna_buildings: bool = True):
         self.seed = seed
         self.structures: List[Structure] = []
         self.spawned_chunks: set = set()  # Track which chunks we've processed
+        self.use_dna_buildings = use_dna_buildings
+        
+        # Display list cache for performance
+        self._display_lists: Dict[int, int] = {}  # structure_id -> display_list
     
     def add_structure(self, structure: Structure):
         """Add a structure to the world."""
@@ -796,7 +1248,7 @@ class StructureManager:
         rng = np.random.default_rng(chunk_seed)
         
         # Low chance of building per chunk
-        if rng.random() > 0.03:  # 3% chance (slightly more buildings)
+        if rng.random() > 0.04:  # 4% chance - balanced building density
             return
         
         # Find a spot
@@ -843,32 +1295,113 @@ class StructureManager:
         # Use the maximum height as the floor level (building sits on top)
         world_y = max(corner_heights)
         
-        # Building size with bias toward multi-floor and larger structures
-        floor_roll = rng.random()
-        if floor_roll < 0.2:
-            floors = 1  # 20% single floor
-        elif floor_roll < 0.5:
-            floors = 2  # 30% two floors
-        elif floor_roll < 0.8:
-            floors = 3  # 30% three floors
+        # Decide building type: regular building or maze
+        building_type_roll = rng.random()
+        
+        if building_type_roll < 0.15:  # 15% chance of maze
+            # Generate maze
+            maze_roll = rng.random()
+            if maze_roll < 0.7:  # 70% of mazes are 2D (single floor)
+                maze_floors = 1
+                maze_width = 6 + rng.integers(0, 6)  # 6-11 cells
+                maze_depth = 6 + rng.integers(0, 6)
+            else:  # 30% of mazes are 3D (multi-floor)
+                maze_floors = 2 + rng.integers(0, 2)  # 2-3 floors
+                maze_width = 5 + rng.integers(0, 4)  # 5-8 cells (smaller for 3D)
+                maze_depth = 5 + rng.integers(0, 4)
+            
+            cell_size = 5.0 + rng.random() * 3.0  # 5-8 units per cell
+            
+            building = generate_maze(
+                world_x, world_y, world_z,
+                width=maze_width,
+                depth=maze_depth,
+                floors=maze_floors,
+                cell_size=cell_size,
+                wall_height=10.0 + rng.random() * 5.0,  # 10-15 units tall walls
+                seed=chunk_seed,
+                terrain_heights=corner_heights
+            )
+        elif self.use_dna_buildings:
+            # NEW: DNA-based building system with rich variety
+            building = self._spawn_dna_building(
+                world_x, world_y, world_z, chunk_seed, corner_heights, rng
+            )
         else:
-            floors = 4 + rng.integers(0, 3)  # 20% tall (4-6 floors)
+            # Legacy: Regular tile-based building
+            floor_roll = rng.random()
+            if floor_roll < 0.2:
+                floors = 1  # 20% single floor
+            elif floor_roll < 0.5:
+                floors = 2  # 30% two floors
+            elif floor_roll < 0.8:
+                floors = 3  # 30% three floors
+            else:
+                floors = 4 + rng.integers(0, 3)  # 20% tall (4-6 floors)
+            
+            # Use pre-calculated values from terrain sampling above
+            tiles_x = tiles_x_temp
+            tiles_z = tiles_z_temp
+            tile_size = tile_size_temp
+            
+            building = generate_tile_building(
+                world_x, world_y, world_z,
+                tiles_x=tiles_x,
+                tiles_z=tiles_z,
+                floors=floors,
+                tile_size=tile_size,
+                seed=chunk_seed,
+                terrain_heights=corner_heights
+            )
         
-        # Use pre-calculated values from terrain sampling above
-        tiles_x = tiles_x_temp
-        tiles_z = tiles_z_temp
-        tile_size = tile_size_temp
-        
-        building = generate_tile_building(
-            world_x, world_y, world_z,
-            tiles_x=tiles_x,
-            tiles_z=tiles_z,
-            floors=floors,
-            tile_size=tile_size,
-            seed=chunk_seed,
-            terrain_heights=corner_heights  # Pass terrain heights for pillar generation
-        )
         self.add_structure(building)
+    
+    def _spawn_dna_building(self, x: float, y: float, z: float, seed: int,
+                            terrain_heights: List[float], rng) -> Structure:
+        """Spawn a building using the DNA-based system for rich variety."""
+        from .building_dna import BuildingType, BuildingDNA, get_building_type_for_biome
+        from .building_generator import generate_building_from_dna
+        
+        # Choose building type based on terrain characteristics
+        # Higher terrain = more residential, lower = more commercial/industrial
+        avg_height = sum(terrain_heights) / len(terrain_heights)
+        
+        if avg_height < 8:
+            # Near water - industrial/warehouse/docks
+            building_types = [
+                BuildingType.WAREHOUSE, BuildingType.FACTORY, BuildingType.HANGAR,
+                BuildingType.SHOP, BuildingType.HOUSE, BuildingType.PARKOUR
+            ]
+        elif avg_height < 25:
+            # Lowlands - mixed urban
+            building_types = [
+                BuildingType.HOUSE, BuildingType.APARTMENT, BuildingType.SHOP,
+                BuildingType.OFFICE, BuildingType.TOWER, BuildingType.HOTEL,
+                BuildingType.WAREHOUSE, BuildingType.VILLA, BuildingType.HANGAR,
+                BuildingType.PARKOUR
+            ]
+        elif avg_height < 45:
+            # Hills - residential/resort
+            building_types = [
+                BuildingType.HOUSE, BuildingType.VILLA, BuildingType.TEMPLE,
+                BuildingType.OBSERVATORY, BuildingType.APARTMENT, BuildingType.HOTEL,
+                BuildingType.PARKOUR
+            ]
+        else:
+            # Mountain - special/remote
+            building_types = [
+                BuildingType.TEMPLE, BuildingType.OBSERVATORY, 
+                BuildingType.RUINS, BuildingType.MONUMENT, BuildingType.TOWER,
+                BuildingType.PARKOUR
+            ]
+        
+        building_type = rng.choice(building_types)
+        
+        # Create DNA for this building
+        dna = BuildingDNA.create_random(building_type, seed)
+        
+        # Generate the actual structure
+        return generate_building_from_dna(x, y, z, dna, terrain_heights)
     
     def check_collision(self, px: float, py: float, pz: float, 
                         radius: float = 0.5, player_height: float = 3.5) -> Tuple[bool, Optional[float]]:
@@ -927,11 +1460,22 @@ class StructureManager:
             StructureRenderer.render_structure(structure, cam_x, cam_z)
     
     def cleanup_distant(self, cx: int, cz: int, chunk_size: float = 32, max_chunks: int = 40):
-        """Remove structures far from player."""
+        """Remove structures far from player and cleanup their display lists."""
         world_x = cx * chunk_size
         world_z = cz * chunk_size
         max_dist = max_chunks * chunk_size
         
+        # Find structures to remove
+        to_remove = [
+            s for s in self.structures
+            if abs(s.x - world_x) >= max_dist or abs(s.z - world_z) >= max_dist
+        ]
+        
+        # Cleanup display lists for removed structures
+        for structure in to_remove:
+            StructureRenderer.cleanup_display_list(structure)
+        
+        # Keep only nearby structures
         self.structures = [
             s for s in self.structures
             if abs(s.x - world_x) < max_dist and abs(s.z - world_z) < max_dist

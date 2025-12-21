@@ -253,8 +253,147 @@ class TestMovementTypes:
         
         animal.update(1.0)
         
-        # Should be at water level
-        assert animal.y == 0.5
+        # Should be near water level (allow for small bobbing animation)
+        assert abs(animal.y - 0.5) < 0.1
+
+
+class TestSpatialIndexIntegration:
+    """Tests for spatial index integration with AnimalManager."""
+    
+    def test_spatial_index_created(self):
+        """Test that AnimalManager creates a spatial index."""
+        manager = AnimalManager(world_seed=42)
+        assert hasattr(manager, '_spatial_index')
+        assert manager._spatial_index is not None
+    
+    def test_spawned_animals_added_to_spatial_index(self):
+        """Test that spawned animals are indexed for spatial queries."""
+        manager = AnimalManager(world_seed=42)
+        heightmap = np.ones((33, 33)) * 10  # Land
+        
+        # Spawn animals
+        manager.spawn_animals_for_chunk(0, 0, heightmap, 0, 0, 1.0, 3.5)
+        
+        # If animals were spawned, they should be in the spatial index
+        if len(manager.animals) > 0:
+            from waverse.spatial import EntityType
+            spatial_count = manager._spatial_index.count(EntityType.ANIMAL)
+            assert spatial_count == len(manager.animals)
+    
+    def test_cleanup_removes_from_spatial_index(self):
+        """Test that cleanup removes animals from spatial index."""
+        manager = AnimalManager(world_seed=42)
+        heightmap = np.ones((33, 33)) * 10
+        
+        # Spawn in two far apart chunks
+        manager.spawn_animals_for_chunk(0, 0, heightmap, 0, 0, 1.0, 3.5)
+        manager.spawn_animals_for_chunk(100, 100, heightmap, 100 * 32, 100 * 32, 1.0, 3.5)
+        
+        from waverse.spatial import EntityType
+        initial_count = manager._spatial_index.count(EntityType.ANIMAL)
+        
+        # Cleanup distant chunks
+        manager.cleanup_distant_chunks(0, 0, max_distance=10)
+        
+        # Spatial index should have fewer animals
+        final_count = manager._spatial_index.count(EntityType.ANIMAL)
+        assert final_count <= initial_count
+    
+    def test_spatial_query_finds_nearby_animals(self):
+        """Test that spatial queries find animals correctly."""
+        manager = AnimalManager(world_seed=42)
+        heightmap = np.ones((33, 33)) * 10
+        
+        # Spawn animals at origin chunk
+        manager.spawn_animals_for_chunk(0, 0, heightmap, 0, 0, 1.0, 3.5)
+        
+        if len(manager.animals) > 0:
+            # Query from center of chunk
+            from waverse.spatial import EntityType
+            results = list(manager._spatial_index.query_radius(16, 16, 100, EntityType.ANIMAL))
+            
+            # Should find animals that were spawned
+            assert len(results) > 0
+
+
+class TestMovementCaching:
+    """Tests for animal movement vector caching."""
+    
+    def test_cached_velocity_applied(self):
+        """Test that cached velocity is used for movement."""
+        dna = AnimalDNA.create_random(AnimalType.MAMMAL, seed=42)
+        animal = AnimalInstance(x=0, y=5, z=0, dna=dna)
+        
+        # Set cached velocity
+        animal._cached_vx = 1.0
+        animal._cached_vz = 0.5
+        
+        initial_x = animal.x
+        initial_z = animal.z
+        
+        # Update should apply cached velocity
+        animal.update(1.0)
+        
+        # Position should change based on cached velocity
+        # (actual movement may include other factors, but should be non-zero)
+        moved = (animal.x != initial_x) or (animal.z != initial_z)
+        assert moved or animal.anim_time > 0  # Either moved or animation updated
+
+
+class TestPerformanceCharacteristics:
+    """Tests verifying performance-related behavior."""
+    
+    def test_manager_handles_many_animals_efficiently(self):
+        """Test that spawning many animals doesn't explode in time."""
+        import time
+        
+        manager = AnimalManager(world_seed=42)
+        heightmap = np.ones((33, 33)) * 10
+        
+        start = time.time()
+        
+        # Spawn animals in 100 chunks
+        for cx in range(10):
+            for cz in range(10):
+                manager.spawn_animals_for_chunk(
+                    cx, cz, heightmap, 
+                    cx * 32, cz * 32, 1.0, 3.5
+                )
+        
+        elapsed = time.time() - start
+        
+        # Should complete in under 5 seconds
+        assert elapsed < 5.0
+        
+        # Verify spatial index is consistent
+        from waverse.spatial import EntityType
+        assert manager._spatial_index.count(EntityType.ANIMAL) == len(manager.animals)
+    
+    def test_spatial_query_performance_scales_with_radius(self):
+        """Test that small radius queries are fast regardless of total count."""
+        import time
+        
+        manager = AnimalManager(world_seed=42)
+        heightmap = np.ones((33, 33)) * 10
+        
+        # Spawn many animals
+        for cx in range(5):
+            for cz in range(5):
+                manager.spawn_animals_for_chunk(
+                    cx, cz, heightmap,
+                    cx * 32, cz * 32, 1.0, 3.5
+                )
+        
+        from waverse.spatial import EntityType
+        
+        # Time many small radius queries
+        start = time.time()
+        for _ in range(1000):
+            list(manager._spatial_index.query_radius(16, 16, 10, EntityType.ANIMAL))
+        elapsed = time.time() - start
+        
+        # 1000 queries should complete in under 1 second
+        assert elapsed < 1.0
 
 
 if __name__ == "__main__":

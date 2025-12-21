@@ -223,8 +223,8 @@ class PlantDNA:
     # Leaves/Canopy
     leaf_density: float = 0.7      # 0 = sparse, 1 = dense
     leaf_size: float = 0.5         # Relative leaf size
-    leaf_shape: str = "round"      # round, pointed, frond, needle, blade
-    canopy_shape: str = "dome"     # dome, cone, umbrella, weeping, columnar
+    leaf_shape: str = "round"      # round, pointed, frond, needle, blade, heart, star, fan, feather, spiral
+    canopy_shape: str = "dome"     # dome, cone, umbrella, weeping, columnar, sphere, layered, explosion, cascading
     canopy_spread: float = 0.5     # How wide the canopy spreads
     
     # Special features
@@ -276,6 +276,10 @@ class PlantDNA:
     # Orientation
     upside_down: bool = False      # Plant grows downward (hanging)
     lean_angle: float = 0.0        # How much the plant leans (-1 to 1)
+    
+    # EVOLVABLE GROWTH RATE - affects how fast plant grows in life simulation
+    # Range: 0.5 (slow grower) to 2.0 (fast grower), default 1.0
+    growth_rate: float = 1.0
     
     def mutate(self, rng: np.random.Generator = None, strength: float = 0.5) -> "PlantDNA":
         """
@@ -379,6 +383,12 @@ class PlantDNA:
         # Bark texture can mutate
         if rng.random() < 0.03 * strength:
             new_dna.bark_texture = rng.choice(["smooth", "rough", "scaly", "peeling", "ridged"])
+        
+        # Growth rate mutation - allows plants to evolve faster/slower growth
+        new_dna.growth_rate = float(np.clip(
+            self.growth_rate + rng.normal(0, 0.1 * strength), 
+            0.5, 2.0  # Range: 0.5x to 2x growth speed
+        ))
         
         return new_dna
     
@@ -541,7 +551,7 @@ class PlantDNA:
                 dna.flower_color = ColorGene.from_hsv(rng.random(), 0.6 + rng.random() * 0.4, 0.8)
             
         elif plant_type == PlantType.TREE:
-            dna.height_gene = Gene(4 + rng.random() * 8, 2, 15, 0.25)
+            dna.height_gene = Gene(5 + rng.random() * 10, 2, 25, 0.25)  # Bigger trees!
             dna.width_gene = Gene(0.2 + rng.random() * 0.3, 0.1, 0.6, 0.15)
             dna.trunk_segments = [
                 SegmentGene(
@@ -558,15 +568,16 @@ class PlantDNA:
             dna.branch_height = 0.4 + rng.random() * 0.35
             dna.sub_branch_chance = 0.3 + rng.random() * 0.35  # 30-65% chance
             dna.recursive_depth = 1 + rng.integers(0, 2)  # 1-2 levels of branching
-            dna.canopy_shape = rng.choice(["dome", "cone", "umbrella", "weeping"])
+            dna.canopy_shape = rng.choice(["dome", "cone", "umbrella", "weeping", "sphere", "layered", "explosion"])
             dna.canopy_spread = 0.4 + rng.random() * 0.5
             dna.droop = rng.random() * 0.4  # Some droop variation
             dna.asymmetry = 0.1 + rng.random() * 0.3  # Natural asymmetry
+            dna.leaf_shape = rng.choice(["round", "pointed", "heart", "star", "fan"])
             dna.trunk_color = ColorGene(0.25 + rng.random() * 0.2, 0.15 + rng.random() * 0.12, 0.08 + rng.random() * 0.05)
             dna.leaf_color = ColorGene(0.1 + rng.random() * 0.15, 0.3 + rng.random() * 0.4, 0.08 + rng.random() * 0.1)
             
         elif plant_type == PlantType.TALL_TREE:
-            dna.height_gene = Gene(12 + rng.random() * 12, 8, 30, 0.3)
+            dna.height_gene = Gene(15 + rng.random() * 20, 8, 50, 0.3)  # Giant trees!
             dna.width_gene = Gene(0.4 + rng.random() * 0.5, 0.2, 1.0, 0.2)
             dna.trunk_segments = [
                 SegmentGene(
@@ -655,7 +666,7 @@ class PlantDNA:
             
         elif plant_type == PlantType.PINE:
             # Coniferous pine tree
-            dna.height_gene = Gene(6 + rng.random() * 12, 4, 20, 0.25)
+            dna.height_gene = Gene(8 + rng.random() * 15, 4, 35, 0.25)  # Taller pines!
             dna.width_gene = Gene(0.3 + rng.random() * 0.3, 0.15, 0.7, 0.15)
             dna.trunk_segments = [
                 SegmentGene(1.0, 0.35, 0.92, 0, 0),
@@ -720,7 +731,7 @@ class PlantDNA:
             
         elif plant_type == PlantType.ALIEN:
             # Truly random/weird with high potential for complex branching
-            dna.height_gene = Gene(1 + rng.random() * 15, 0.5, 20, 0.35)
+            dna.height_gene = Gene(2 + rng.random() * 20, 0.5, 35, 0.35)  # Bigger aliens!
             dna.width_gene = Gene(0.1 + rng.random() * 0.5, 0.05, 1.0, 0.25)
             dna.trunk_segments = [
                 SegmentGene(
@@ -737,8 +748,8 @@ class PlantDNA:
             dna.sub_branch_chance = 0.25 + rng.random() * 0.4  # Reduced variance
             dna.recursive_depth = 1 + rng.integers(0, 2)  # 1-2 levels max
             dna.droop = rng.random() * 0.8 - 0.3  # Can droop or reach up
-            dna.leaf_shape = rng.choice(["round", "pointed", "frond", "needle", "blade"])
-            dna.canopy_shape = rng.choice(["dome", "cone", "umbrella", "weeping", "columnar"])
+            dna.leaf_shape = rng.choice(["round", "pointed", "frond", "needle", "blade", "heart", "star", "fan", "spiral", "feather"])
+            dna.canopy_shape = rng.choice(["dome", "cone", "umbrella", "weeping", "columnar", "sphere", "layered", "explosion", "cascading"])
             dna.asymmetry = 0.2 + rng.random() * 0.4
             dna.spiral_factor = rng.random() * 0.5
             

@@ -44,6 +44,9 @@ class AnimalInstance:
     state: str = "idle"  # idle, moving, fleeing
     state_timer: float = 0.0
     
+    # Visual scale (for baby animals that grow)
+    scale: float = 1.0
+    
     def update(self, dt: float, neighbors: List["AnimalInstance"] = None, 
                player_pos: Tuple[float, float, float] = None,
                get_ground_height=None):
@@ -430,6 +433,104 @@ class AnimalRenderer:
         glVertex3f(animal.x, animal.y + animal.dna.base_scale * 0.3, animal.z)
     
     @staticmethod
+    def draw_billboard(animal: AnimalInstance, scale: float = 1.0):
+        """Draw animal as a simple 2D shape that matches its silhouette.
+        
+        Different animal types get different shapes:
+        - Birds/flyers: Diamond/wing shape
+        - Fish/swimmers: Horizontal ellipse
+        - Spiders/bugs: Wide low shape
+        - Mammals/walkers: Rounded rectangle
+        - Snakes/worms: Horizontal line
+        """
+        atype = animal.dna.animal_type
+        # Scale down to match actual visual size (0.5 factor)
+        base_size = animal.dna.base_scale * 0.5 * scale
+        
+        # Position
+        cx, cy, cz = animal.x, animal.y + animal.dna.base_scale * 0.15, animal.z
+        
+        # Color
+        color = animal.dna.primary_color
+        glColor3f(*color)
+        
+        if atype in ('bird', 'moth', 'butterfly', 'bat'):
+            # Diamond/wing shape (wide horizontal)
+            hw = base_size * 1.2
+            hh = base_size * 0.4
+            glBegin(GL_QUADS)
+            glVertex3f(cx, cy + hh, cz)  # Top
+            glVertex3f(cx - hw, cy, cz)  # Left
+            glVertex3f(cx, cy - hh, cz)  # Bottom  
+            glVertex3f(cx + hw, cy, cz)  # Right
+            glEnd()
+            
+        elif atype in ('fish', 'shark', 'whale', 'manta'):
+            # Fish shape - horizontal diamond with tail
+            hw = base_size * 1.0
+            hh = base_size * 0.35
+            glBegin(GL_TRIANGLES)
+            # Body
+            glVertex3f(cx + hw, cy, cz)  # Nose
+            glVertex3f(cx - hw * 0.3, cy + hh, cz)
+            glVertex3f(cx - hw * 0.3, cy - hh, cz)
+            # Tail
+            glVertex3f(cx - hw * 0.3, cy, cz)
+            glVertex3f(cx - hw, cy + hh * 0.8, cz)
+            glVertex3f(cx - hw, cy - hh * 0.8, cz)
+            glEnd()
+            
+        elif atype in ('spider', 'crab', 'scorpion'):
+            # Wide low shape
+            hw = base_size * 0.8
+            hh = base_size * 0.25
+            glBegin(GL_QUADS)
+            glVertex3f(cx - hw, cy + hh, cz)
+            glVertex3f(cx + hw, cy + hh, cz)
+            glVertex3f(cx + hw, cy - hh, cz)
+            glVertex3f(cx - hw, cy - hh, cz)
+            glEnd()
+            
+        elif atype in ('snake', 'worm', 'eel'):
+            # Long horizontal line
+            hw = base_size * 1.5
+            hh = base_size * 0.15
+            glBegin(GL_QUADS)
+            glVertex3f(cx - hw, cy + hh, cz)
+            glVertex3f(cx + hw, cy + hh, cz)
+            glVertex3f(cx + hw, cy - hh, cz)
+            glVertex3f(cx - hw, cy - hh, cz)
+            glEnd()
+            
+        elif atype in ('jellyfish', 'octopus', 'squid'):
+            # Dome with tentacles
+            hw = base_size * 0.5
+            hh = base_size * 0.4
+            # Dome
+            glBegin(GL_TRIANGLES)
+            glVertex3f(cx, cy + hh, cz)
+            glVertex3f(cx - hw, cy, cz)
+            glVertex3f(cx + hw, cy, cz)
+            glEnd()
+            # Tentacles (small triangle below)
+            glBegin(GL_TRIANGLES)
+            glVertex3f(cx, cy - hh * 1.5, cz)
+            glVertex3f(cx - hw * 0.8, cy, cz)
+            glVertex3f(cx + hw * 0.8, cy, cz)
+            glEnd()
+            
+        else:
+            # Default: rounded rectangle (generic quadruped)
+            hw = base_size * 0.6
+            hh = base_size * 0.4
+            glBegin(GL_QUADS)
+            glVertex3f(cx - hw, cy + hh, cz)
+            glVertex3f(cx + hw, cy + hh, cz)
+            glVertex3f(cx + hw, cy - hh, cz)
+            glVertex3f(cx - hw, cy - hh, cz)
+            glEnd()
+    
+    @staticmethod
     def _draw_segment(seg: BodySegmentGene):
         """Draw a body segment."""
         color = seg.color[:3] if len(seg.color) >= 3 else seg.color
@@ -668,14 +769,25 @@ class AnimalRenderer:
 class AnimalManager:
     """Manages animal spawning, AI updates, and rendering."""
     
-    LOD_FULL = 40      # Reduced for performance
-    LOD_SIMPLE = 100
-    LOD_POINT = 200
+    # Increased LOD distances for better visibility
+    LOD_FULL = 80      # Full detail
+    LOD_SIMPLE = 180   # Simplified geometry  
+    LOD_POINT = 350    # Point sprites (visible from far)
+    
+    # Spatial indexing for O(1) neighbor lookups
+    USE_SPATIAL_INDEX = True
+    SPATIAL_CELL_SIZE = 30.0  # Cell size for spatial hashing
     
     def __init__(self, world_seed: int = 42):
         self.world_seed = world_seed
         self.animals: List[AnimalInstance] = []
         self.chunk_animals: Dict[Tuple[int, int], List[AnimalInstance]] = {}
+        
+        # Spatial index for O(1) neighbor lookups
+        self._spatial_index = None
+        if self.USE_SPATIAL_INDEX:
+            from .spatial import SpatialIndex
+            self._spatial_index = SpatialIndex(cell_size=self.SPATIAL_CELL_SIZE)
         
         # Pre-generate species templates
         self.species_templates = self._generate_species()
@@ -690,6 +802,9 @@ class AnimalManager:
             ]
         return templates
     
+    # Animal cap - balanced for optimized rendering
+    MAX_TOTAL_ANIMALS = 500
+    
     def spawn_animals_for_chunk(self, cx: int, cz: int, heightmap, 
                                  chunk_world_x: float, chunk_world_z: float,
                                  tile_scale: float, height_scale: float):
@@ -698,14 +813,18 @@ class AnimalManager:
         if key in self.chunk_animals:
             return
         
+        # Don't spawn if already at capacity
+        if len(self.animals) >= self.MAX_TOTAL_ANIMALS:
+            return
+        
         chunk_seed = abs(hash((self.world_seed, cx, cz, "animals"))) % (2**31)
         rng = np.random.default_rng(chunk_seed)
         
         h, w = heightmap.shape
         animals = []
         
-        # Animals per chunk - balanced for performance
-        num_animals = rng.integers(1, 5)  # 1-4 animals per chunk
+        # Animals per chunk - balanced with chunk radius culling
+        num_animals = rng.integers(2, 5)  # 2-4 animals per chunk
         
         for _ in range(num_animals):
             local_x = rng.integers(5, w - 5)
@@ -715,11 +834,27 @@ class AnimalManager:
             
             # Determine what can spawn here - favor GROUND animals heavily
             if ground_h < 2:
-                # Near/in water - crocs and frogs
+                # Near/in water - aquatic and amphibious creatures!
                 animal_type = rng.choice([
+                    # Amphibious
                     AnimalType.CROC, AnimalType.CROC,
                     AnimalType.HOPPER,  # Frogs
-                    AnimalType.WORM,    # Water snakes
+                    AnimalType.AMPHIBIAN,
+                    # Aquatic - new creatures
+                    AnimalType.OCTOPUS, AnimalType.OCTOPUS,
+                    AnimalType.SQUID,
+                    AnimalType.JELLYFISH,
+                    AnimalType.FISH, AnimalType.FISH,
+                    AnimalType.CRUSTACEAN, AnimalType.CRUSTACEAN,
+                    AnimalType.ANEMONE,
+                    AnimalType.SEASTAR,
+                    AnimalType.NUDIBRANCH,
+                    AnimalType.NAUTILUS,
+                    AnimalType.MANTA,
+                    AnimalType.HYDRA,
+                    # Amoebas love water
+                    AnimalType.AMOEBA, AnimalType.AMOEBA,
+                    AnimalType.BLOB,
                 ])
             elif ground_h < 15:
                 # Lowlands - lots of ground variety
@@ -732,12 +867,19 @@ class AnimalManager:
                     AnimalType.REPTILE, AnimalType.REPTILE,
                     AnimalType.HOPPER, AnimalType.HOPPER,  # Rabbits, frogs
                     AnimalType.WORM, AnimalType.WORM,      # Snakes
-                    # Small crawlers
+                    # Small crawlers - new types!
                     AnimalType.SPIDER, AnimalType.SPIDER,
+                    AnimalType.CENTIPEDE,
+                    AnimalType.TRILOBITE,
                     AnimalType.INSECT,
+                    AnimalType.SNAIL,
                     # Occasional flyers
                     AnimalType.BIRD,
-                    AnimalType.METROID  # Rare floating horror
+                    AnimalType.METROID,  # Rare floating horror
+                    # Weird creatures
+                    AnimalType.AMOEBA,
+                    AnimalType.BLOB,
+                    AnimalType.ALIEN,
                 ])
             elif ground_h < 30:
                 # Hills - diverse ground animals
@@ -747,9 +889,11 @@ class AnimalManager:
                     AnimalType.REPTILE, AnimalType.REPTILE,
                     AnimalType.HOPPER, AnimalType.HOPPER,
                     AnimalType.SPIDER,
+                    AnimalType.CENTIPEDE,
                     AnimalType.WORM,
                     AnimalType.BIRD, AnimalType.BIRD,
                     AnimalType.INSECT,
+                    AnimalType.TRILOBITE,
                 ])
             else:
                 # High ground - hardy mammals, birds, some hoppers
@@ -757,7 +901,8 @@ class AnimalManager:
                     AnimalType.MAMMAL, AnimalType.MAMMAL, AnimalType.MAMMAL,
                     AnimalType.HOPPER,  # Mountain goat-like
                     AnimalType.BIRD, AnimalType.BIRD,
-                    AnimalType.METROID  # They float up high
+                    AnimalType.METROID,  # They float up high
+                    AnimalType.ALIEN,    # Aliens too
                 ])
             
             # Get template and mutate
@@ -785,12 +930,72 @@ class AnimalManager:
             
             animals.append(animal)
             self.animals.append(animal)
+            
+            # Add to spatial index for O(1) neighbor lookups
+            if self._spatial_index:
+                from .spatial import EntityType as SpatialType
+                self._spatial_index.insert(animal, animal.x, animal.z, SpatialType.ANIMAL, id(animal))
         
         self.chunk_animals[key] = animals
     
+    def spawn_baby_animal(self, x: float, y: float, z: float, parent_dna: dict):
+        """Spawn a baby animal at the location where an egg hatched."""
+        # Debug logging (disabled by default)
+        # print(f"[HATCH] Spawning baby animal at ({x:.1f}, {y:.1f}, {z:.1f}) from parent: {parent_dna.get('animal_type', 'unknown')}")
+        
+        # Determine chunk
+        chunk_size = 128  # Approximate chunk size in world units
+        cx = int(x // chunk_size)
+        cz = int(z // chunk_size)
+        key = (cx, cz)
+        
+        # Determine animal type from parent DNA
+        animal_type = parent_dna.get('animal_type', AnimalType.MAMMAL)
+        if animal_type not in AnimalType.ALL:
+            animal_type = AnimalType.MAMMAL
+        
+        # Create DNA based on parent (with some mutation)
+        templates = self.species_templates.get(animal_type, self.species_templates.get(AnimalType.MAMMAL, []))
+        if templates:
+            rng = np.random.default_rng(abs(hash((x, z, animal_type))) % (2**31))
+            base_dna = rng.choice(templates)
+            dna = base_dna.mutate(rng, strength=0.2)  # Light mutation from parent
+        else:
+            # Fallback - create random DNA
+            dna = AnimalDNA.create_random(animal_type, int(x * 1000 + z))
+        
+        # Start on ground, then adjust for movement type
+        world_y = y
+        if dna.movement_type == MovementType.FLY:
+            world_y = y + 2  # Start just above ground, will fly up
+        elif dna.movement_type in (MovementType.SWIM, MovementType.FLOAT):
+            world_y = max(0.5, y)  # In water
+        
+        # Create baby animal (smaller but visible scale)
+        animal = AnimalInstance(
+            x=x, y=world_y, z=z,
+            dna=dna,
+            rotation=np.random.random() * 360,
+            anim_phase=np.random.random(),
+            scale=0.5  # Baby starts at 50% (was 30%, too hard to see)
+        )
+        # Debug logging (disabled by default)
+        # print(f"[HATCH] Created {dna.animal_type} baby at chunk {key}, total animals: {len(self.animals) + 1}")
+        
+        # Add to collections
+        if key not in self.chunk_animals:
+            self.chunk_animals[key] = []
+        self.chunk_animals[key].append(animal)
+        self.animals.append(animal)
+        
+        # Add to spatial index
+        if self._spatial_index:
+            from .spatial import EntityType as SpatialType
+            self._spatial_index.insert(animal, animal.x, animal.z, SpatialType.ANIMAL, id(animal))
+    
     def update(self, dt: float, player_pos: Tuple[float, float, float], 
                get_ground_height=None):
-        """Update animals - nearby ones get full AI, distant ones get simple updates."""
+        """Update animals - smart updates: expensive AI rarely, cheap movement always."""
         if not player_pos:
             return
         
@@ -800,47 +1005,82 @@ class AnimalManager:
             # Distance to player
             dist_sq = (animal.x - px)**2 + (animal.z - pz)**2
             
-            # Full AI update for animals within 150 units
-            if dist_sq < 22500:  # 150^2
-                # Simplified neighbor check for flocking
+            if dist_sq > 160000:  # 400^2 - too far, skip entirely
+                continue
+            
+            # Always apply cached velocity (cheap!) 
+            # This keeps animals moving smoothly between AI updates
+            if hasattr(animal, '_cached_vx'):
+                old_x, old_z = animal.x, animal.z
+                animal.x += animal._cached_vx * dt * 0.02
+                animal.z += animal._cached_vz * dt * 0.02
+                # Update spatial index if position changed significantly
+                if self._spatial_index and (abs(animal.x - old_x) > 1 or abs(animal.z - old_z) > 1):
+                    self._spatial_index.update_position(id(animal), animal.x, animal.z)
+            
+            # Full AI update only for VERY close animals (expensive - neighbor checks)
+            if dist_sq < 10000:  # 100^2
                 neighbors = None
-                if dist_sq < 6400 and animal.dna.group_tendency > 0.3:  # 80^2
-                    neighbors = [
-                        other for other in self.animals
-                        if other is not animal 
-                        and (animal.x - other.x)**2 + (animal.z - other.z)**2 < 900  # 30^2
-                    ][:5]
+                if dist_sq < 3600 and animal.dna.group_tendency > 0.3:  # 60^2
+                    # Use spatial index for O(1) neighbor lookup instead of O(n) loop!
+                    if self._spatial_index:
+                        # query_radius is a generator, take first few results
+                        nearby = list(self._spatial_index.query_radius(animal.x, animal.z, 25.0))[:5]
+                        neighbors = [n.entity for n in nearby if n.entity is not animal][:3]
+                    else:
+                        # Fallback O(n) loop
+                        neighbors = [
+                            other for other in self.animals
+                            if other is not animal 
+                            and (animal.x - other.x)**2 + (animal.z - other.z)**2 < 625
+                        ][:3]
                 
                 animal.update(dt, neighbors, player_pos, get_ground_height)
-            elif dist_sq < 90000:  # 300^2 - simple movement update
-                # Just continue current movement without AI changes
+                # Cache velocity for interpolation
+                animal._cached_vx = getattr(animal, 'vx', 0)
+                animal._cached_vz = getattr(animal, 'vz', 0)
+            elif dist_sq < 40000:  # 200^2 - medium distance: simple update, no neighbors
                 animal.update(dt, None, None, get_ground_height)
+                animal._cached_vx = getattr(animal, 'vx', 0)
+                animal._cached_vz = getattr(animal, 'vz', 0)
     
     def render(self, camera_x: float, camera_y: float, camera_z: float):
-        """Render nearby animals with LOD."""
+        """Render nearby animals with LOD - optimized with squared distances and shape-aware billboards."""
         glDisable(GL_LIGHTING)
         
-        # Only process animals within render distance
-        max_dist_sq = self.LOD_POINT * self.LOD_POINT
+        # Pre-compute squared thresholds (avoid sqrt per animal!)
+        full_sq = self.LOD_FULL * self.LOD_FULL
+        simple_sq = self.LOD_SIMPLE * self.LOD_SIMPLE
+        point_sq = self.LOD_POINT * self.LOD_POINT
+        
+        # Extended range for billboards
+        billboard_far_sq = (self.LOD_POINT * 1.5) ** 2  # 525 units
+        billboard_horizon_sq = (self.LOD_POINT * 2.0) ** 2  # 700 units
         
         full_animals = []
         simple_animals = []
-        point_animals = []
+        billboard_animals = []  # (animal, scale) tuples
         
         for animal in self.animals:
             dist_sq = (animal.x - camera_x)**2 + (animal.z - camera_z)**2
             
-            if dist_sq > max_dist_sq:
+            if dist_sq > billboard_horizon_sq:
                 continue
             
-            dist = math.sqrt(dist_sq)
-            
-            if dist < self.LOD_FULL:
+            # Use squared distances - no sqrt needed!
+            if dist_sq < full_sq:
                 full_animals.append(animal)
-            elif dist < self.LOD_SIMPLE:
+            elif dist_sq < simple_sq:
                 simple_animals.append(animal)
+            elif dist_sq < point_sq:
+                # Full-size billboard
+                billboard_animals.append((animal, 1.0))
+            elif dist_sq < billboard_far_sq:
+                # Half-size billboard
+                billboard_animals.append((animal, 0.5))
             else:
-                point_animals.append(animal)
+                # Quarter-size billboard (horizon)
+                billboard_animals.append((animal, 0.25))
         
         # Render each LOD level
         for animal in full_animals:
@@ -849,25 +1089,43 @@ class AnimalManager:
         for animal in simple_animals:
             AnimalRenderer.draw_simple(animal)
         
-        if point_animals:
-            glPointSize(3)
-            glBegin(GL_POINTS)
-            for animal in point_animals:
-                AnimalRenderer.draw_point(animal)
-            glEnd()
+        # Render shape-aware billboards at appropriate scales
+        for animal, scale in billboard_animals:
+            AnimalRenderer.draw_billboard(animal, scale)
         
         glEnable(GL_LIGHTING)
     
-    def cleanup_distant_chunks(self, center_cx: int, center_cz: int, max_distance: int = 25):
+    def cleanup_distant_chunks(self, center_cx: int, center_cz: int, max_distance: int = 15):
         """Remove animals from distant chunks."""
         to_remove = []
-        for (cx, cz), animals in self.chunk_animals.items():
+        for (cx, cz), animals in list(self.chunk_animals.items()):
             if abs(cx - center_cx) > max_distance or abs(cz - center_cz) > max_distance:
                 to_remove.append((cx, cz))
                 for animal in animals:
                     if animal in self.animals:
                         self.animals.remove(animal)
+                        # Remove from spatial index
+                        if self._spatial_index:
+                            self._spatial_index.remove(id(animal))
         
         for key in to_remove:
             del self.chunk_animals[key]
+        
+        # Hard cap enforcement - if still over limit, aggressively cull
+        if len(self.animals) > self.MAX_TOTAL_ANIMALS:
+            # Keep only the most recent animals
+            excess = len(self.animals) - self.MAX_TOTAL_ANIMALS
+            removed = self.animals[:excess]
+            self.animals = self.animals[excess:]
+            
+            # Remove from spatial index
+            if self._spatial_index:
+                for animal in removed:
+                    self._spatial_index.remove(id(animal))
+            
+            # Also clean up chunk_animals dict
+            for (cx, cz), chunk_list in list(self.chunk_animals.items()):
+                self.chunk_animals[(cx, cz)] = [a for a in chunk_list if a not in removed]
+                if not self.chunk_animals[(cx, cz)]:
+                    del self.chunk_animals[(cx, cz)]
 
