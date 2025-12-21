@@ -551,7 +551,7 @@ class PlantDNA:
                 dna.flower_color = ColorGene.from_hsv(rng.random(), 0.6 + rng.random() * 0.4, 0.8)
             
         elif plant_type == PlantType.TREE:
-            dna.height_gene = Gene(4 + rng.random() * 8, 2, 15, 0.25)
+            dna.height_gene = Gene(5 + rng.random() * 10, 2, 25, 0.25)  # Bigger trees!
             dna.width_gene = Gene(0.2 + rng.random() * 0.3, 0.1, 0.6, 0.15)
             dna.trunk_segments = [
                 SegmentGene(
@@ -577,7 +577,7 @@ class PlantDNA:
             dna.leaf_color = ColorGene(0.1 + rng.random() * 0.15, 0.3 + rng.random() * 0.4, 0.08 + rng.random() * 0.1)
             
         elif plant_type == PlantType.TALL_TREE:
-            dna.height_gene = Gene(12 + rng.random() * 12, 8, 30, 0.3)
+            dna.height_gene = Gene(15 + rng.random() * 20, 8, 50, 0.3)  # Giant trees!
             dna.width_gene = Gene(0.4 + rng.random() * 0.5, 0.2, 1.0, 0.2)
             dna.trunk_segments = [
                 SegmentGene(
@@ -666,7 +666,7 @@ class PlantDNA:
             
         elif plant_type == PlantType.PINE:
             # Coniferous pine tree
-            dna.height_gene = Gene(6 + rng.random() * 12, 4, 20, 0.25)
+            dna.height_gene = Gene(8 + rng.random() * 15, 4, 35, 0.25)  # Taller pines!
             dna.width_gene = Gene(0.3 + rng.random() * 0.3, 0.15, 0.7, 0.15)
             dna.trunk_segments = [
                 SegmentGene(1.0, 0.35, 0.92, 0, 0),
@@ -731,7 +731,7 @@ class PlantDNA:
             
         elif plant_type == PlantType.ALIEN:
             # Truly random/weird with high potential for complex branching
-            dna.height_gene = Gene(1 + rng.random() * 15, 0.5, 20, 0.35)
+            dna.height_gene = Gene(2 + rng.random() * 20, 0.5, 35, 0.35)  # Bigger aliens!
             dna.width_gene = Gene(0.1 + rng.random() * 0.5, 0.05, 1.0, 0.25)
             dna.trunk_segments = [
                 SegmentGene(

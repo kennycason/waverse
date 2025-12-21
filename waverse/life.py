@@ -42,12 +42,13 @@ class LifeConfig:
     # 0.05 = 3 game-minutes per real second (slower, more natural)
     TIME_SCALE = 0.05
     
-    # Plant growth rate multiplier (slower = more natural)
-    PLANT_GROWTH_RATE = 1.0
+    # Plant growth rate multiplier (higher = faster growth)
+    PLANT_GROWTH_RATE = 1.5  # 1.5x base growth (gentle but noticeable)
     
     # Plant visual scale range (min% to max% based on growth)
-    PLANT_MIN_SCALE = 0.3   # 30% at growth=0
-    PLANT_MAX_SCALE = 1.0   # 100% at growth=1
+    # Keep range small to avoid jarring size changes
+    PLANT_MIN_SCALE = 0.8   # 80% at growth=0 (reasonable start)
+    PLANT_MAX_SCALE = 1.1   # 110% at growth=1 (subtle max growth)
     
     # Growth variance - random variance in growth rate per plant
     GROWTH_VARIANCE = 0.5   # 0-50% variance
@@ -87,6 +88,10 @@ class LifeConfig:
     # Logging (set to False to disable console spam)
     LOG_ENABLED = False
     LOG_INTERVAL = 15.0  # Log stats every 15 seconds
+    
+    # Growth logging (separate toggle for debugging plant growth)
+    GROWTH_LOG_ENABLED = False  # Set to True to see [GROWTH] messages
+    GROWTH_LOG_INTERVAL = 5.0   # Log growth stats every N seconds
 
 
 class Gender(Enum):
@@ -389,6 +394,18 @@ class LifeSimulator:
         self.animals_ate: int = 0
         self.matings: int = 0
         self.eggs_hatched: int = 0
+        
+        # Growth tracking (for debug logging) - uses config values
+        self.growth_log_enabled: bool = LifeConfig.GROWTH_LOG_ENABLED
+        self.growth_log_interval: float = LifeConfig.GROWTH_LOG_INTERVAL
+        self.growth_log_timer: float = 0.0
+        self.growth_stats: dict = {
+            'plants_updated': 0,
+            'plants_grew': 0,
+            'total_growth': 0.0,
+            'max_growth_change': 0.0,
+            'plants_at_100': 0,
+        }
     
     def get_or_create_plant_life(self, plant_id: int, plant_size: float = None) -> PlantLife:
         """Get or create life state for a plant."""
@@ -533,6 +550,29 @@ class LifeSimulator:
         if LifeConfig.LOG_ENABLED and self.log_timer >= LifeConfig.LOG_INTERVAL:
             self._log_status(is_raining, is_day, sun_intensity)
             self.log_timer = 0.0
+        
+        # Growth tracking log (separate from main log)
+        self.growth_log_timer += dt
+        if self.growth_log_enabled and self.growth_log_timer >= self.growth_log_interval:
+            stats = self.growth_stats
+            if stats['plants_updated'] > 0:
+                avg_growth = stats['total_growth'] / max(1, stats['plants_grew']) * 100  # as %
+                pct_grew = stats['plants_grew'] / stats['plants_updated'] * 100
+                print(f"[GROWTH] {stats['plants_grew']}/{stats['plants_updated']} plants grew ({pct_grew:.0f}%), "
+                      f"avg +{avg_growth:.3f}%, max +{stats['max_growth_change']*100:.3f}%, "
+                      f"fully grown: {stats['plants_at_100']}")
+            else:
+                print(f"[GROWTH] No plants updated this cycle (skip_flora={skip_flora})")
+            
+            # Reset stats
+            self.growth_stats = {
+                'plants_updated': 0,
+                'plants_grew': 0,
+                'total_growth': 0.0,
+                'max_growth_change': 0.0,
+                'plants_at_100': 0,
+            }
+            self.growth_log_timer = 0.0
     
     def _update_plants(self, plants: list, dt_hours: float, 
                        is_raining: bool, is_day: bool, sun_intensity: float,
@@ -577,13 +617,21 @@ class LifeSimulator:
             max_scale = LifeConfig.PLANT_MAX_SCALE
             plant.scale = base_scale * (min_scale + life.growth * (max_scale - min_scale))
             
-            # Check for visual change (energy, growth, or scale changed)
-            # Be more aggressive - any change triggers refresh
-            if abs(old_fraction - new_fraction) > 0.01 or abs(old_growth - life.growth) > 0.005:
-                any_visual_change = True
-                # Verbose growth logging (commented out for performance)
-                # if LifeConfig.LOG_ENABLED and abs(old_growth - life.growth) > 0.02:
-                #     print(f"  [LIFE] Plant grew: {old_growth*100:.0f}% -> {life.growth*100:.0f}%")
+            # Only mark for refresh on DEATH (plant removal) - not on every growth tick!
+            # The scale change is gradual enough that we don't need to refresh display lists
+            # frequently. Plants naturally update when chunks are regenerated.
+            
+            # Track growth stats for logging
+            growth_change = life.growth - old_growth
+            if self.growth_log_enabled:
+                self.growth_stats['plants_updated'] += 1
+                if growth_change > 0.0001:
+                    self.growth_stats['plants_grew'] += 1
+                    self.growth_stats['total_growth'] += growth_change
+                    if growth_change > self.growth_stats['max_growth_change']:
+                        self.growth_stats['max_growth_change'] = growth_change
+                if life.growth >= 0.99:
+                    self.growth_stats['plants_at_100'] += 1
             
             # Check for death - mark for removal
             if not life.is_alive():

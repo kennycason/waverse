@@ -940,6 +940,9 @@ class AnimalManager:
     
     def spawn_baby_animal(self, x: float, y: float, z: float, parent_dna: dict):
         """Spawn a baby animal at the location where an egg hatched."""
+        # Debug logging (disabled by default)
+        # print(f"[HATCH] Spawning baby animal at ({x:.1f}, {y:.1f}, {z:.1f}) from parent: {parent_dna.get('animal_type', 'unknown')}")
+        
         # Determine chunk
         chunk_size = 128  # Approximate chunk size in world units
         cx = int(x // chunk_size)
@@ -968,14 +971,16 @@ class AnimalManager:
         elif dna.movement_type in (MovementType.SWIM, MovementType.FLOAT):
             world_y = max(0.5, y)  # In water
         
-        # Create baby animal (smaller scale)
+        # Create baby animal (smaller but visible scale)
         animal = AnimalInstance(
             x=x, y=world_y, z=z,
             dna=dna,
             rotation=np.random.random() * 360,
             anim_phase=np.random.random(),
-            scale=0.3  # Baby starts small!
+            scale=0.5  # Baby starts at 50% (was 30%, too hard to see)
         )
+        # Debug logging (disabled by default)
+        # print(f"[HATCH] Created {dna.animal_type} baby at chunk {key}, total animals: {len(self.animals) + 1}")
         
         # Add to collections
         if key not in self.chunk_animals:
