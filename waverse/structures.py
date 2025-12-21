@@ -1165,7 +1165,7 @@ class StructureRenderer:
     
     @staticmethod
     def _draw_bbox(structure: Structure):
-        """Draw a simple bounding box for very distant structures."""
+        """Draw a solid bounding box for very distant structures."""
         min_x, min_y, min_z = structure.bbox_min
         max_x, max_y, max_z = structure.bbox_max
         
@@ -1177,23 +1177,44 @@ class StructureRenderer:
         else:
             color = (0.5, 0.5, 0.5)
         
-        glColor3f(*color)
+        # Slightly darker for sides to give depth
+        side_color = tuple(c * 0.85 for c in color)
+        bottom_color = tuple(c * 0.7 for c in color)
+        
         glBegin(GL_QUADS)
-        # Front
+        # Front (bright)
+        glColor3f(*color)
         glVertex3f(min_x, min_y, max_z)
         glVertex3f(max_x, min_y, max_z)
         glVertex3f(max_x, max_y, max_z)
         glVertex3f(min_x, max_y, max_z)
-        # Back
+        # Back (bright)
         glVertex3f(max_x, min_y, min_z)
         glVertex3f(min_x, min_y, min_z)
         glVertex3f(min_x, max_y, min_z)
         glVertex3f(max_x, max_y, min_z)
-        # Top
+        # Top (brightest)
         glVertex3f(min_x, max_y, min_z)
         glVertex3f(min_x, max_y, max_z)
         glVertex3f(max_x, max_y, max_z)
         glVertex3f(max_x, max_y, min_z)
+        # Left side (darker)
+        glColor3f(*side_color)
+        glVertex3f(min_x, min_y, min_z)
+        glVertex3f(min_x, min_y, max_z)
+        glVertex3f(min_x, max_y, max_z)
+        glVertex3f(min_x, max_y, min_z)
+        # Right side (darker)
+        glVertex3f(max_x, min_y, max_z)
+        glVertex3f(max_x, min_y, min_z)
+        glVertex3f(max_x, max_y, min_z)
+        glVertex3f(max_x, max_y, max_z)
+        # Bottom (darkest - usually not visible but completes the box)
+        glColor3f(*bottom_color)
+        glVertex3f(min_x, min_y, max_z)
+        glVertex3f(min_x, min_y, min_z)
+        glVertex3f(max_x, min_y, min_z)
+        glVertex3f(max_x, min_y, max_z)
         glEnd()
 
 
@@ -1346,29 +1367,32 @@ class StructureManager:
         avg_height = sum(terrain_heights) / len(terrain_heights)
         
         if avg_height < 8:
-            # Near water - industrial/warehouse
+            # Near water - industrial/warehouse/docks
             building_types = [
-                BuildingType.WAREHOUSE, BuildingType.FACTORY, 
+                BuildingType.WAREHOUSE, BuildingType.FACTORY, BuildingType.HANGAR,
                 BuildingType.SHOP, BuildingType.HOUSE, BuildingType.PARKOUR
             ]
         elif avg_height < 25:
-            # Lowlands - mixed
+            # Lowlands - mixed urban
             building_types = [
                 BuildingType.HOUSE, BuildingType.APARTMENT, BuildingType.SHOP,
-                BuildingType.OFFICE, BuildingType.WAREHOUSE, BuildingType.VILLA,
+                BuildingType.OFFICE, BuildingType.TOWER, BuildingType.HOTEL,
+                BuildingType.WAREHOUSE, BuildingType.VILLA, BuildingType.HANGAR,
                 BuildingType.PARKOUR
             ]
         elif avg_height < 45:
-            # Hills - residential
+            # Hills - residential/resort
             building_types = [
                 BuildingType.HOUSE, BuildingType.VILLA, BuildingType.TEMPLE,
-                BuildingType.OBSERVATORY, BuildingType.APARTMENT, BuildingType.PARKOUR
+                BuildingType.OBSERVATORY, BuildingType.APARTMENT, BuildingType.HOTEL,
+                BuildingType.PARKOUR
             ]
         else:
-            # Mountain - special
+            # Mountain - special/remote
             building_types = [
                 BuildingType.TEMPLE, BuildingType.OBSERVATORY, 
-                BuildingType.RUINS, BuildingType.MONUMENT, BuildingType.PARKOUR
+                BuildingType.RUINS, BuildingType.MONUMENT, BuildingType.TOWER,
+                BuildingType.PARKOUR
             ]
         
         building_type = rng.choice(building_types)
