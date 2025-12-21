@@ -862,19 +862,19 @@ class AnimalManager:
                     # Big animals
                     AnimalType.MAMMAL, AnimalType.MAMMAL, AnimalType.MAMMAL,
                     AnimalType.DINOSAUR, AnimalType.DINOSAUR,
-                    AnimalType.CROC,
+                    AnimalType.CROC, AnimalType.CROC,
                     # Medium ground animals
-                    AnimalType.REPTILE, AnimalType.REPTILE,
+                    AnimalType.REPTILE, AnimalType.REPTILE, AnimalType.REPTILE,
                     AnimalType.HOPPER, AnimalType.HOPPER,  # Rabbits, frogs
-                    AnimalType.WORM, AnimalType.WORM,      # Snakes
+                    AnimalType.WORM, AnimalType.WORM, AnimalType.WORM, AnimalType.WORM,  # Snakes/worms - more common!
                     # Small crawlers - new types!
-                    AnimalType.SPIDER, AnimalType.SPIDER,
-                    AnimalType.CENTIPEDE,
-                    AnimalType.TRILOBITE,
-                    AnimalType.INSECT,
-                    AnimalType.SNAIL,
+                    AnimalType.SPIDER, AnimalType.SPIDER, AnimalType.SPIDER,
+                    AnimalType.CENTIPEDE, AnimalType.CENTIPEDE,
+                    AnimalType.TRILOBITE, AnimalType.TRILOBITE,
+                    AnimalType.INSECT, AnimalType.INSECT,
+                    AnimalType.SNAIL, AnimalType.SNAIL,
                     # Occasional flyers
-                    AnimalType.BIRD,
+                    AnimalType.BIRD, AnimalType.BIRD,
                     AnimalType.METROID,  # Rare floating horror
                     # Weird creatures
                     AnimalType.AMOEBA,
@@ -884,16 +884,17 @@ class AnimalManager:
             elif ground_h < 30:
                 # Hills - diverse ground animals
                 animal_type = rng.choice([
-                    AnimalType.MAMMAL, AnimalType.MAMMAL, AnimalType.MAMMAL,
-                    AnimalType.DINOSAUR,
+                    AnimalType.MAMMAL, AnimalType.MAMMAL,
+                    AnimalType.DINOSAUR, AnimalType.DINOSAUR,
                     AnimalType.REPTILE, AnimalType.REPTILE,
                     AnimalType.HOPPER, AnimalType.HOPPER,
-                    AnimalType.SPIDER,
-                    AnimalType.CENTIPEDE,
-                    AnimalType.WORM,
+                    AnimalType.SPIDER, AnimalType.SPIDER,
+                    AnimalType.CENTIPEDE, AnimalType.CENTIPEDE,
+                    AnimalType.WORM, AnimalType.WORM, AnimalType.WORM,  # More snakes in hills
                     AnimalType.BIRD, AnimalType.BIRD,
-                    AnimalType.INSECT,
+                    AnimalType.INSECT, AnimalType.INSECT,
                     AnimalType.TRILOBITE,
+                    AnimalType.SNAIL,
                 ])
             else:
                 # High ground - hardy mammals, birds, some hoppers

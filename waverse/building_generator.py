@@ -11,7 +11,7 @@ import numpy as np
 from OpenGL.GL import *
 
 from .building_dna import BuildingDNA, BuildingType, RoofType, WallStyle, ColorPalette
-from .structures import Structure, Wall, Floor, Ramp, Pillar
+from .structures import Structure, Wall, Floor, Ramp, Pillar, Doorway, Arch, Staircase
 
 
 def generate_building_from_dna(
@@ -65,15 +65,57 @@ def generate_building_from_dna(
         floor_hw = hw - inset
         floor_hd = hd - inset
         
-        # Add floor slab (except ground floor unless on slope)
+        # Stair configuration (consistent across floors)
+        stair_width = 3.0   # Wide enough to walk on
+        stair_length = dna.floor_height * 1.5  # Matches Staircase.length property
+        stair_margin = 1.5  # Gap from wall (increased for safety)
+        has_stairs = dna.floors > 1 and dna.has_stairs
+        
+        # Determine stair position (consistent for all floors)
+        # entrance_wall: 0=+Z front, 1=-Z back, 2=-X left, 3=+X right
+        # Put stairs in back corner, opposite from entrance
+        # Stairs go along the back (-Z) wall, running in +X direction
+        # This keeps them away from the front entrance
+        
+        # Position stairs in back-left corner, running toward back-right
+        # Stair origin is at bottom step, stairs extend in +X direction
+        stair_dir = 0  # Stairs go in +X direction
+        stair_x = x - floor_hw + stair_margin  # Start near left wall (inside)
+        stair_z = z - floor_hd + stair_margin + stair_width / 2  # Near back wall (inside)
+        
+        # Opening is where stairs arrive at top (at end of stair length)
+        opening_x = stair_x + stair_length / 2  # Center of opening
+        opening_z = stair_z
+        
+        # If entrance is at back, flip stairs to front
+        if dna.entrance_wall == 1:  # Entrance at -Z (back)
+            stair_z = z + floor_hd - stair_margin - stair_width / 2  # Near front wall
+            opening_z = stair_z
+        
+        floor_color = tuple(c * 0.85 for c in dna.colors.primary)
+        
+        # Determine if stairs are at front or back
+        stairs_at_back = dna.entrance_wall != 1  # True unless entrance is at back
+        
+        # Add floor slab(s) - with stair opening on upper floors
         if floor_idx > 0 or (terrain_heights and base_y > min_terrain + 1):
-            structure.floors.append(Floor(
-                x=x, y=floor_y, z=z,
-                width=floor_hw * 2 + 0.5,
-                depth=floor_hd * 2 + 0.5,
-                thickness=0.4,
-                color=tuple(c * 0.85 for c in dna.colors.primary)
-            ))
+            if has_stairs and floor_idx > 0:
+                # Upper floor with stair opening - create floor pieces around the opening
+                # Opening area: stair_length x stair_width centered at (opening_x, opening_z)
+                _add_floor_with_opening(
+                    structure, x, floor_y, z, floor_hw, floor_hd,
+                    opening_x, opening_z, stair_length, stair_width,
+                    stairs_at_back, floor_color
+                )
+            else:
+                # Ground floor or no stairs - full floor
+                structure.floors.append(Floor(
+                    x=x, y=floor_y, z=z,
+                    width=floor_hw * 2 + 0.5,
+                    depth=floor_hd * 2 + 0.5,
+                    thickness=0.4,
+                    color=floor_color
+                ))
         
         # Add walls
         _add_floor_walls(structure, x, floor_y, z, floor_hw, floor_hd, 
@@ -82,6 +124,18 @@ def generate_building_from_dna(
         # Add balconies (upper floors only)
         if dna.has_balconies and floor_idx > 0:
             _add_balconies(structure, x, floor_y, z, floor_hw, floor_hd, dna, rng)
+        
+        # Add interior stairs to next floor (not on top floor)
+        if has_stairs and floor_idx < dna.floors - 1:
+            structure.staircases.append(Staircase(
+                x=stair_x,
+                y_bottom=floor_y,
+                y_top=floor_y + dna.floor_height,
+                z=stair_z,
+                width=stair_width,
+                direction=stair_dir,
+                color=tuple(c * 0.7 for c in dna.colors.primary)
+            ))
     
     # =========================================================================
     # ROOF
@@ -90,10 +144,23 @@ def generate_building_from_dna(
     _add_roof(structure, x, roof_y, z, hw, hd, dna, rng)
     
     # =========================================================================
-    # ENTRANCE / AWNING
+    # ENTRANCE / AWNING / ENTRANCE STAIRS
     # =========================================================================
     if dna.has_awning:
         _add_awning(structure, x, base_y, z, hw, hd, dna, rng)
+    
+    # Add entrance stairs/ramp if ground floor is elevated
+    if terrain_heights:
+        min_terrain = min(terrain_heights)
+        entrance_height = base_y - min_terrain
+        if entrance_height > 0.5:  # Door is elevated, need stairs to reach it
+            _add_entrance_stairs(structure, x, base_y, z, hw, hd, dna, min_terrain)
+    
+    # =========================================================================
+    # DECORATIVE ARCHES (temples, monuments, villas)
+    # =========================================================================
+    if dna.building_type in (BuildingType.TEMPLE, BuildingType.MONUMENT, BuildingType.VILLA):
+        _add_decorative_arches(structure, x, base_y, z, hw, hd, dna, rng)
     
     # =========================================================================
     # ROOFTOP FEATURES
@@ -109,6 +176,77 @@ def generate_building_from_dna(
     
     structure.compute_bounds()
     return structure
+
+
+def _add_floor_with_opening(structure: Structure, x: float, floor_y: float, z: float,
+                            hw: float, hd: float,
+                            opening_x: float, opening_z: float,
+                            opening_length: float, opening_width: float,
+                            stairs_at_back: bool, color: tuple):
+    """
+    Create floor rectangles around a stair opening.
+    Stairs run in X direction, opening is at stair top.
+    
+    Layout (top view, stairs at back -Z):
+    |-----------------------|
+    |  [stair area/opening] |   <- back (stair side)
+    |-----------------------|
+    |                       |
+    |    main floor (r2)    |   <- rest of floor
+    |                       |
+    |-----------------------|
+    """
+    thickness = 0.4
+    gap = 0.2  # Small gap around opening
+    
+    # Opening dimensions (stairs run in X, opening is stair_length x stair_width)
+    opening_half_x = opening_length / 2
+    opening_half_z = opening_width / 2
+    
+    # Main floor section - the large area away from the stair opening
+    if stairs_at_back:
+        # Opening near -Z, main floor toward +Z
+        r2_z1 = opening_z + opening_half_z + gap
+        r2_z2 = z + hd
+    else:
+        # Opening near +Z, main floor toward -Z
+        r2_z1 = z - hd
+        r2_z2 = opening_z - opening_half_z - gap
+    
+    if r2_z2 > r2_z1 + 1.0:
+        structure.floors.append(Floor(
+            x=x, y=floor_y, z=(r2_z1 + r2_z2) / 2,
+            width=hw * 2 + 0.5,
+            depth=r2_z2 - r2_z1,
+            thickness=thickness, color=color
+        ))
+    
+    # Side sections next to opening (left and right of the opening)
+    # Left section: from left wall to left edge of opening
+    left_x1 = x - hw
+    left_x2 = opening_x - opening_half_x - gap
+    if left_x2 > left_x1 + 0.5:
+        stair_row_z1 = opening_z - opening_half_z
+        stair_row_z2 = opening_z + opening_half_z
+        structure.floors.append(Floor(
+            x=(left_x1 + left_x2) / 2, y=floor_y, z=(stair_row_z1 + stair_row_z2) / 2,
+            width=left_x2 - left_x1,
+            depth=stair_row_z2 - stair_row_z1,
+            thickness=thickness, color=color
+        ))
+    
+    # Right section: from right edge of opening to right wall
+    right_x1 = opening_x + opening_half_x + gap
+    right_x2 = x + hw
+    if right_x2 > right_x1 + 0.5:
+        stair_row_z1 = opening_z - opening_half_z
+        stair_row_z2 = opening_z + opening_half_z
+        structure.floors.append(Floor(
+            x=(right_x1 + right_x2) / 2, y=floor_y, z=(stair_row_z1 + stair_row_z2) / 2,
+            width=right_x2 - right_x1,
+            depth=stair_row_z2 - stair_row_z1,
+            thickness=thickness, color=color
+        ))
 
 
 def _add_support_pillars(structure: Structure, x: float, base_y: float, z: float,
@@ -175,7 +313,9 @@ def _add_floor_walls(structure: Structure, x: float, floor_y: float, z: float,
         
         if is_door_wall:
             # Door opening - split wall into two segments
-            door_width = 3.0
+            # Player needs ~4 units height and ~3 units width to fit comfortably
+            door_width = 4.0
+            door_height = min(5.5, actual_height * 0.9)  # Taller door for player
             left_width = (length - door_width) / 2 - 0.5
             right_width = left_width
             
@@ -200,6 +340,16 @@ def _add_floor_walls(structure: Structure, x: float, floor_y: float, z: float,
                     thickness=wall_thickness, rotation=rot,
                     color=dna.colors.primary
                 ))
+            
+            # Add doorway frame with optional arch
+            has_arch = rng.random() < 0.3  # 30% chance of arched doorway
+            structure.doorways.append(Doorway(
+                x=wx, y=floor_y, z=wz,
+                width=door_width, height=door_height,
+                rotation=rot,
+                frame_color=tuple(c * 0.6 for c in dna.colors.primary),
+                has_arch=has_arch
+            ))
         else:
             # Regular wall - may have windows
             if dna.has_windows and floor_idx > 0:
@@ -532,6 +682,102 @@ def _add_awning(structure: Structure, x: float, base_y: float, z: float,
         thickness=0.2,
         color=awning_color
     ))
+
+
+def _add_entrance_stairs(structure: Structure, x: float, base_y: float, z: float,
+                         hw: float, hd: float, dna: BuildingDNA, ground_y: float):
+    """Add external stairs to reach an elevated entrance."""
+    entrance_wall = dna.entrance_wall
+    entrance_height = base_y - ground_y
+    stair_width = 4.0  # Wide entrance stairs
+    stair_length = entrance_height * 1.5  # Horizontal run (comfortable slope)
+    
+    # Staircase class draws from origin (step 0, bottom) toward direction (step N, top)
+    # Origin must be at ground level, away from building
+    # Top step must end up at the door (at wall)
+    # Direction: 0=+X, 90=+Z, 180=-X, 270=-Z
+    
+    # entrance_wall: 0=+Z front, 1=-Z back, 2=-X left, 3=+X right
+    # Origin AT door, stairs extend OUTWARD (away from building)
+    # Swapping y_bottom/y_top to flip the stair geometry
+    if entrance_wall == 0:  # Door at +Z front wall
+        stair_x = x
+        stair_z = z + hd
+        stair_dir = 90  # Outward (+Z)
+    elif entrance_wall == 1:  # Door at -Z back wall  
+        stair_x = x
+        stair_z = z - hd
+        stair_dir = 270  # Outward (-Z)
+    elif entrance_wall == 2:  # Door at -X left wall
+        stair_x = x - hw
+        stair_z = z
+        stair_dir = 180  # Outward (-X)
+    else:  # Door at +X right wall
+        stair_x = x + hw
+        stair_z = z
+        stair_dir = 0  # Outward (+X)
+    
+    # Swap y_bottom/y_top: origin is at door (high), stairs descend outward
+    structure.staircases.append(Staircase(
+        x=stair_x,
+        y_bottom=base_y,  # Swapped: door level at origin
+        y_top=ground_y,   # Swapped: ground level at far end
+        z=stair_z,
+        width=stair_width,
+        direction=stair_dir,
+        color=tuple(c * 0.8 for c in dna.colors.primary)
+    ))
+
+
+def _add_decorative_arches(structure: Structure, x: float, base_y: float, z: float,
+                           hw: float, hd: float, dna: BuildingDNA, 
+                           rng: np.random.Generator):
+    """Add decorative arches at entrance or around the building."""
+    entrance_wall = dna.entrance_wall
+    arch_height = dna.floor_height * 1.2
+    arch_width = dna.width * 0.4
+    
+    # Main entrance arch
+    if entrance_wall == 0:  # +Z
+        ax, az = x, z + hd + 1.5
+        rot = 0
+    elif entrance_wall == 1:  # -Z
+        ax, az = x, z - hd - 1.5
+        rot = 180
+    elif entrance_wall == 2:  # -X
+        ax, az = x - hw - 1.5, z
+        arch_width = dna.depth * 0.4
+        rot = 90
+    else:  # +X
+        ax, az = x + hw + 1.5, z
+        arch_width = dna.depth * 0.4
+        rot = -90
+    
+    # Add entrance arch
+    structure.arches.append(Arch(
+        x=ax, y=base_y, z=az,
+        width=arch_width, height=arch_height,
+        thickness=0.6, rotation=rot,
+        color=tuple(c * 0.85 for c in dna.colors.primary)
+    ))
+    
+    # For temples, add side arches
+    if dna.building_type == BuildingType.TEMPLE:
+        # Colonnade of arches along the sides
+        num_arches = max(2, int(max(hw, hd) / 4))
+        spacing = (hw * 2 - arch_width) / max(1, num_arches)
+        
+        for i in range(num_arches):
+            offset = -hw + arch_width/2 + i * spacing + spacing/2
+            
+            # Side arches (perpendicular to entrance)
+            if entrance_wall in [0, 1]:  # Entrance on Z, arches on X
+                structure.arches.append(Arch(
+                    x=x + offset, y=base_y, z=z - hd - 1.0,
+                    width=arch_width * 0.8, height=arch_height * 0.9,
+                    thickness=0.4, rotation=180,
+                    color=tuple(c * 0.8 for c in dna.colors.primary)
+                ))
 
 
 def _add_rooftop_features(structure: Structure, x: float, roof_y: float, z: float,

@@ -209,10 +209,8 @@ WALK_SMOOTH_SPEED = 0.4  # Faster terrain following
 
 # Speed levels - more granular at low end for smooth walking
 SPEED_LEVELS = [
-    0.02, 0.05, 0.08, 0.12, 0.18, 0.25, 0.35, 0.5,  # Walking speeds (8 levels)
-    0.7, 1.0, 1.5, 2.0, 3.0, 4.0,                    # Jogging/running (6 levels)
-    6.0, 10.0, 16.0, 32.0, 64.0, 128.0, 256.0        # Flying speeds (7 levels)
-]  # 21 total speed levels
+    0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0
+]  # 7 speed levels - L2 cycles through these (max 2x)
 
 # LOD settings - aggressive LOD for huge view distance
 LOD_FULL_DISTANCE = 5      # Full detail within this range
@@ -1198,7 +1196,7 @@ class Camera:
         self.flying = False  # Start in walking mode
         self.swimming = False  # In water, swim mode (fly but capped at surface)
         self.target_y = 40
-        self.speed_level = 9  # Default speed (1.0x walking) - index into SPEED_LEVELS
+        self.speed_level = 2  # Default speed (0.75x) - index into SPEED_LEVELS
         
         # Velocity tracking for HUD display
         self.prev_x = 0
@@ -1212,8 +1210,16 @@ class Camera:
         self.jumping = False
         self.falling = False  # Triggered by steep drops (cliff/building edge)
         self.jump_velocity = 0.0
-        self.gravity = 6.0   # Balanced gravity
-        self.jump_strength = 1.7  # ~2x normal - can reach 1st floor rooftops
+        self.gravity = 20.0  # Normal gravity (used when falling)
+        # Super Metroid style variable jump:
+        # Super Metroid style variable jump:
+        # - Holding jump = low gravity, you rise much higher and longer
+        # - Release jump = high gravity immediately cuts your ascent
+        # - Tap = short hop (~1 unit), Hold = full jump (~3-4 units)
+        self.gravity_held = 12.0  # Moderate gravity while holding
+        self.gravity_released = 60.0  # VERY high gravity when released (immediate stop)
+        self.jump_strength = 4.0  # Lower initial impulse for reasonable max height
+        self.jump_held = False  # Is jump button currently held?
         self.last_ground_y = 0.0  # Track previous ground height for cliff detection
         
         # Auto-fly / Tour mode: 0=off, 1=wander, 2=showcase
@@ -1333,7 +1339,8 @@ class Camera:
             self.log_index = max(0, min(len(self.log_items) - 1, self.log_index + direction))
     
     def update_scroll(self, dt: float, is_scrolling_up: bool, is_scrolling_down: bool):
-        """Update accelerated scrolling. Returns number of items to scroll."""
+        """Update accelerated scrolling. Returns number of items to scroll.
+        Tap = always moves one item. Hold = accelerates over time."""
         # Determine current scroll direction
         new_direction = 0
         if is_scrolling_up:
@@ -1346,8 +1353,9 @@ class Camera:
             self.scroll_direction = new_direction
             self.scroll_hold_time = 0.0
             self.scroll_cooldown = 0.0
-            # Immediate first scroll when starting
+            # Immediate first scroll on tap (always moves one item)
             if new_direction != 0:
+                self.scroll_cooldown = 0.35  # Delay before acceleration kicks in
                 return new_direction  # Scroll 1 item immediately
             return 0
         
@@ -1359,27 +1367,31 @@ class Camera:
         self.scroll_hold_time += dt
         self.scroll_cooldown -= dt
         
-        # Only scroll when cooldown expires
+        # Only scroll when cooldown expires (acceleration for holding)
         if self.scroll_cooldown > 0:
             return 0
         
         # Calculate scroll speed based on hold time (acceleration)
-        # 0-0.3s: slow (1 item every 0.2s)
-        # 0.3-1s: medium (1 item every 0.1s)  
-        # 1-2s: fast (2 items every 0.08s)
-        # 2s+: very fast (3 items every 0.05s)
-        if self.scroll_hold_time < 0.3:
+        # 0-0.5s: slow (1 item every 0.25s)
+        # 0.5-1.5s: medium (1 item every 0.15s)
+        # 1.5-3s: fast (1 item every 0.1s)
+        # 3-5s: faster (2 items every 0.08s)
+        # 5s+: very fast (3 items every 0.06s)
+        if self.scroll_hold_time < 0.5:
             scroll_amount = 1
-            self.scroll_cooldown = 0.2
-        elif self.scroll_hold_time < 1.0:
+            self.scroll_cooldown = 0.25
+        elif self.scroll_hold_time < 1.5:
+            scroll_amount = 1
+            self.scroll_cooldown = 0.15
+        elif self.scroll_hold_time < 3.0:
             scroll_amount = 1
             self.scroll_cooldown = 0.1
-        elif self.scroll_hold_time < 2.0:
+        elif self.scroll_hold_time < 5.0:
             scroll_amount = 2
             self.scroll_cooldown = 0.08
         else:
             scroll_amount = 3
-            self.scroll_cooldown = 0.05
+            self.scroll_cooldown = 0.06
         
         return scroll_amount * new_direction
     
@@ -1624,8 +1636,21 @@ class Camera:
             self.target_y = effective_ground
             
             if self.jumping or self.falling:
-                # Apply physics (same for jumping and falling)
-                self.jump_velocity -= self.gravity * 0.016  # Gravity
+                # Variable gravity for dynamic jumping (Mario-style)
+                # - Holding jump while rising = low gravity (higher jump)
+                # - Released jump while rising = high gravity (cut jump short)
+                # - Falling = normal gravity
+                if self.jump_velocity > 0:
+                    # Rising - gravity depends on whether jump is held
+                    if self.jump_held:
+                        current_gravity = self.gravity_held  # Float up longer
+                    else:
+                        current_gravity = self.gravity_released  # Cut jump short
+                else:
+                    # Falling - use normal gravity
+                    current_gravity = self.gravity
+                
+                self.jump_velocity -= current_gravity * 0.016
                 new_y = self.y + self.jump_velocity
                 
                 # Check for ceiling collision when jumping UP
@@ -1649,6 +1674,7 @@ class Camera:
                     self.jumping = False
                     self.falling = False
                     self.jump_velocity = 0.0
+                    self.jump_held = False
                     self.last_ground_y = effective_ground
             else:
                 # Walking - follow terrain/floor smoothly
@@ -1724,12 +1750,17 @@ class Camera:
         # Normalize: walking ~2-5, running ~10, flying fast ~50+
         return min(1.0, speed / 30.0)
     
-    def jump(self):
-        """Start a jump if on the ground and not already jumping/falling."""
+    def jump(self, held: bool = True):
+        """Start a jump if on the ground. held=True for variable jump height."""
         if not self.flying and not self.jumping and not self.falling:
             self.jumping = True
             self.falling = False
             self.jump_velocity = self.jump_strength
+            self.jump_held = held
+    
+    def update_jump_held(self, held: bool):
+        """Update whether jump button is being held (for variable jump height)."""
+        self.jump_held = held
     
     def add_marker(self):
         """Add a marker at current position, using next available letter."""
@@ -2899,18 +2930,17 @@ def draw_menu(display: tuple, camera: Camera, hud_font=None):
             controls_gp = [
                 ("Left Stick", "Move"),
                 ("Right Stick", "Look around"),
-                ("L3", "Go down"),
-                ("R3", "Go up"),
-                ("L2 / R2", "Speed down/up"),
-                ("A", "Jump"),
-                ("B (hold)", "Run (2x speed)"),
-                ("R1", "Use tool (ACTION)"),
-                ("D-PAD L/R", "Switch tool"),
-                ("L1", "Cycle tool radius"),
+                ("A", "Action/Talk (future)"),
+                ("B", "Jump (hold=higher)"),
+                ("X", "Toggle fly/walk"),
                 ("Y", "Screenshot"),
+                ("L2 / R2", "Speed down / up"),
+                ("R1", "Use tool"),
+                ("L3 (hold)", "Run (2x speed)"),
+                ("D-PAD ←→", "Cycle tools"),
+                ("D-PAD ↑↓", "Tool radius / Menu nav"),
                 ("START", "Menu"),
                 ("SELECT", "Warp to new world"),
-                ("X", "Tour mode"),
             ]
             
             for btn, action in controls_gp:
@@ -3030,6 +3060,8 @@ def draw_hud(display: tuple, camera: Camera, sky: SkySystem = None, climate: Cli
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
     
     # ========== TOP BAR: Coordinates + Compass ==========
+    # All elements use same top margin (10) as minimap
+    top_margin = 10
     top_bar_h = 36
     
     # Coordinates background (left side, after minimap ~190px)
@@ -3039,10 +3071,10 @@ def draw_hud(display: tuple, camera: Camera, sky: SkySystem = None, climate: Cli
     coord_h = 52   # Taller for 3 rows (X, Y, Z)
     glColor4f(0, 0, 0, 0.6)
     glBegin(GL_QUADS)
-    glVertex2f(coord_x, 6)
-    glVertex2f(coord_x + coord_w, 6)
-    glVertex2f(coord_x + coord_w, 6 + coord_h)
-    glVertex2f(coord_x, 6 + coord_h)
+    glVertex2f(coord_x, top_margin)
+    glVertex2f(coord_x + coord_w, top_margin)
+    glVertex2f(coord_x + coord_w, top_margin + coord_h)
+    glVertex2f(coord_x, top_margin + coord_h)
     glEnd()
     
     # Draw coordinate text using pygame font if available
@@ -3065,12 +3097,12 @@ def draw_hud(display: tuple, camera: Camera, sky: SkySystem = None, climate: Cli
         dy_text = f"∂Y: {vz:+5.1f}"
         dz_text = f"∂Z: {vy:+5.1f}"
         
-        _draw_text(hud_font, x_text, coord_x + 5, 10, (255, 180, 100))
-        _draw_text(hud_font, dx_text, coord_x + 115, 10, (200, 150, 80))
-        _draw_text(hud_font, y_text, coord_x + 5, 24, (100, 200, 255))
-        _draw_text(hud_font, dy_text, coord_x + 115, 24, (80, 160, 200))
-        _draw_text(hud_font, z_text, coord_x + 5, 38, (150, 255, 150))
-        _draw_text(hud_font, dz_text, coord_x + 115, 38, (120, 200, 120))
+        _draw_text(hud_font, x_text, coord_x + 5, top_margin + 4, (255, 180, 100))
+        _draw_text(hud_font, dx_text, coord_x + 115, top_margin + 4, (200, 150, 80))
+        _draw_text(hud_font, y_text, coord_x + 5, top_margin + 18, (100, 200, 255))
+        _draw_text(hud_font, dy_text, coord_x + 115, top_margin + 18, (80, 160, 200))
+        _draw_text(hud_font, z_text, coord_x + 5, top_margin + 32, (150, 255, 150))
+        _draw_text(hud_font, dz_text, coord_x + 115, top_margin + 32, (120, 200, 120))
     else:
         # Fallback: draw simple coordinate indicators
         glColor4f(1.0, 0.7, 0.4, 1.0)
@@ -3081,74 +3113,94 @@ def draw_hud(display: tuple, camera: Camera, sky: SkySystem = None, climate: Cli
     # Compass background (adjusted position for wider coord box)
     compass_x = coord_x + coord_w + 10
     compass_w = 350  # Slightly narrower to fit
+    compass_y = top_margin  # Same top margin
+    compass_h = top_bar_h
+    compass_center_y = compass_y + compass_h / 2  # Vertical center of compass
+    
     glColor4f(0, 0, 0, 0.6)
     glBegin(GL_QUADS)
-    glVertex2f(compass_x, 10)
-    glVertex2f(compass_x + compass_w, 10)
-    glVertex2f(compass_x + compass_w, 10 + top_bar_h)
-    glVertex2f(compass_x, 10 + top_bar_h)
+    glVertex2f(compass_x, compass_y)
+    glVertex2f(compass_x + compass_w, compass_y)
+    glVertex2f(compass_x + compass_w, compass_y + compass_h)
+    glVertex2f(compass_x, compass_y + compass_h)
     glEnd()
     
     # Compass center line
     compass_center = compass_x + compass_w / 2
     glColor4f(0.5, 0.5, 0.5, 0.8)
     glBegin(GL_LINES)
-    glVertex2f(compass_x + 10, 28)
-    glVertex2f(compass_x + compass_w - 10, 28)
+    glVertex2f(compass_x + 10, compass_center_y)
+    glVertex2f(compass_x + compass_w - 10, compass_center_y)
     glEnd()
     
     # Center tick mark
     glColor4f(1.0, 1.0, 1.0, 0.9)
     glBegin(GL_LINES)
-    glVertex2f(compass_center, 22)
-    glVertex2f(compass_center, 34)
+    glVertex2f(compass_center, compass_center_y - 6)
+    glVertex2f(compass_center, compass_center_y + 6)
     glEnd()
     
-    # North marker only - red circle with "N"
+    # North and South markers - inverted so turning right moves markers left
     yaw = camera.yaw
     
-    # North direction (yaw 0)
-    north_diff = 0 - yaw
-    while north_diff > 180: north_diff -= 360
-    while north_diff < -180: north_diff += 360
+    # Helper to draw compass direction marker
+    def draw_compass_marker(direction_angle, letter, fill_color, outline_color):
+        diff = direction_angle - yaw
+        while diff > 180: diff -= 360
+        while diff < -180: diff += 360
+        
+        if abs(diff) < 90:
+            # INVERTED: negative sign so turning right moves marker left
+            pos_x = compass_center - (diff / 90) * (compass_w / 2 - 30)
+            cy = compass_center_y  # Use compass vertical center
+            radius = 12
+            
+            # Filled circle
+            glColor4f(*fill_color)
+            glBegin(GL_TRIANGLE_FAN)
+            glVertex2f(pos_x, cy)
+            for i in range(13):
+                angle = (i / 12) * 2 * math.pi
+                glVertex2f(pos_x + math.cos(angle) * radius, cy + math.sin(angle) * radius)
+            glEnd()
+            
+            # Outline
+            glColor4f(*outline_color)
+            glBegin(GL_LINE_LOOP)
+            for i in range(12):
+                angle = (i / 12) * 2 * math.pi
+                glVertex2f(pos_x + math.cos(angle) * radius, cy + math.sin(angle) * radius)
+            glEnd()
+            
+            # Letter
+            if letter == "N":
+                glBegin(GL_LINES)
+                glVertex2f(pos_x - 4, cy + 4)
+                glVertex2f(pos_x - 4, cy - 4)
+                glVertex2f(pos_x - 4, cy - 4)
+                glVertex2f(pos_x + 4, cy + 4)
+                glVertex2f(pos_x + 4, cy + 4)
+                glVertex2f(pos_x + 4, cy - 4)
+                glEnd()
+            elif letter == "S":
+                # Draw "S" shape
+                glBegin(GL_LINE_STRIP)
+                glVertex2f(pos_x + 3, cy - 4)
+                glVertex2f(pos_x - 3, cy - 4)
+                glVertex2f(pos_x - 3, cy)
+                glVertex2f(pos_x + 3, cy)
+                glVertex2f(pos_x + 3, cy + 4)
+                glVertex2f(pos_x - 3, cy + 4)
+                glEnd()
     
-    # Only show if within view range (-90 to +90 degrees)
-    if abs(north_diff) < 90:
-        pos_x = compass_center + (north_diff / 90) * (compass_w / 2 - 30)
-        radius = 12
-        
-        # Red filled circle
-        glColor4f(1.0, 0.3, 0.3, 0.9)
-        glBegin(GL_TRIANGLE_FAN)
-        glVertex2f(pos_x, 28)
-        for i in range(13):
-            angle = (i / 12) * 2 * math.pi
-            glVertex2f(pos_x + math.cos(angle) * radius, 28 + math.sin(angle) * radius)
-        glEnd()
-        
-        # White outline
-        glColor4f(1, 1, 1, 1)
-        glBegin(GL_LINE_LOOP)
-        for i in range(12):
-            angle = (i / 12) * 2 * math.pi
-            glVertex2f(pos_x + math.cos(angle) * radius, 28 + math.sin(angle) * radius)
-        glEnd()
-        
-        # "N" letter inside (simple shape)
-        glBegin(GL_LINES)
-        # Left vertical
-        glVertex2f(pos_x - 4, 32)
-        glVertex2f(pos_x - 4, 24)
-        # Diagonal
-        glVertex2f(pos_x - 4, 24)
-        glVertex2f(pos_x + 4, 32)
-        # Right vertical
-        glVertex2f(pos_x + 4, 32)
-        glVertex2f(pos_x + 4, 24)
-        glEnd()
+    # North (yaw 0) - red
+    draw_compass_marker(0, "N", (1.0, 0.3, 0.3, 0.9), (1, 1, 1, 1))
+    # South (yaw 180) - blue
+    draw_compass_marker(180, "S", (0.3, 0.5, 0.9, 0.9), (1, 1, 1, 1))
     
     # Draw markers on compass (labeled A, B, C...)
     marker_labels = "ABCDEFGHIJ"
+    cy = compass_center_y  # Vertical center
     for idx, (mx, mz, mcolor, mname) in enumerate(camera.markers):
         # Calculate angle to marker
         dx = mx - camera.x
@@ -3162,16 +3214,17 @@ def draw_hud(display: tuple, camera: Camera, sky: SkySystem = None, climate: Cli
         
         # Show if within range
         if abs(diff) < 90:
-            pos_x = compass_center + (diff / 90) * (compass_w / 2 - 30)
+            # INVERTED: negative sign for consistent compass behavior
+            pos_x = compass_center - (diff / 90) * (compass_w / 2 - 30)
             
             # Colored marker circle
             glColor4f(*mcolor, 0.9)
             radius = 10
             glBegin(GL_TRIANGLE_FAN)
-            glVertex2f(pos_x, 28)
+            glVertex2f(pos_x, cy)
             for j in range(13):
                 angle = (j / 12) * 2 * math.pi
-                glVertex2f(pos_x + math.cos(angle) * radius, 28 + math.sin(angle) * radius)
+                glVertex2f(pos_x + math.cos(angle) * radius, cy + math.sin(angle) * radius)
             glEnd()
             
             # White outline
@@ -3179,58 +3232,54 @@ def draw_hud(display: tuple, camera: Camera, sky: SkySystem = None, climate: Cli
             glBegin(GL_LINE_LOOP)
             for j in range(12):
                 angle = (j / 12) * 2 * math.pi
-                glVertex2f(pos_x + math.cos(angle) * radius, 28 + math.sin(angle) * radius)
+                glVertex2f(pos_x + math.cos(angle) * radius, cy + math.sin(angle) * radius)
             glEnd()
             
             # Draw letter (A, B, C...) - simplified letter shapes
             label = marker_labels[idx] if idx < len(marker_labels) else "?"
             if label == "A":
                 glBegin(GL_LINES)
-                glVertex2f(pos_x, 23)
-                glVertex2f(pos_x - 4, 33)
-                glVertex2f(pos_x, 23)
-                glVertex2f(pos_x + 4, 33)
-                glVertex2f(pos_x - 2, 29)
-                glVertex2f(pos_x + 2, 29)
+                glVertex2f(pos_x, cy - 5)
+                glVertex2f(pos_x - 4, cy + 5)
+                glVertex2f(pos_x, cy - 5)
+                glVertex2f(pos_x + 4, cy + 5)
+                glVertex2f(pos_x - 2, cy + 1)
+                glVertex2f(pos_x + 2, cy + 1)
                 glEnd()
             elif label == "B":
                 glBegin(GL_LINES)
-                glVertex2f(pos_x - 3, 23)
-                glVertex2f(pos_x - 3, 33)
-                glVertex2f(pos_x - 3, 23)
-                glVertex2f(pos_x + 2, 23)
-                glVertex2f(pos_x - 3, 28)
-                glVertex2f(pos_x + 2, 28)
-                glVertex2f(pos_x - 3, 33)
-                glVertex2f(pos_x + 2, 33)
+                glVertex2f(pos_x - 3, cy - 5)
+                glVertex2f(pos_x - 3, cy + 5)
+                glVertex2f(pos_x - 3, cy - 5)
+                glVertex2f(pos_x + 2, cy - 5)
+                glVertex2f(pos_x - 3, cy)
+                glVertex2f(pos_x + 2, cy)
+                glVertex2f(pos_x - 3, cy + 5)
+                glVertex2f(pos_x + 2, cy + 5)
                 glEnd()
             elif label == "C":
                 glBegin(GL_LINE_STRIP)
-                glVertex2f(pos_x + 3, 24)
-                glVertex2f(pos_x - 2, 24)
-                glVertex2f(pos_x - 3, 28)
-                glVertex2f(pos_x - 2, 32)
-                glVertex2f(pos_x + 3, 32)
+                glVertex2f(pos_x + 3, cy - 4)
+                glVertex2f(pos_x - 2, cy - 4)
+                glVertex2f(pos_x - 3, cy)
+                glVertex2f(pos_x - 2, cy + 4)
+                glVertex2f(pos_x + 3, cy + 4)
                 glEnd()
             else:
                 # Simple dot for other letters
                 glBegin(GL_QUADS)
-                glVertex2f(pos_x - 2, 26)
-                glVertex2f(pos_x + 2, 26)
-                glVertex2f(pos_x + 2, 30)
-                glVertex2f(pos_x - 2, 30)
+                glVertex2f(pos_x - 2, cy - 2)
+                glVertex2f(pos_x + 2, cy - 2)
+                glVertex2f(pos_x + 2, cy + 2)
+                glVertex2f(pos_x - 2, cy + 2)
                 glEnd()
     
-    # Info box
+    # Info box - match minimap height (180) and top margin (10)
     has_climate = climate is not None
     box_w = 180
-    box_h = 70
-    if sky:
-        box_h += 20
-    if has_climate:
-        box_h += 40
+    box_h = 180  # Match minimap height
     box_x = display[0] - box_w - 10
-    box_y = 10
+    box_y = 10  # Same top margin as minimap
     
     glColor4f(0, 0, 0, 0.6)
     glBegin(GL_QUADS)
@@ -3421,15 +3470,16 @@ def draw_hud(display: tuple, camera: Camera, sky: SkySystem = None, climate: Cli
     # ========== TOOL DISPLAY (to the right of compass) ==========
     tool_x = compass_x + compass_w + 15
     tool_w = 80
-    tool_h = 28
+    tool_h = top_bar_h  # Match compass height
+    tool_y = top_margin  # Same top margin
     
     # Background
     glColor4f(0, 0, 0, 0.7)
     glBegin(GL_QUADS)
-    glVertex2f(tool_x, 15)
-    glVertex2f(tool_x + tool_w, 15)
-    glVertex2f(tool_x + tool_w, 15 + tool_h)
-    glVertex2f(tool_x, 15 + tool_h)
+    glVertex2f(tool_x, tool_y)
+    glVertex2f(tool_x + tool_w, tool_y)
+    glVertex2f(tool_x + tool_w, tool_y + tool_h)
+    glVertex2f(tool_x, tool_y + tool_h)
     glEnd()
     
     # Tool-specific color
@@ -3444,15 +3494,15 @@ def draw_hud(display: tuple, camera: Camera, sky: SkySystem = None, climate: Cli
     
     # Tool indicator bar
     glBegin(GL_QUADS)
-    glVertex2f(tool_x + 5, 18)
-    glVertex2f(tool_x + tool_w - 5, 18)
-    glVertex2f(tool_x + tool_w - 5, 22)
-    glVertex2f(tool_x + 5, 22)
+    glVertex2f(tool_x + 5, tool_y + 3)
+    glVertex2f(tool_x + tool_w - 5, tool_y + 3)
+    glVertex2f(tool_x + tool_w - 5, tool_y + 7)
+    glVertex2f(tool_x + 5, tool_y + 7)
     glEnd()
     
     # Draw tool name with font if available
     if hud_font:
-        _draw_text(hud_font, camera.current_tool, tool_x + 10, 26, (255, 255, 255))
+        _draw_text(hud_font, camera.current_tool, tool_x + 10, tool_y + 16, (255, 255, 255))
     
     # Draw status message at bottom-left of screen
     if camera.status_message and camera.status_timer > 0 and hud_font:
@@ -3608,14 +3658,16 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
         camera.pitch = saved.get("pitch", -20)
         # ALWAYS start in walking mode - flying is for tour/explore only
         camera.flying = False
-        camera.speed_level = saved.get("speed_level", 9)  # Default to 1.0x speed
+        saved_speed = saved.get("speed_level", 2)
+        # If saved speed is out of range (from old config), reset to default
+        camera.speed_level = saved_speed if 0 <= saved_speed < len(SPEED_LEVELS) else 2
         print(f"  Loaded position: ({camera.x:.0f}, {camera.y:.0f}, {camera.z:.0f})")
         print(f"  (Starting in WALK mode)")
     else:
         # New game - start in walking mode at spawn
         camera.y = chunk_manager.get_height_at(0, 0) * HEIGHT_SCALE + 30
         camera.flying = False  # Walking mode
-        camera.speed_level = 9  # 1.0x speed (comfortable walking pace)
+        camera.speed_level = 2  # 0.75x speed (comfortable walking pace)
     
     # Pre-load chunks around camera position
     start_chunk = camera.get_chunk_pos()
@@ -3698,9 +3750,9 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
         print(f"  GAMEPAD ({gamepad.name}):")
         print(f"    Config: L-Stick X={GamepadConfig.L_STICK_X} Y={GamepadConfig.L_STICK_Y}")
         print(f"    Config: R-Stick X={GamepadConfig.R_STICK_X} Y={GamepadConfig.R_STICK_Y}")
-        print("    Left Stick=Move | Right Stick=Look | B(hold)=Run")
-        print("    L3=Down | R3=Up | L2/R2=Speed | A=Jump | R1=ACTION | Y=Screenshot")
-        print("    DPAD L/R=Switch Tool | L1=Tool Size | START=Menu | SELECT=Warp")
+        print("    Left Stick=Move | Right Stick=Look")
+        print("    A=Action | B=Jump | X=Fly/Walk | Y=Screenshot")
+        print("    L2/R2=Speed | R1=Tool | DPAD=Cycle | L3=Run | START=Menu | SELECT=Warp")
     print("=" * 60 + "\n")
     
     clock = pygame.time.Clock()
@@ -3915,73 +3967,90 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                 gamepad_look_speed = dt * 2.5
                 camera.rotate_keyboard(gp_look[0] * gamepad_look_speed, gp_look[1] * gamepad_look_speed)
                 
-                # L3 = go down, R3 = go up
-                up += gamepad.get_vertical() * dt * speed
+                # In fly mode, vertical movement comes from look direction + forward
+                # No more L3/R3 for up/down - more intuitive controls
             
-            # L2/R2 behavior depends on mode
+            # L2 = Speed down, R2 = Speed up
             l2_val, r2_val = gamepad.get_triggers()
-            
-            # Debug ALL axes to find the right one for R2
-            # if frame_count % 60 == 0:
-            #     axes_str = " ".join([f"{i}:{gamepad.get_axis_raw(i):+.2f}" for i in range(6)])
-            #     print(f"  [GP] Axes: {axes_str} | L2={l2_val:.2f} R2={r2_val:.2f}")
             
             if camera.auto_fly_mode > 0:
                 # TOUR MODE: L2/R2 adjust flight height
-                if l2_val > 0.3:  # L2 = lower height
+                if l2_val > 0.3:
                     camera.auto_fly_height -= l2_val * 0.5
                     camera.auto_fly_height = max(15, camera.auto_fly_height)
-                if r2_val > 0.3:  # R2 = raise height
+                if r2_val > 0.3:
                     camera.auto_fly_height += r2_val * 0.5
                     camera.auto_fly_height = min(100, camera.auto_fly_height)
             else:
-                # NORMAL MODE: L2/R2 for speed changes (with cooldown)
-                if gamepad_speed_cooldown <= 0:
-                    if l2_val > 0.7:  # L2 = decrease speed (faster response)
-                        new_level = max(0, camera.speed_level - 1)
-                        if new_level != camera.speed_level:
-                            camera.set_speed(new_level)
-                            print(f"  Speed: {SPEED_LEVELS[new_level]:.2f}x")
-                            gamepad_speed_cooldown = 12  # ~0.2 seconds - quick slow down
-                    elif r2_val > 0.7:  # R2 = increase speed (slower response)
-                        new_level = min(len(SPEED_LEVELS) - 1, camera.speed_level + 1)
-                        if new_level != camera.speed_level:
-                            camera.set_speed(new_level)
-                            print(f"  Speed: {SPEED_LEVELS[new_level]:.2f}x")
-                            gamepad_speed_cooldown = 30  # ~0.5 seconds - gradual speed up
+                # NORMAL MODE:
+                # L2 = speed down
+                if gamepad_speed_cooldown <= 0 and l2_val > 0.7:
+                    new_level = max(0, camera.speed_level - 1)
+                    if new_level != camera.speed_level:
+                        camera.set_speed(new_level)
+                        camera.set_status(f"Speed: {SPEED_LEVELS[new_level]:.2f}x", 1.0)
+                        print(f"  Speed: {SPEED_LEVELS[new_level]:.2f}x")
+                    gamepad_speed_cooldown = 15
+                
+                # R2 = speed up
+                if gamepad_speed_cooldown <= 0 and r2_val > 0.7:
+                    new_level = min(len(SPEED_LEVELS) - 1, camera.speed_level + 1)
+                    if new_level != camera.speed_level:
+                        camera.set_speed(new_level)
+                        camera.set_status(f"Speed: {SPEED_LEVELS[new_level]:.2f}x", 1.0)
+                        print(f"  Speed: {SPEED_LEVELS[new_level]:.2f}x")
+                    gamepad_speed_cooldown = 15
             
-            # A button = jump (in walk mode) - only when menu closed
-            if not camera.menu_open and gamepad.get_button(GamepadConfig.A):
-                camera.jump()
+            # L3 = Run (hold for 2x speed) - only when menu closed
+            if not camera.menu_open:
+                if gamepad.get_button(GamepadConfig.L3):
+                    camera.is_running = True
+                else:
+                    camera.is_running = False
             
-            # B button = RUN (doubles speed while held) - only when menu closed
+            # X button = Toggle fly/walk mode - only when menu closed
+            if not camera.menu_open and gamepad.get_button(GamepadConfig.X) and gamepad_speed_cooldown <= 0:
+                camera.flying = not camera.flying
+                mode_name = "FLY" if camera.flying else "WALK"
+                camera.set_status(f"Mode: {mode_name}", 1.5)
+                print(f"  Mode: {mode_name}")
+                gamepad_speed_cooldown = 20
+            
+            # B button = JUMP - only when menu closed
+            # Variable jump: hold for higher jump, tap for short hop
             b_pressed = gamepad.get_button(GamepadConfig.B)
-            if not camera.menu_open and b_pressed:
-                camera.is_running = True
-                # if frame_count % 30 == 0:
-                #     print(f"  [GP] B pressed - RUNNING")
-            else:
-                camera.is_running = False
+            if not camera.menu_open:
+                if b_pressed:
+                    camera.jump()  # Start jump if grounded
+                    camera.update_jump_held(True)  # Held = higher jump
+                else:
+                    camera.update_jump_held(False)  # Released = cut jump short
             
-            # R1 button = use current tool (ACTION) - only when menu closed
-            if not camera.menu_open and gamepad.get_button(GamepadConfig.R1) and gamepad_speed_cooldown <= 0:
-                if camera.current_tool == ToolType.SCAN:
-                    log_dna_at_cursor(camera, flora_manager, animal_manager)
-                elif camera.current_tool == ToolType.MINE:
-                    modified_chunks = modify_terrain_at_cursor(camera, chunk_manager, "MINE", camera.tool_radius)
-                    if modified_chunks:
-                        for chunk_key in modified_chunks:
-                            if chunk_key in chunk_renderer.display_lists:
-                                del chunk_renderer.display_lists[chunk_key]
-                elif camera.current_tool == ToolType.FILL:
-                    modified_chunks = modify_terrain_at_cursor(camera, chunk_manager, "FILL", camera.tool_radius)
-                    if modified_chunks:
-                        for chunk_key in modified_chunks:
-                            if chunk_key in chunk_renderer.display_lists:
-                                del chunk_renderer.display_lists[chunk_key]
-                gamepad_speed_cooldown = 20  # Faster for terrain tools
+            # A button = Action/Talk (currently unused, placeholder for future)
+            # if not camera.menu_open and gamepad.get_button(GamepadConfig.A) and gamepad_speed_cooldown <= 0:
+            #     # Future: interact with NPCs, objects, etc.
+            #     pass
             
-            # DPAD LEFT/RIGHT = cycle tools - only when menu closed
+            # R1 = Use tool (SCAN/MINE/FILL) - only when menu closed
+            if not camera.menu_open and gamepad_speed_cooldown <= 0:
+                if gamepad.get_button(GamepadConfig.R1):
+                    if camera.current_tool == ToolType.SCAN:
+                        log_dna_at_cursor(camera, flora_manager, animal_manager)
+                    elif camera.current_tool == ToolType.MINE:
+                        modified_chunks = modify_terrain_at_cursor(camera, chunk_manager, "MINE", camera.tool_radius)
+                        if modified_chunks:
+                            for chunk_key in modified_chunks:
+                                if chunk_key in chunk_renderer.display_lists:
+                                    del chunk_renderer.display_lists[chunk_key]
+                    elif camera.current_tool == ToolType.FILL:
+                        modified_chunks = modify_terrain_at_cursor(camera, chunk_manager, "FILL", camera.tool_radius)
+                        if modified_chunks:
+                            for chunk_key in modified_chunks:
+                                if chunk_key in chunk_renderer.display_lists:
+                                    del chunk_renderer.display_lists[chunk_key]
+                    gamepad_speed_cooldown = 15
+            
+            # DPAD = Tool cycling (left/right) and tool radius (up/down)
             if not camera.menu_open and gamepad_speed_cooldown <= 0:
                 if gamepad.get_dpad(GamepadConfig.DPAD_LEFT):
                     camera.prev_tool()
@@ -3989,12 +4058,10 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                 elif gamepad.get_dpad(GamepadConfig.DPAD_RIGHT):
                     camera.next_tool()
                     gamepad_speed_cooldown = 15
-            
-            # L1 = cycle tool radius (for MINE/FILL) - only when menu closed
-            if not camera.menu_open and gamepad.get_button(GamepadConfig.L1) and gamepad_speed_cooldown <= 0:
-                if camera.current_tool in (ToolType.MINE, ToolType.FILL):
-                    camera.cycle_tool_radius()
-                    gamepad_speed_cooldown = 15
+                elif gamepad.get_dpad(GamepadConfig.DPAD_UP) or gamepad.get_dpad(GamepadConfig.DPAD_DOWN):
+                    if camera.current_tool in (ToolType.MINE, ToolType.FILL):
+                        camera.cycle_tool_radius()
+                        gamepad_speed_cooldown = 15
             
             # Y button = screenshot
             if gamepad.get_button(GamepadConfig.Y) and gamepad_speed_cooldown <= 0:
@@ -4013,8 +4080,15 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
             
         
         # Keyboard space = jump (in walk mode) - only when menu closed
-        if not camera.menu_open and keys[pygame.K_SPACE] and not camera.flying:
-            camera.jump()
+        # Variable jump: hold for higher jump, tap for short hop
+        # Only update jump_held from keyboard if NOT using gamepad for jump
+        if not camera.menu_open and not camera.flying:
+            if keys[pygame.K_SPACE]:
+                camera.jump()  # Start jump if grounded
+                camera.update_jump_held(True)  # Held = higher jump
+            elif not (gamepad and gamepad.get_button(GamepadConfig.B)):
+                # Only release if gamepad B isn't being held either
+                camera.update_jump_held(False)  # Released = cut jump short
         
         # Keyboard B = run (double speed while held) - OR with gamepad B
         if keys[pygame.K_b]:

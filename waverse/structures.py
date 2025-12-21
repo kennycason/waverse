@@ -183,8 +183,81 @@ class Pillar:
 
 
 @dataclass
+class Doorway:
+    """A doorway opening in a wall (walkable gap)."""
+    x: float          # Center X
+    y: float          # Base Y (floor level)
+    z: float          # Center Z
+    width: float = 2.5   # Opening width
+    height: float = 4.0  # Opening height (player needs ~3.5)
+    rotation: float = 0.0   # Rotation in degrees around Y axis
+    frame_color: Tuple[float, float, float] = (0.35, 0.3, 0.25)  # Door frame color
+    has_arch: bool = False  # Curved top instead of flat
+
+
+@dataclass
+class Arch:
+    """A decorative arch structure."""
+    x: float          # Center X
+    y: float          # Base Y
+    z: float          # Center Z
+    width: float = 4.0    # Span width
+    height: float = 6.0   # Total height including arch
+    thickness: float = 0.5  # Depth of arch
+    rotation: float = 0.0
+    color: Tuple[float, float, float] = (0.5, 0.45, 0.4)
+
+
+@dataclass 
+class Staircase:
+    """Interior stairs connecting floors."""
+    x: float          # Center X at bottom
+    y_bottom: float   # Bottom floor Y
+    y_top: float      # Top floor Y (where stairs lead to)
+    z: float          # Center Z at bottom
+    width: float = 3.0   # Stair width
+    direction: float = 0.0  # Direction stairs go (0=+X, 90=+Z, etc)
+    color: Tuple[float, float, float] = (0.45, 0.4, 0.35)
+    
+    @property
+    def height(self) -> float:
+        return self.y_top - self.y_bottom
+    
+    @property
+    def length(self) -> float:
+        """Horizontal run of stairs (based on comfortable slope)."""
+        return self.height * 1.5  # ~33 degree angle
+    
+    def get_height_at(self, px: float, pz: float) -> Optional[float]:
+        """Get the stair height at a world position, or None if not on stairs."""
+        # Transform to local coords (stair origin is at bottom step)
+        rad = math.radians(self.direction)
+        cos_r, sin_r = math.cos(rad), math.sin(rad)
+        
+        dx = px - self.x
+        dz = pz - self.z
+        
+        # Rotate to stair's local coords
+        local_x = dx * cos_r + dz * sin_r   # Along stair direction (0 to length)
+        local_z = -dx * sin_r + dz * cos_r  # Perpendicular to stair direction
+        
+        # Check if on staircase bounds
+        if local_x < -0.5 or local_x > self.length + 0.5:
+            return None
+        if abs(local_z) > self.width / 2 + 0.5:
+            return None
+        
+        # Clamp local_x to stair range
+        local_x = max(0, min(local_x, self.length))
+        
+        # Interpolate height based on position along stairs
+        t = local_x / self.length if self.length > 0 else 0
+        return self.y_bottom + t * self.height
+
+
+@dataclass
 class Structure:
-    """A complete structure made of walls, floors, ramps, and pillars."""
+    """A complete structure made of walls, floors, ramps, pillars, doorways, arches, and stairs."""
     x: float          # World X center
     y: float          # World Y base
     z: float          # World Z center
@@ -192,6 +265,9 @@ class Structure:
     floors: List[Floor] = field(default_factory=list)
     ramps: List[Ramp] = field(default_factory=list)
     pillars: List[Pillar] = field(default_factory=list)
+    doorways: List[Doorway] = field(default_factory=list)
+    arches: List[Arch] = field(default_factory=list)
+    staircases: List[Staircase] = field(default_factory=list)
     
     # Bounding box for quick culling
     bbox_min: Tuple[float, float, float] = (0, 0, 0)
@@ -872,6 +948,12 @@ class StructureRenderer:
             cls._draw_ramp(ramp)
         for pillar in structure.pillars:
             cls._draw_pillar(pillar)
+        for doorway in structure.doorways:
+            cls._draw_doorway(doorway)
+        for arch in structure.arches:
+            cls._draw_arch(arch)
+        for staircase in structure.staircases:
+            cls._draw_staircase(staircase)
         glEndList()
         
         # Create SIMPLE display list (skip small elements)
@@ -1096,6 +1178,172 @@ class StructureRenderer:
         glVertex3f(hw, h, -hw)
         glVertex3f(hw, h, hw)
         glEnd()
+        
+        glPopMatrix()
+    
+    @staticmethod
+    def _draw_doorway(doorway: Doorway):
+        """Draw a doorway frame (the opening is just empty space)."""
+        glPushMatrix()
+        glTranslatef(doorway.x, doorway.y, doorway.z)
+        glRotatef(doorway.rotation, 0, 1, 0)
+        
+        hw = doorway.width / 2
+        frame_width = 0.3  # Frame thickness
+        
+        glColor3f(*doorway.frame_color)
+        
+        # Left frame post
+        glBegin(GL_QUADS)
+        # Front face
+        glVertex3f(-hw - frame_width, 0, frame_width/2)
+        glVertex3f(-hw, 0, frame_width/2)
+        glVertex3f(-hw, doorway.height, frame_width/2)
+        glVertex3f(-hw - frame_width, doorway.height, frame_width/2)
+        # Back face
+        glVertex3f(-hw, 0, -frame_width/2)
+        glVertex3f(-hw - frame_width, 0, -frame_width/2)
+        glVertex3f(-hw - frame_width, doorway.height, -frame_width/2)
+        glVertex3f(-hw, doorway.height, -frame_width/2)
+        glEnd()
+        
+        # Right frame post
+        glBegin(GL_QUADS)
+        glVertex3f(hw, 0, frame_width/2)
+        glVertex3f(hw + frame_width, 0, frame_width/2)
+        glVertex3f(hw + frame_width, doorway.height, frame_width/2)
+        glVertex3f(hw, doorway.height, frame_width/2)
+        glVertex3f(hw + frame_width, 0, -frame_width/2)
+        glVertex3f(hw, 0, -frame_width/2)
+        glVertex3f(hw, doorway.height, -frame_width/2)
+        glVertex3f(hw + frame_width, doorway.height, -frame_width/2)
+        glEnd()
+        
+        # Top lintel (or arch if has_arch)
+        if doorway.has_arch:
+            # Draw curved arch
+            arch_segments = 8
+            for i in range(arch_segments):
+                angle1 = math.pi * i / arch_segments
+                angle2 = math.pi * (i + 1) / arch_segments
+                x1 = -hw * math.cos(angle1)
+                y1 = doorway.height + hw * math.sin(angle1) * 0.4
+                x2 = -hw * math.cos(angle2)
+                y2 = doorway.height + hw * math.sin(angle2) * 0.4
+                
+                glBegin(GL_QUADS)
+                glVertex3f(x1, y1 - 0.2, frame_width/2)
+                glVertex3f(x2, y2 - 0.2, frame_width/2)
+                glVertex3f(x2, y2, frame_width/2)
+                glVertex3f(x1, y1, frame_width/2)
+                glEnd()
+        else:
+            # Flat lintel
+            glBegin(GL_QUADS)
+            glVertex3f(-hw, doorway.height, frame_width/2)
+            glVertex3f(hw, doorway.height, frame_width/2)
+            glVertex3f(hw, doorway.height + frame_width, frame_width/2)
+            glVertex3f(-hw, doorway.height + frame_width, frame_width/2)
+            glEnd()
+        
+        glPopMatrix()
+    
+    @staticmethod
+    def _draw_arch(arch: Arch):
+        """Draw a decorative standalone arch."""
+        glPushMatrix()
+        glTranslatef(arch.x, arch.y, arch.z)
+        glRotatef(arch.rotation, 0, 1, 0)
+        
+        hw = arch.width / 2
+        pillar_w = arch.width * 0.15  # Pillar width
+        arch_height = arch.height - hw  # Straight portion
+        
+        glColor3f(*arch.color)
+        
+        # Left pillar
+        glBegin(GL_QUADS)
+        glVertex3f(-hw, 0, arch.thickness/2)
+        glVertex3f(-hw + pillar_w, 0, arch.thickness/2)
+        glVertex3f(-hw + pillar_w, arch_height, arch.thickness/2)
+        glVertex3f(-hw, arch_height, arch.thickness/2)
+        glVertex3f(-hw + pillar_w, 0, -arch.thickness/2)
+        glVertex3f(-hw, 0, -arch.thickness/2)
+        glVertex3f(-hw, arch_height, -arch.thickness/2)
+        glVertex3f(-hw + pillar_w, arch_height, -arch.thickness/2)
+        glEnd()
+        
+        # Right pillar
+        glBegin(GL_QUADS)
+        glVertex3f(hw - pillar_w, 0, arch.thickness/2)
+        glVertex3f(hw, 0, arch.thickness/2)
+        glVertex3f(hw, arch_height, arch.thickness/2)
+        glVertex3f(hw - pillar_w, arch_height, arch.thickness/2)
+        glVertex3f(hw, 0, -arch.thickness/2)
+        glVertex3f(hw - pillar_w, 0, -arch.thickness/2)
+        glVertex3f(hw - pillar_w, arch_height, -arch.thickness/2)
+        glVertex3f(hw, arch_height, -arch.thickness/2)
+        glEnd()
+        
+        # Curved arch top
+        arch_segments = 12
+        inner_r = hw - pillar_w
+        outer_r = hw
+        for i in range(arch_segments):
+            angle1 = math.pi * i / arch_segments
+            angle2 = math.pi * (i + 1) / arch_segments
+            
+            ix1, iy1 = inner_r * math.cos(angle1), inner_r * math.sin(angle1)
+            ix2, iy2 = inner_r * math.cos(angle2), inner_r * math.sin(angle2)
+            ox1, oy1 = outer_r * math.cos(angle1), outer_r * math.sin(angle1)
+            ox2, oy2 = outer_r * math.cos(angle2), outer_r * math.sin(angle2)
+            
+            # Front face of arch
+            glBegin(GL_QUADS)
+            glVertex3f(-ix1, arch_height + iy1, arch.thickness/2)
+            glVertex3f(-ix2, arch_height + iy2, arch.thickness/2)
+            glVertex3f(-ox2, arch_height + oy2, arch.thickness/2)
+            glVertex3f(-ox1, arch_height + oy1, arch.thickness/2)
+            glEnd()
+        
+        glPopMatrix()
+    
+    @staticmethod
+    def _draw_staircase(staircase: Staircase):
+        """Draw a staircase with individual steps."""
+        glPushMatrix()
+        glTranslatef(staircase.x, staircase.y_bottom, staircase.z)
+        glRotatef(staircase.direction, 0, 1, 0)
+        
+        # Calculate step dimensions
+        num_steps = max(2, int(staircase.height / 0.4))  # ~0.4 units per step
+        step_height = staircase.height / num_steps
+        step_depth = staircase.length / num_steps
+        hw = staircase.width / 2
+        
+        glColor3f(*staircase.color)
+        
+        for i in range(num_steps):
+            y = i * step_height
+            x = i * step_depth
+            
+            # Step top (tread)
+            glBegin(GL_QUADS)
+            glNormal3f(0, 1, 0)
+            glVertex3f(x, y + step_height, -hw)
+            glVertex3f(x + step_depth, y + step_height, -hw)
+            glVertex3f(x + step_depth, y + step_height, hw)
+            glVertex3f(x, y + step_height, hw)
+            glEnd()
+            
+            # Step front (riser)
+            glBegin(GL_QUADS)
+            glNormal3f(-1, 0, 0)
+            glVertex3f(x, y, -hw)
+            glVertex3f(x, y, hw)
+            glVertex3f(x, y + step_height, hw)
+            glVertex3f(x, y + step_height, -hw)
+            glEnd()
         
         glPopMatrix()
     
@@ -1449,6 +1697,13 @@ class StructureManager:
             for ramp in structure.ramps:
                 h = ramp.get_height_at(px, pz)
                 if h is not None and h <= py + 1.0:  # Ramp below us
+                    if floor_height is None or h > floor_height:
+                        floor_height = h
+            
+            # Check staircases (walking on)
+            for staircase in structure.staircases:
+                h = staircase.get_height_at(px, pz)
+                if h is not None and h <= py + 1.5:  # Stairs below us (generous step-up)
                     if floor_height is None or h > floor_height:
                         floor_height = h
         
