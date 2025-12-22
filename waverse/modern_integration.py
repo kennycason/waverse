@@ -236,25 +236,33 @@ class ModernWorldRenderer:
         cam_cx = int(camera.x // chunk_world_size)
         cam_cz = int(camera.z // chunk_world_size)
         
+        # Build list of chunks sorted by distance (radial order, not stripes)
+        chunks_by_dist = []
+        for dx in range(-self.render_distance, self.render_distance + 1):
+            for dz in range(-self.render_distance, self.render_distance + 1):
+                dist_sq = dx * dx + dz * dz
+                cx, cz = cam_cx + dx, cam_cz + dz
+                chunks_by_dist.append((dist_sq, cx, cz))
+        
+        # Sort by distance so closest chunks load first
+        chunks_by_dist.sort(key=lambda x: x[0])
+        
         # Determine which chunks should be loaded
         needed_terrain = set()
         needed_flora = set()
         
-        for dx in range(-self.render_distance, self.render_distance + 1):
-            for dz in range(-self.render_distance, self.render_distance + 1):
-                dist = math.sqrt(dx * dx + dz * dz)
-                
-                cx, cz = cam_cx + dx, cam_cz + dz
-                
-                if dist <= self.render_distance:
-                    needed_terrain.add((cx, cz))
-                
-                if dist <= self.flora_render_distance:
-                    needed_flora.add((cx, cz))
+        for dist_sq, cx, cz in chunks_by_dist:
+            dist = math.sqrt(dist_sq)
+            if dist <= self.render_distance:
+                needed_terrain.add((cx, cz))
+            if dist <= self.flora_render_distance:
+                needed_flora.add((cx, cz))
         
-        # Load new terrain chunks
-        for key in needed_terrain - self.loaded_terrain_chunks:
-            self.load_terrain_chunk(key[0], key[1], chunk_manager)
+        # Load new terrain chunks (in radial order)
+        chunks_to_load = [(cx, cz) for _, cx, cz in chunks_by_dist 
+                          if (cx, cz) in needed_terrain and (cx, cz) not in self.loaded_terrain_chunks]
+        for cx, cz in chunks_to_load:
+            self.load_terrain_chunk(cx, cz, chunk_manager)
         
         # Unload distant terrain chunks
         for key in self.loaded_terrain_chunks - needed_terrain:
@@ -267,8 +275,10 @@ class ModernWorldRenderer:
                 self.flora.clear_instances()
                 self.loaded_flora_chunks.clear()
                 
-                for key in needed_flora:
-                    self.load_flora_for_chunk(key[0], key[1], flora_manager)
+                # Load flora in radial order
+                flora_to_load = [(cx, cz) for _, cx, cz in chunks_by_dist if (cx, cz) in needed_flora]
+                for cx, cz in flora_to_load:
+                    self.load_flora_for_chunk(cx, cz, flora_manager)
                 
                 self.flora.upload_instances()
         

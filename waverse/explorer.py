@@ -4401,11 +4401,19 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
             cam_x, cam_z = cam_pos[0], cam_pos[2]
             new_chunks = 0
             
+            # Sort chunks by distance from camera (radial order, not stripes)
+            chunks_by_distance = []
             for (cx, cz), (display_list, lod) in chunk_renderer.display_lists.items():
-                dx, dz = abs(cx - cam_cx), abs(cz - cam_cz)
-                if dx > FLORA_RENDER_RADIUS or dz > FLORA_RENDER_RADIUS:
+                dx, dz = cx - cam_cx, cz - cam_cz
+                if abs(dx) > FLORA_RENDER_RADIUS or abs(dz) > FLORA_RENDER_RADIUS:
                     continue
-                
+                dist_sq = dx * dx + dz * dz
+                chunks_by_distance.append((dist_sq, cx, cz, display_list, lod))
+            
+            # Process closest chunks first
+            chunks_by_distance.sort(key=lambda x: x[0])
+            
+            for dist_sq, cx, cz, display_list, lod in chunks_by_distance:
                 key = (cx, cz)
                 
                 needs_generation = key not in flora_manager.chunk_plants
@@ -4437,20 +4445,27 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
         # Always spawn animals/structures even with modern renderer
         if USE_MODERN_RENDERER and modern_renderer:
             cam_cx, cam_cz = current_chunk
+            # Build list sorted by distance (radial order)
+            spawn_chunks = []
             for dx in range(-12, 13):
                 for dz in range(-12, 13):
-                    cx, cz = cam_cx + dx, cam_cz + dz
-                    key = (cx, cz)
-                    chunk = chunk_manager.chunks.get(key)
-                    if chunk:
-                        if key not in animal_manager.chunk_animals:
-                            animal_manager.spawn_animals_for_chunk(
-                                cx, cz, chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE
-                            )
-                        if key not in flora_manager.chunk_plants:
-                            structure_manager.spawn_random_buildings(
-                                cx, cz, chunk.world_x, chunk.world_z, chunk.heightmap, HEIGHT_SCALE, TILE_SCALE
-                            )
+                    dist_sq = dx * dx + dz * dz
+                    if dist_sq <= 12 * 12:  # Circular, not square
+                        spawn_chunks.append((dist_sq, cam_cx + dx, cam_cz + dz))
+            spawn_chunks.sort(key=lambda x: x[0])
+            
+            for _, cx, cz in spawn_chunks:
+                key = (cx, cz)
+                chunk = chunk_manager.chunks.get(key)
+                if chunk:
+                    if key not in animal_manager.chunk_animals:
+                        animal_manager.spawn_animals_for_chunk(
+                            cx, cz, chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE
+                        )
+                    if key not in flora_manager.chunk_plants:
+                        structure_manager.spawn_random_buildings(
+                            cx, cz, chunk.world_x, chunk.world_z, chunk.heightmap, HEIGHT_SCALE, TILE_SCALE
+                        )
         
         # Update animals every few frames for performance
         _animal_start = time.perf_counter()

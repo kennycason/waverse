@@ -499,28 +499,38 @@ class LifeSimulator:
         max_plants = LifeConfig.MAX_PLANTS_PER_UPDATE * (sim_radius * 2 + 1) ** 2
         max_animals = LifeConfig.MAX_ANIMALS_PER_UPDATE * (sim_radius * 2 + 1)
         
+        # Build list of chunks sorted by distance from camera (radial, not stripes)
+        chunks_to_process = []
         for dx in range(-sim_radius, sim_radius + 1):
             for dz in range(-sim_radius, sim_radius + 1):
-                cx, cz = cam_cx + dx, cam_cz + dz
-                chunk_key = (cx, cz)
-                
-                # Update plants in this chunk (with limit)
-                if not skip_flora and chunk_key in plants_by_chunk and plants_updated < max_plants:
-                    chunk_plants = plants_by_chunk[chunk_key]
-                    plants_to_update = chunk_plants[:LifeConfig.MAX_PLANTS_PER_UPDATE]
-                    self._update_plants(plants_to_update, dt_hours, 
-                                       is_raining, is_day, sun_intensity, chunk_key)
-                    plants_updated += len(plants_to_update)
-                
-                # Update animals in this chunk (with limit)
-                # Pass the chunk's plants for eating behavior
-                if not skip_animals and chunk_key in animals_by_chunk and animals_updated < max_animals:
-                    chunk_animals = animals_by_chunk[chunk_key]
-                    chunk_plants = plants_by_chunk.get(chunk_key, [])
-                    animals_to_update = chunk_animals[:LifeConfig.MAX_ANIMALS_PER_UPDATE]
-                    self._update_animals(animals_to_update, dt_hours,
-                                        is_day, chunk_plants, chunk_key)
-                    animals_updated += len(animals_to_update)
+                dist_sq = dx * dx + dz * dz
+                if dist_sq <= sim_radius * sim_radius:  # Circular, not square
+                    chunks_to_process.append((dist_sq, dx, dz))
+        
+        # Sort by distance so we process closest chunks first
+        chunks_to_process.sort(key=lambda x: x[0])
+        
+        for _, dx, dz in chunks_to_process:
+            cx, cz = cam_cx + dx, cam_cz + dz
+            chunk_key = (cx, cz)
+            
+            # Update plants in this chunk (with limit)
+            if not skip_flora and chunk_key in plants_by_chunk and plants_updated < max_plants:
+                chunk_plants = plants_by_chunk[chunk_key]
+                plants_to_update = chunk_plants[:LifeConfig.MAX_PLANTS_PER_UPDATE]
+                self._update_plants(plants_to_update, dt_hours, 
+                                   is_raining, is_day, sun_intensity, chunk_key)
+                plants_updated += len(plants_to_update)
+            
+            # Update animals in this chunk (with limit)
+            # Pass the chunk's plants for eating behavior
+            if not skip_animals and chunk_key in animals_by_chunk and animals_updated < max_animals:
+                chunk_animals = animals_by_chunk[chunk_key]
+                chunk_plants = plants_by_chunk.get(chunk_key, [])
+                animals_to_update = chunk_animals[:LifeConfig.MAX_ANIMALS_PER_UPDATE]
+                self._update_animals(animals_to_update, dt_hours,
+                                    is_day, chunk_plants, chunk_key)
+                animals_updated += len(animals_to_update)
         
         # Update eggs (only if animals are enabled)
         if not skip_animals:
