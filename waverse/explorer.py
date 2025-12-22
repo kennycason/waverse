@@ -3822,29 +3822,11 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
     
     if USE_MODERN_RENDERER and modern_renderer:
         # Modern renderer handles terrain via VBOs, not display lists
-        # Load chunks into modern renderer instead
-        cx, cz = start_chunk
-        render_dist = RenderConfig.MODERN_TERRAIN_DISTANCE
-        chunks_to_load = []
-        for dx in range(-render_dist, render_dist + 1):
-            for dz in range(-render_dist, render_dist + 1):
-                if dx*dx + dz*dz <= render_dist*render_dist:
-                    chunks_to_load.append((cx + dx, cz + dz))
-        
-        total_chunks = len(chunks_to_load)
-        for i, (chunk_x, chunk_z) in enumerate(chunks_to_load):
-            if i % 20 == 0:
-                print(f"    Loading chunks: {i}/{total_chunks}")
-            # Load chunk data
-            chunk = chunk_manager.get_chunk(chunk_x, chunk_z)
-            if chunk is not None:
-                modern_renderer.update_chunks_around_camera(
-                    cx * CHUNK_SIZE * TILE_SCALE, 
-                    camera.y, 
-                    cz * CHUNK_SIZE * TILE_SCALE,
-                    chunk_manager, flora_manager, animal_manager, structure_manager
-                )
-        print(f"  Loaded {total_chunks} chunks!")
+        # Just call update once - it loads chunks based on camera position
+        modern_renderer.update_chunks_around_camera(
+            camera, chunk_manager, flora_manager, animal_manager, structure_manager
+        )
+        print(f"  Loaded chunks via modern renderer!")
     else:
         # Legacy: use display lists
         chunk_renderer.update_chunks(start_chunk, force_all=True)
