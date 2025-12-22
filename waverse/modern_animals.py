@@ -151,136 +151,219 @@ void main() {
 # =============================================================================
 
 def create_worm_mesh() -> Tuple[np.ndarray, np.ndarray]:
-    """Create a segmented worm/snake mesh."""
+    """Create a segmented worm/snake mesh with proper triangles."""
     vertices = []
     normals = []
     
-    segments = 8
-    radius = 0.15
-    length = 2.0
+    segments = 6
+    sides = 6
+    length = 1.5
+    radius = 0.12
     
     for i in range(segments):
-        t = i / (segments - 1)
-        z = t * length - length / 2
+        t0 = i / segments
+        t1 = (i + 1) / segments
+        z0 = t0 * length - length / 2
+        z1 = t1 * length - length / 2
         
         # Taper at ends
-        r = radius * (1.0 - abs(t - 0.5) * 0.5)
+        r0 = radius * (1.0 - abs(t0 - 0.5) * 0.6)
+        r1 = radius * (1.0 - abs(t1 - 0.5) * 0.6)
         
-        for j in range(8):
-            angle = j * math.pi / 4
-            x = math.cos(angle) * r
-            y = math.sin(angle) * r + r  # Offset up from ground
+        for j in range(sides):
+            a0 = j * 2 * math.pi / sides
+            a1 = (j + 1) * 2 * math.pi / sides
             
-            vertices.append([x, y, z])
+            # Four corners of this quad section
+            x00 = math.cos(a0) * r0
+            y00 = math.sin(a0) * r0 + r0
+            x10 = math.cos(a1) * r0
+            y10 = math.sin(a1) * r0 + r0
+            x01 = math.cos(a0) * r1
+            y01 = math.sin(a0) * r1 + r1
+            x11 = math.cos(a1) * r1
+            y11 = math.sin(a1) * r1 + r1
             
-            # Normal pointing outward
-            nx = math.cos(angle)
-            ny = math.sin(angle)
-            normals.append([nx, ny, 0])
+            # Two triangles per quad
+            vertices.extend([
+                [x00, y00, z0], [x10, y10, z0], [x01, y01, z1],
+                [x10, y10, z0], [x11, y11, z1], [x01, y01, z1],
+            ])
+            
+            # Normals pointing outward
+            n0 = [math.cos(a0), math.sin(a0), 0]
+            n1 = [math.cos(a1), math.sin(a1), 0]
+            normals.extend([n0, n1, n0, n1, n1, n0])
     
     return np.array(vertices, dtype='f4'), np.array(normals, dtype='f4')
 
 
 def create_bird_mesh() -> Tuple[np.ndarray, np.ndarray]:
-    """Create a simple bird mesh with wings."""
+    """Create a simple bird mesh with wings using proper triangles."""
     vertices = []
     normals = []
     
-    # Body (ellipsoid-ish)
-    body_verts = [
-        # Front
-        [0, 0.3, 0.4], [0.15, 0.25, 0], [-0.15, 0.25, 0],
-        # Back
-        [0, 0.35, -0.3], [0.1, 0.3, 0], [-0.1, 0.3, 0],
-        # Top
-        [0, 0.45, 0], [0.1, 0.4, 0.1], [-0.1, 0.4, 0.1],
-        # Wings (triangles)
-        [0.15, 0.3, 0], [0.6, 0.35, -0.1], [0.2, 0.3, -0.2],
-        [-0.15, 0.3, 0], [-0.6, 0.35, -0.1], [-0.2, 0.3, -0.2],
+    # Body as a simple pyramid/tetrahedron
+    # Beak (front), tail (back), top, left wing, right wing
+    beak = [0, 0.3, 0.4]
+    tail = [0, 0.3, -0.4]
+    top = [0, 0.5, 0]
+    left = [-0.15, 0.25, 0]
+    right = [0.15, 0.25, 0]
+    
+    # Body triangles (6 for diamond shape)
+    body_tris = [
+        [beak, top, right],      # Front-top-right
+        [beak, left, top],       # Front-top-left
+        [beak, right, left],     # Front-bottom (belly)
+        [tail, right, top],      # Back-top-right
+        [tail, top, left],       # Back-top-left
+        [tail, left, right],     # Back-bottom (belly)
     ]
     
-    for v in body_verts:
-        vertices.append(v)
-        # Simple upward-ish normal
-        normals.append([0, 1, 0])
+    for tri in body_tris:
+        vertices.extend(tri)
+        normals.extend([[0, 1, 0]] * 3)
+    
+    # Wings as flat triangles
+    wing_left = [
+        [-0.15, 0.32, 0.1], [-0.5, 0.35, 0], [-0.15, 0.32, -0.15]
+    ]
+    wing_right = [
+        [0.15, 0.32, 0.1], [0.15, 0.32, -0.15], [0.5, 0.35, 0]
+    ]
+    
+    vertices.extend(wing_left)
+    normals.extend([[0, 1, 0]] * 3)
+    vertices.extend(wing_right)
+    normals.extend([[0, 1, 0]] * 3)
     
     return np.array(vertices, dtype='f4'), np.array(normals, dtype='f4')
 
 
 def create_mammal_mesh() -> Tuple[np.ndarray, np.ndarray]:
-    """Create a simple quadruped mesh."""
+    """Create a simple quadruped mesh with proper triangles."""
     vertices = []
     normals = []
     
-    # Body box
-    body = [
-        # Top
-        [-0.3, 0.6, -0.5], [0.3, 0.6, -0.5], [0.3, 0.6, 0.5], [-0.3, 0.6, 0.5],
-        # Bottom
-        [-0.3, 0.3, -0.5], [0.3, 0.3, -0.5], [0.3, 0.3, 0.5], [-0.3, 0.3, 0.5],
-        # Legs (simple cylinders approximated as boxes)
-        [-0.25, 0.3, 0.4], [-0.2, 0, 0.4], [-0.15, 0.3, 0.4],  # Front left
-        [0.25, 0.3, 0.4], [0.2, 0, 0.4], [0.15, 0.3, 0.4],     # Front right
-        [-0.25, 0.3, -0.4], [-0.2, 0, -0.4], [-0.15, 0.3, -0.4],  # Back left
-        [0.25, 0.3, -0.4], [0.2, 0, -0.4], [0.15, 0.3, -0.4],     # Back right
-        # Head
-        [0, 0.7, 0.7], [-0.15, 0.55, 0.5], [0.15, 0.55, 0.5],
-    ]
+    def add_box(cx, cy, cz, hw, hh, hd):
+        """Add a box (12 triangles) centered at cx, cy, cz with half-sizes."""
+        # 8 corners
+        c = [
+            [cx-hw, cy-hh, cz-hd], [cx+hw, cy-hh, cz-hd],
+            [cx+hw, cy+hh, cz-hd], [cx-hw, cy+hh, cz-hd],
+            [cx-hw, cy-hh, cz+hd], [cx+hw, cy-hh, cz+hd],
+            [cx+hw, cy+hh, cz+hd], [cx-hw, cy+hh, cz+hd],
+        ]
+        # 6 faces as 12 triangles (indices)
+        faces = [
+            (0,1,2), (0,2,3),  # Back
+            (5,4,7), (5,7,6),  # Front
+            (4,0,3), (4,3,7),  # Left
+            (1,5,6), (1,6,2),  # Right
+            (3,2,6), (3,6,7),  # Top
+            (4,5,1), (4,1,0),  # Bottom
+        ]
+        face_normals = [
+            [0,0,-1], [0,0,-1], [0,0,1], [0,0,1],
+            [-1,0,0], [-1,0,0], [1,0,0], [1,0,0],
+            [0,1,0], [0,1,0], [0,-1,0], [0,-1,0],
+        ]
+        for i, (a,b,cc) in enumerate(faces):
+            vertices.extend([c[a], c[b], c[cc]])
+            normals.extend([face_normals[i]] * 3)
     
-    for v in body:
-        vertices.append(v)
-        normals.append([0, 1, 0])  # Simplified
+    # Body
+    add_box(0, 0.45, 0, 0.25, 0.15, 0.4)
+    
+    # Head
+    add_box(0, 0.55, 0.5, 0.12, 0.12, 0.15)
+    
+    # 4 legs
+    add_box(-0.18, 0.15, 0.3, 0.05, 0.15, 0.05)   # Front left
+    add_box(0.18, 0.15, 0.3, 0.05, 0.15, 0.05)    # Front right
+    add_box(-0.18, 0.15, -0.3, 0.05, 0.15, 0.05)  # Back left
+    add_box(0.18, 0.15, -0.3, 0.05, 0.15, 0.05)   # Back right
     
     return np.array(vertices, dtype='f4'), np.array(normals, dtype='f4')
 
 
 def create_fish_mesh() -> Tuple[np.ndarray, np.ndarray]:
-    """Create a fish-shaped mesh."""
+    """Create a fish-shaped mesh with proper triangles."""
     vertices = []
     normals = []
     
-    # Simple fish shape
-    fish = [
-        # Body diamond
-        [0, 0, 0.5],   # Nose
-        [0.2, 0.1, 0], [0, 0.15, 0], [-0.2, 0.1, 0],  # Top
-        [0.2, -0.1, 0], [0, -0.1, 0], [-0.2, -0.1, 0],  # Bottom
-        [0, 0, -0.4],  # Tail base
-        # Tail fin
-        [0, 0.2, -0.6], [0, 0, -0.4], [0, -0.2, -0.6],
-        # Dorsal fin
-        [0, 0.3, 0], [0, 0.15, 0.1], [0, 0.15, -0.1],
+    # Fish body as a diamond (8 triangles)
+    nose = [0, 0.1, 0.4]
+    tail = [0, 0.1, -0.4]
+    top = [0, 0.25, 0]
+    bottom = [0, 0, 0]
+    left = [-0.15, 0.1, 0]
+    right = [0.15, 0.1, 0]
+    
+    body_tris = [
+        # Front half
+        [nose, top, right], [nose, left, top],
+        [nose, right, bottom], [nose, bottom, left],
+        # Back half
+        [tail, right, top], [tail, top, left],
+        [tail, bottom, right], [tail, left, bottom],
     ]
     
-    for v in fish:
-        vertices.append(v)
-        normals.append([0, 1, 0])
+    for tri in body_tris:
+        vertices.extend(tri)
+        normals.extend([[0, 1, 0]] * 3)
+    
+    # Tail fin (2 triangles forming V)
+    tail_top = [[0, 0.1, -0.4], [0.15, 0.2, -0.55], [0, 0.1, -0.5]]
+    tail_bot = [[0, 0.1, -0.4], [0, 0.1, -0.5], [0.15, 0, -0.55]]
+    vertices.extend(tail_top)
+    vertices.extend(tail_bot)
+    normals.extend([[1, 0, 0]] * 6)
+    
+    # Dorsal fin (1 triangle)
+    dorsal = [[0, 0.25, 0.1], [0, 0.35, 0], [0, 0.25, -0.1]]
+    vertices.extend(dorsal)
+    normals.extend([[1, 0, 0]] * 3)
     
     return np.array(vertices, dtype='f4'), np.array(normals, dtype='f4')
 
 
 def create_insect_mesh() -> Tuple[np.ndarray, np.ndarray]:
-    """Create a simple insect/bug mesh."""
+    """Create a simple insect/bug mesh with proper triangles."""
     vertices = []
     normals = []
     
-    # Three body segments
-    for i, z in enumerate([-0.2, 0, 0.2]):
-        r = 0.1 if i == 1 else 0.07
-        for j in range(6):
-            angle = j * math.pi / 3
-            x = math.cos(angle) * r
-            y = math.sin(angle) * r + 0.1
-            vertices.append([x, y, z])
-            normals.append([math.cos(angle), math.sin(angle), 0])
+    # Three body segments as simple ellipsoids (8 triangles each)
+    def add_segment(cz, r, h):
+        # Simple 8-sided "sphere" approximation
+        top = [0, h + 0.05, cz]
+        bottom = [0, 0.05, cz]
+        for i in range(8):
+            a0 = i * math.pi / 4
+            a1 = (i + 1) * math.pi / 4
+            mid0 = [math.cos(a0) * r, h/2 + 0.05, cz + math.sin(a0) * r * 0.3]
+            mid1 = [math.cos(a1) * r, h/2 + 0.05, cz + math.sin(a1) * r * 0.3]
+            
+            # Top cone triangle
+            vertices.extend([top, mid0, mid1])
+            normals.extend([[0, 1, 0]] * 3)
+            # Bottom cone triangle
+            vertices.extend([bottom, mid1, mid0])
+            normals.extend([[0, -1, 0]] * 3)
     
-    # Legs (6 simple lines represented as thin triangles)
+    # Head (small), thorax (medium), abdomen (larger)
+    add_segment(0.15, 0.06, 0.08)   # Head
+    add_segment(0, 0.08, 0.1)        # Thorax
+    add_segment(-0.18, 0.1, 0.12)    # Abdomen
+    
+    # 6 legs as thin triangles
     for side in [-1, 1]:
-        for z in [-0.15, 0, 0.15]:
+        for zoff in [-0.05, 0, 0.05]:
             vertices.extend([
-                [side * 0.08, 0.1, z],
-                [side * 0.25, 0, z],
-                [side * 0.08, 0.08, z],
+                [side * 0.08, 0.08, zoff],
+                [side * 0.2, 0.02, zoff],
+                [side * 0.08, 0.06, zoff],
             ])
             normals.extend([[0, 1, 0]] * 3)
     
