@@ -3824,7 +3824,7 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
         # Modern renderer handles terrain via VBOs, not display lists
         # Load chunks into modern renderer instead
         cx, cz = start_chunk
-        render_dist = RenderConfig.MODERN_TERRAIN_RENDER_DISTANCE
+        render_dist = RenderConfig.MODERN_TERRAIN_DISTANCE
         chunks_to_load = []
         for dx in range(-render_dist, render_dist + 1):
             for dz in range(-render_dist, render_dist + 1):
