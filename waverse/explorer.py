@@ -442,6 +442,13 @@ class GamepadManager:
     
     def get_look(self) -> tuple:
         """Get look from right stick (yaw, pitch)."""
+        # Validate axes exist
+        if not self.gamepad:
+            return (0.0, 0.0)
+        num_axes = self.gamepad.get_numaxes()
+        if GamepadConfig.R_STICK_X >= num_axes or GamepadConfig.R_STICK_Y >= num_axes:
+            return (0.0, 0.0)
+        
         x = self.get_axis(GamepadConfig.R_STICK_X, GamepadConfig.R_STICK_X_INV)
         y = self.get_axis(GamepadConfig.R_STICK_Y, GamepadConfig.R_STICK_Y_INV)
         # yaw from horizontal (X), pitch from vertical (Y)
@@ -3606,8 +3613,6 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
     pygame.init()
     display = (1400, 800)
     
-    # Always use compatibility profile so we can mix legacy (HUD) with modern (terrain/flora)
-    # ModernGL can still work in compatibility mode
     pygame.display.set_mode(display, DOUBLEBUF | OPENGL)
     pygame.display.set_caption(f"Waverse - {config.name}")
     
@@ -3638,11 +3643,16 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
     modern_ctx = None
     if USE_MODERN_RENDERER:
         try:
-            # Create context from existing pygame window (compatibility mode)
-            modern_ctx = moderngl.create_context(require=330)
+            # Create context from existing pygame window
+            # Don't require specific version - use whatever is available
+            modern_ctx = moderngl.create_context()
+            print(f"  [RENDERER] ModernGL context created (OpenGL {modern_ctx.version_code})")
+            
+            if modern_ctx.version_code < 330:
+                print(f"  [RENDERER] Warning: OpenGL {modern_ctx.version_code} < 330, shaders may not work")
+            
             modern_renderer = ModernWorldRenderer(modern_ctx)
             modern_renderer.set_chunk_params(CHUNK_SIZE, TILE_SCALE, HEIGHT_SCALE)
-            print(f"  [RENDERER] ModernGL context created (OpenGL {modern_ctx.version_code})")
         except Exception as e:
             print(f"  [RENDERER] ModernGL failed: {e}")
             print(f"  [RENDERER] Falling back to legacy renderer")
@@ -3803,6 +3813,8 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
         perf.start_frame()
         frame_count += 1
         dt = clock.tick(60) / 16.67
+        # Cap dt to prevent extreme values causing fast camera spinning
+        dt = min(dt, 4.0)  # Max ~15 fps worth of movement per frame
         
         # Update gamepad speed cooldown
         if gamepad_speed_cooldown > 0:
@@ -3997,6 +4009,10 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
             # Right stick = look (IJKL) - only when menu closed
             if not camera.menu_open:
                 gp_look = gamepad.get_look()
+                # Debug: Log if look input is non-zero (every 2 seconds)
+                if USE_MODERN_RENDERER and (abs(gp_look[0]) > 0.05 or abs(gp_look[1]) > 0.05):
+                    if frame_count % 120 == 0:
+                        print(f"  [MODERN DEBUG] look input: yaw={gp_look[0]:.3f} pitch={gp_look[1]:.3f} dt={dt:.2f}")
                 gamepad_look_speed = dt * 2.5
                 camera.rotate_keyboard(gp_look[0] * gamepad_look_speed, gp_look[1] * gamepad_look_speed)
                 
@@ -4288,11 +4304,40 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
             modern_renderer.render(dt / 1000.0 if dt > 0 else 0.016)
             
             # Restore legacy OpenGL state for HUD/structures/weather
+            # ModernGL uses VAOs/VBOs/shaders which must be unbound for legacy to work
+            # Note: finish() can cause frame stalls, so we skip it - flush is implicit
+            
+            # Unbind modern GL objects
+            from OpenGL.GL import glBindVertexArray, glBindBuffer, glUseProgram
+            from OpenGL.GL import GL_ARRAY_BUFFER, GL_ELEMENT_ARRAY_BUFFER
+            try:
+                glBindVertexArray(0)
+                glBindBuffer(GL_ARRAY_BUFFER, 0)
+                glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0)
+                glUseProgram(0)
+            except Exception:
+                pass  # Some systems may not support these
+            
             glEnable(GL_DEPTH_TEST)
             glEnable(GL_CULL_FACE)
+            glEnable(GL_LIGHTING)
+            glEnable(GL_LIGHT0)
+            glEnable(GL_FOG)
+            glEnable(GL_COLOR_MATERIAL)
+            
+            # Restore projection matrix
+            glMatrixMode(GL_PROJECTION)
+            glLoadIdentity()
+            gluPerspective(75, display[0]/display[1], 1.0, 2000)
+            
+            # Restore modelview and apply camera
             glMatrixMode(GL_MODELVIEW)
             glLoadIdentity()
             camera.apply()
+            
+            # Re-apply sky lighting/fog (may have been changed by ModernGL)
+            sky.apply_fog()
+            sky.apply_lighting()
             
             perf.record_time('chunk', _chunk_start)
             perf.record_time('flora', _chunk_start)  # Combined in modern renderer
