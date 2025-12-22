@@ -453,8 +453,43 @@ class GamepadManager:
         if GamepadConfig.R_STICK_X >= num_axes or GamepadConfig.R_STICK_Y >= num_axes:
             return (0.0, 0.0)
         
-        x = self.get_axis(GamepadConfig.R_STICK_X, GamepadConfig.R_STICK_X_INV)
-        y = self.get_axis(GamepadConfig.R_STICK_Y, GamepadConfig.R_STICK_Y_INV)
+        # Get raw values and apply baseline correction
+        raw_x = self.get_axis_raw(GamepadConfig.R_STICK_X)
+        raw_y = self.get_axis_raw(GamepadConfig.R_STICK_Y)
+        
+        # Detect if axis has a stuck value (trigger or misconfigured axis)
+        # Real sticks center near 0, triggers rest at -1 or 1
+        # Also check for stuck intermediate values (drift)
+        if not hasattr(self, '_r_stick_baseline'):
+            # Record baseline on first call (controller at rest)
+            self._r_stick_baseline = (raw_x, raw_y)
+            if abs(raw_x) > 0.5 or abs(raw_y) > 0.5:
+                print(f"  [GAMEPAD] Warning: Right stick axes have unusual resting values: X={raw_x:.2f} Y={raw_y:.2f}")
+                print(f"  [GAMEPAD] This may indicate incorrect axis mapping. Press G for debug, or reconfigure controller.")
+        
+        # Subtract baseline (handles triggers mapped as stick)
+        baseline_x, baseline_y = self._r_stick_baseline
+        
+        # If baseline is extreme (likely a trigger), disable this axis
+        if abs(baseline_x) > 0.8:
+            adjusted_x = 0.0
+        else:
+            adjusted_x = raw_x - baseline_x
+        
+        if abs(baseline_y) > 0.8:
+            adjusted_y = 0.0
+        else:
+            adjusted_y = raw_y - baseline_y
+        
+        # Apply deadzone to adjusted values
+        x = GamepadConfig.apply_deadzone(adjusted_x, 0.25)
+        y = GamepadConfig.apply_deadzone(adjusted_y, 0.25)
+        
+        if GamepadConfig.R_STICK_X_INV:
+            x = -x
+        if GamepadConfig.R_STICK_Y_INV:
+            y = -y
+        
         # yaw from horizontal (X), pitch from vertical (Y)
         # Invert X so pushing stick right = look right (standard)
         # Invert Y so pushing stick up = look up (positive pitch)
