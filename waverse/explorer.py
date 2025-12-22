@@ -45,7 +45,7 @@ from .chunk_worker import ChunkWorker
 
 
 # =============================================================================
-# PERFORMANCE MONITOR - Press SPACE to dump stats
+# PERFORMANCE MONITOR - Press F3 to dump stats, F4 for overlay
 # =============================================================================
 class PerfMonitor:
     """Lightweight performance monitoring - only tracks on demand."""
@@ -3827,7 +3827,7 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
     print("    Camera: IJKL or Right-Click+Mouse")
     print("    Speed: [/- = slower | ]/= = faster")
     print("    R=ACTION | ,/.=Switch Tool | T=Tool Size | Tab=Menu | P=Screenshot | X=Tour | N=Warp")
-    print("    SPACE=Perf Stats | ENTER=Perf Overlay")
+    print("    F3=Perf Stats | F4=Perf Overlay")
     if gamepad.is_connected():
         print(f"  GAMEPAD ({gamepad.name}):")
         print(f"    Config: L-Stick X={GamepadConfig.L_STICK_X} Y={GamepadConfig.L_STICK_Y}")
@@ -3924,11 +3924,11 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                                         flora_manager, animal_manager,
                                         chunk_dna_manager, climate_manager,
                                         structure_manager, config, life_simulator)
-                elif event.key == pygame.K_SPACE:
-                    # SPACE = dump performance stats
+                elif event.key == pygame.K_F3:
+                    # F3 = dump performance stats (like Minecraft debug)
                     perf.dump_stats()
-                elif event.key == pygame.K_RETURN:
-                    # ENTER = toggle perf overlay
+                elif event.key == pygame.K_F4:
+                    # F4 = toggle perf overlay
                     perf.toggle_overlay()
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 3:
