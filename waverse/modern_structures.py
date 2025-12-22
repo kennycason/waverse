@@ -248,7 +248,8 @@ def structure_to_geometry(structure: Any, lod: int = 0) -> Tuple[np.ndarray, int
         # Walls
         for wall in getattr(structure, 'walls', []):
             x, y, z = wall.x, wall.y, wall.z
-            w, h, d = wall.width / 2, wall.height / 2, wall.depth / 2
+            w, h = wall.width / 2, wall.height / 2
+            d = wall.thickness / 2  # Wall uses 'thickness' not 'depth'
             v, n, c = create_box(x, y + h, z, w, h, d, wall_color)
             all_vertices.extend(v)
             all_normals.extend(n)
