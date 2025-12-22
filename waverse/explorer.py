@@ -382,7 +382,11 @@ class GamepadManager:
             
             # Print axis info
             num_axes = self.gamepad.get_numaxes()
-            print(f"    Axes: {num_axes} | L-Stick: {GamepadConfig.L_STICK_X},{GamepadConfig.L_STICK_Y}")
+            print(f"    Axes: {num_axes} | L-Stick: {GamepadConfig.L_STICK_X},{GamepadConfig.L_STICK_Y} | R-Stick: {GamepadConfig.R_STICK_X},{GamepadConfig.R_STICK_Y}")
+            # Print raw axis values for diagnostics
+            if num_axes > 0:
+                raw_vals = [f"{i}:{self.gamepad.get_axis(i):.2f}" for i in range(min(num_axes, 6))]
+                print(f"    Raw axis values: {' '.join(raw_vals)}")
             print("    Press G to toggle gamepad debug mode")
             return True
         else:
