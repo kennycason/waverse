@@ -22,6 +22,8 @@ from .modern_flora import ModernFloraRenderer
 from .modern_animals import ModernAnimalRenderer, get_animal_type_id
 from .modern_water import ModernWaterRenderer
 from .modern_sky import ModernSkyRenderer
+from .modern_structures import ModernStructureRenderer
+from .modern_weather import ModernWeatherRenderer
 
 
 # =============================================================================
@@ -45,9 +47,11 @@ class ModernWorldRenderer:
         # Sub-renderers
         self.sky = ModernSkyRenderer(ctx)  # Rendered first (background)
         self.terrain = ModernTerrainRenderer(ctx)
+        self.structures = ModernStructureRenderer(ctx)  # Buildings, before flora
         self.flora = ModernFloraRenderer(ctx)
         self.animals = ModernAnimalRenderer(ctx)
-        self.water = ModernWaterRenderer(ctx)  # Rendered last (transparent)
+        self.water = ModernWaterRenderer(ctx)
+        self.weather = ModernWeatherRenderer(ctx)  # Rendered last (particles)
         
         # Integration state
         self.loaded_terrain_chunks: set = set()
@@ -57,12 +61,18 @@ class ModernWorldRenderer:
         self.frame_stats = {
             'terrain_chunks': 0,
             'terrain_tris': 0,
+            'structure_count': 0,
+            'structure_tris': 0,
             'flora_instances': 0,
             'animal_instances': 0,
             'water_tris': 0,
+            'weather_particles': 0,
             'total_draw_calls': 0,
             'frame_time_ms': 0,
         }
+        
+        # Current structure list (updated each frame)
+        self._visible_structures: List[Any] = []
         
         # Render settings
         self.render_distance = 12  # Chunks
@@ -110,9 +120,11 @@ class ModernWorldRenderer:
         view = glm.lookAt(cam_pos, target, glm.vec3(0, 1, 0))
         
         self.sky.set_camera(projection, view, cam_pos)
+        self.structures.set_camera(projection, view, cam_pos)
         self.flora.set_camera(projection, view, cam_pos)
         self.animals.set_camera(projection, view, cam_pos)
         self.water.set_camera(projection, view, cam_pos)
+        self.weather.set_camera(projection, view, cam_pos)
     
     def load_terrain_chunk(self, cx: int, cz: int, chunk_manager: Any,
                            biome: str = 'grassland'):
@@ -208,7 +220,8 @@ class ModernWorldRenderer:
     
     def update_chunks_around_camera(self, camera: Any, chunk_manager: Any,
                                     flora_manager: Any = None,
-                                    animal_manager: Any = None):
+                                    animal_manager: Any = None,
+                                    structure_manager: Any = None):
         """
         Load/unload chunks based on camera position.
         
@@ -262,7 +275,36 @@ class ModernWorldRenderer:
         # Handle animals if manager provided
         if animal_manager:
             self.update_animals(camera, animal_manager)
-    
+        
+        # Handle structures if manager provided
+        if structure_manager:
+            self.update_structures(camera, structure_manager)
+
+    def update_structures(self, camera: Any, structure_manager: Any):
+        """Update visible structures list."""
+        self._visible_structures.clear()
+        
+        cam_x, cam_z = camera.x, camera.z
+        render_dist = self.structures.fog_end * 1.2  # Render slightly past fog
+        render_dist_sq = render_dist * render_dist
+        
+        for structure in getattr(structure_manager, 'structures', []):
+            # Get structure center
+            bbox = getattr(structure, 'bbox', None)
+            if bbox:
+                min_p, max_p = bbox
+                cx = (min_p[0] + max_p[0]) / 2
+                cz = (min_p[2] + max_p[2]) / 2
+            else:
+                cx = getattr(structure, 'x', 0)
+                cz = getattr(structure, 'z', 0)
+            
+            # Distance culling
+            dx = cx - cam_x
+            dz = cz - cam_z
+            if dx * dx + dz * dz < render_dist_sq:
+                self._visible_structures.append(structure)
+
     def update_animals(self, camera: Any, animal_manager: Any):
         """
         Update animal instances from the animal manager.
@@ -320,24 +362,29 @@ class ModernWorldRenderer:
         """Update lighting parameters."""
         if sun_dir:
             self.terrain.light_dir = glm.vec3(*sun_dir)
+            self.structures.light_dir = glm.vec3(*sun_dir)
             self.flora.light_dir = glm.vec3(*sun_dir)
             self.animals.light_dir = glm.vec3(*sun_dir)
             self.water.light_dir = glm.vec3(*sun_dir)
         if ambient:
             self.terrain.ambient = glm.vec3(*ambient)
+            self.structures.ambient = glm.vec3(*ambient)
             self.flora.ambient = glm.vec3(*ambient)
             self.animals.ambient = glm.vec3(*ambient)
         if fog_color:
             self.terrain.fog_color = glm.vec3(*fog_color)
+            self.structures.fog_color = glm.vec3(*fog_color)
             self.flora.fog_color = glm.vec3(*fog_color)
             self.animals.fog_color = glm.vec3(*fog_color)
             self.water.sky_color = glm.vec3(*fog_color)  # Sky color for reflections
         if fog_start is not None:
             self.terrain.fog_start = fog_start
+            self.structures.fog_start = fog_start
             self.flora.fog_start = fog_start
             self.animals.fog_start = fog_start
         if fog_end is not None:
             self.terrain.fog_end = fog_end
+            self.structures.fog_end = fog_end
             self.flora.fog_end = fog_end
             self.animals.fog_end = fog_end
     
@@ -345,6 +392,10 @@ class ModernWorldRenderer:
         """Set water level for terrain coloring and water surface."""
         self.terrain.water_level = level
         self.water.water_level = level
+    
+    def set_weather(self, weather_type: str, intensity: float = 1.0):
+        """Set weather conditions for particle effects."""
+        self.weather.set_weather(weather_type, intensity)
     
     def render(self, dt: float = 0.016):
         """
@@ -361,14 +412,20 @@ class ModernWorldRenderer:
         # Render terrain (opaque)
         self.terrain.render()
         
+        # Render structures (buildings, opaque)
+        self.structures.render(self._visible_structures)
+        
         # Render flora
         self.flora.render(dt)
         
         # Render animals
         self.animals.render(dt)
         
-        # Render water last (transparent, needs blending)
+        # Render water (transparent, needs blending)
         self.water.render(dt)
+        
+        # Render weather particles last (in front of everything)
+        self.weather.render(dt)
         
         elapsed = time.perf_counter() - start
         
@@ -376,13 +433,18 @@ class ModernWorldRenderer:
         self.frame_stats = {
             'terrain_chunks': self.terrain.frame_stats['chunks_rendered'],
             'terrain_tris': self.terrain.frame_stats['triangles'],
+            'structure_count': self.structures.frame_stats['structures_rendered'],
+            'structure_tris': self.structures.frame_stats['triangles'],
             'flora_instances': self.flora.frame_stats['instances_rendered'],
             'animal_instances': self.animals.frame_stats['instances_rendered'],
             'water_tris': self.water.frame_stats['triangles'],
+            'weather_particles': self.weather.frame_stats['particles_rendered'],
             'total_draw_calls': (self.terrain.frame_stats['draw_calls'] + 
+                                self.structures.frame_stats['draw_calls'] +
                                 self.flora.frame_stats['draw_calls'] +
                                 self.animals.frame_stats['draw_calls'] +
-                                self.water.frame_stats['draw_calls']),
+                                self.water.frame_stats['draw_calls'] +
+                                self.weather.frame_stats['draw_calls']),
             'frame_time_ms': elapsed * 1000,
         }
     
@@ -400,11 +462,14 @@ class ModernWorldRenderer:
         """Release all GPU resources."""
         self.sky.cleanup()
         self.terrain.cleanup()
+        self.structures.cleanup()
         self.flora.cleanup()
         self.animals.cleanup()
         self.water.cleanup()
+        self.weather.cleanup()
         self.loaded_terrain_chunks.clear()
         self.loaded_flora_chunks.clear()
+        self._visible_structures.clear()
 
 
 # =============================================================================

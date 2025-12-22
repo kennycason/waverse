@@ -4324,13 +4324,19 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
             time_of_day = getattr(sky, 'time', 0.5)  # 0-1, 0.5 = noon
             modern_renderer.set_time_of_day(time_of_day)
             modern_renderer.set_lighting(fog_start=200.0, fog_end=600.0)
+            
+            # Sync weather
+            weather_state = climate_manager.current_weather
+            weather_type = getattr(weather_state, 'weather_type', 'clear') if hasattr(weather_state, 'weather_type') else str(weather_state)
+            modern_renderer.set_weather(weather_type, getattr(weather_state, 'intensity', 1.0) if hasattr(weather_state, 'intensity') else 1.0)
             modern_renderer.set_water_level(water_level)
             
-            # Load chunks around camera (includes terrain, flora, and animals)
+            # Load chunks around camera (includes terrain, flora, animals, structures)
             modern_renderer.update_chunks_around_camera(
                 camera, chunk_manager, 
                 flora_manager if not NO_FLORA_RENDER else None,
-                animal_manager
+                animal_manager,
+                structure_manager
             )
             
             # Enable ModernGL state
