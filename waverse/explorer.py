@@ -3836,7 +3836,7 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
             if i % 20 == 0:
                 print(f"    Loading chunks: {i}/{total_chunks}")
             # Load chunk data
-            chunk = chunk_manager.get_or_generate_chunk(chunk_x, chunk_z)
+            chunk = chunk_manager.get_chunk(chunk_x, chunk_z)
             if chunk is not None:
                 modern_renderer.update_chunks_around_camera(
                     cx * CHUNK_SIZE * TILE_SCALE, 
