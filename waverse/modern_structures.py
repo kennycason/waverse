@@ -294,11 +294,13 @@ def structure_to_geometry(structure: Any, lod: int = 0) -> Tuple[np.ndarray, int
         # Staircases
         for stair in getattr(structure, 'staircases', []):
             x, z = stair.x, stair.z
-            y_bot = getattr(stair, 'y_bottom', stair.y if hasattr(stair, 'y') else 0)
-            y_top = getattr(stair, 'y_top', y_bot + 5)
-            w = getattr(stair, 'width', 2) / 2
-            d = getattr(stair, 'depth', 4) / 2
-            direction = getattr(stair, 'direction', (0, 1))
+            y_bot = stair.y_bottom
+            y_top = stair.y_top
+            w = stair.width / 2
+            d = stair.length / 2  # length is a property
+            # direction is an angle in degrees - convert to (dx, dz) vector
+            angle_rad = math.radians(stair.direction)
+            direction = (math.cos(angle_rad), math.sin(angle_rad))
             v, n, c = create_ramp(x, y_bot, y_top, z, w, d, direction, floor_color)
             all_vertices.extend(v)
             all_normals.extend(n)
