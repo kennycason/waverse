@@ -279,11 +279,14 @@ def structure_to_geometry(structure: Any, lod: int = 0) -> Tuple[np.ndarray, int
         
         # Pillars
         for pillar in getattr(structure, 'pillars', []):
-            x, y, z = pillar.x, pillar.y, pillar.z
-            r = getattr(pillar, 'radius', 0.5)
-            h = pillar.height / 2
+            x, z = pillar.x, pillar.z
+            y_bot = pillar.y_bottom
+            y_top = pillar.y_top
+            w = pillar.width / 2
+            h = (y_top - y_bot) / 2
+            y_center = y_bot + h
             # Approximate pillar as box
-            v, n, c = create_box(x, y + h, z, r, h, r, wall_color)
+            v, n, c = create_box(x, y_center, z, w, h, w, wall_color)
             all_vertices.extend(v)
             all_normals.extend(n)
             all_colors.extend(c)
