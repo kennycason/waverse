@@ -45,6 +45,34 @@ from .chunk_worker import ChunkWorker
 
 
 # =============================================================================
+# RENDER CONFIG - Easy tuning for performance vs quality tradeoffs
+# =============================================================================
+class RenderConfig:
+    """Centralized render settings for easy tweaking."""
+    
+    # Flora (plants/trees)
+    FLORA_RENDER_RADIUS = 22  # Chunks (legacy renderer)
+    FLORA_MAX_NEW_PER_FRAME = 3  # Limit chunk loading per frame
+    
+    # Animals
+    ANIMAL_RENDER_HEIGHT_LIMIT = 150  # Don't render if camera this high
+    ANIMAL_UPDATE_INTERVAL = 2  # Frames between updates
+    
+    # Structures (buildings)
+    STRUCTURE_SPAWN_RADIUS = 12  # Chunks
+    
+    # Modern renderer (GPU instanced)
+    MODERN_TERRAIN_DISTANCE = 16  # Chunks
+    MODERN_FLORA_DISTANCE = 14  # Chunks  
+    MODERN_ANIMAL_DISTANCE = 12  # Chunks
+    
+    # Debug
+    NO_FLORA_RENDER = False
+    NO_ANIMAL_RENDER = False
+    NO_ANIMAL_UPDATE = False
+
+
+# =============================================================================
 # PERFORMANCE MONITOR - Press F3 to dump stats, F4 for overlay
 # =============================================================================
 class PerfMonitor:
@@ -4393,7 +4421,7 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
             _flora_start = time.perf_counter()
             
             # Fixed render radius - consistent to avoid flickering
-            FLORA_RENDER_RADIUS = 18
+            FLORA_RENDER_RADIUS = RenderConfig.FLORA_RENDER_RADIUS
             height_above_ground = camera.y - chunk_manager.get_height_at(camera.x, camera.z)
             
             MAX_NEW_CHUNKS_PER_FRAME = 3

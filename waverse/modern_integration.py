@@ -75,9 +75,19 @@ class ModernWorldRenderer:
         self._visible_structures: List[Any] = []
         
         # Render settings
-        self.render_distance = 12  # Chunks
-        self.flora_render_distance = 8  # Chunks
-        self.animal_render_distance = 10  # Chunks
+        # Render distances (can be overridden by set_render_distances)
+        self.render_distance = 16  # Chunks (terrain)
+        self.flora_render_distance = 14  # Chunks (plants - GPU instanced)
+        self.animal_render_distance = 12  # Chunks (animals)
+    
+    def set_render_distances(self, terrain: int = None, flora: int = None, animals: int = None):
+        """Update render distances dynamically."""
+        if terrain is not None:
+            self.render_distance = terrain
+        if flora is not None:
+            self.flora_render_distance = flora
+        if animals is not None:
+            self.animal_render_distance = animals
         
         # Chunk size info (set by waverse)
         self.chunk_size = 64  # Grid cells per chunk
