@@ -4329,15 +4329,21 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
         glLoadIdentity()
         camera.apply()
         
-        # Render sky (sun/moon/stars)
         cam_pos = camera.get_pos()
-        sky.render(cam_pos[0], cam_pos[1], cam_pos[2])
         
-        # Render clouds with DNA-based visuals
-        weather_renderer.render_clouds(cam_pos[0], cam_pos[1], cam_pos[2],
-                                       climate_manager.current_weather.cloud_cover,
-                                       climate_manager.time,
-                                       climate_manager.current_weather.visual_dna)
+        # Use modern renderer for terrain/flora if available
+        if USE_MODERN_RENDERER and modern_renderer:
+            # Modern renderer handles sky and clouds internally
+            pass
+        else:
+            # Legacy: Render sky (sun/moon/stars)
+            sky.render(cam_pos[0], cam_pos[1], cam_pos[2])
+            
+            # Legacy: Render clouds with DNA-based visuals
+            weather_renderer.render_clouds(cam_pos[0], cam_pos[1], cam_pos[2],
+                                           climate_manager.current_weather.cloud_cover,
+                                           climate_manager.time,
+                                           climate_manager.current_weather.visual_dna)
         
         _chunk_start = time.perf_counter()
         
