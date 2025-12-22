@@ -268,7 +268,8 @@ def structure_to_geometry(structure: Any, lod: int = 0) -> Tuple[np.ndarray, int
         for ramp in getattr(structure, 'ramps', []):
             x, z = ramp.x, ramp.z
             y_bot, y_top = ramp.y_bottom, ramp.y_top
-            w, d = ramp.width / 2, ramp.depth / 2
+            w = ramp.width / 2
+            d = ramp.length / 2  # Ramp uses 'length' not 'depth'
             direction = getattr(ramp, 'direction', (1, 0))
             v, n, c = create_ramp(x, y_bot, y_top, z, w, d, direction, floor_color)
             all_vertices.extend(v)
