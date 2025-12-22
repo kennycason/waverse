@@ -70,6 +70,10 @@ def main():
     parser.add_argument('--max-animals', type=int, default=None, metavar='N',
                         help='Max total animals in world (default: 500)')
     
+    # Renderer selection
+    parser.add_argument('--modern', action='store_true', 
+                        help='Use ModernGL renderer (experimental, faster)')
+    
     args = parser.parse_args()
     
     if args.clear_cache:
@@ -120,6 +124,7 @@ def main():
         'no_animal_update': args.no_animal_update or args.no_life_sim,
         'max_flora': args.max_flora,
         'max_animals': args.max_animals,
+        'modern_renderer': args.modern,
     }
     
     # Run!

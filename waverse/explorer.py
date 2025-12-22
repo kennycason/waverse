@@ -27,6 +27,16 @@ except ImportError:
     OPENGL_AVAILABLE = False
     print("Warning: PyOpenGL not found.")
 
+# ModernGL for high-performance rendering (optional)
+try:
+    import moderngl
+    from pyglm import glm  # Avoid deprecation warning
+    from .modern_integration import ModernWorldRenderer
+    MODERNGL_AVAILABLE = True
+except ImportError:
+    MODERNGL_AVAILABLE = False
+    print("Note: ModernGL not available, using legacy renderer.")
+
 from .world import WorldConfig, ChunkManager, CHUNK_SIZE, TILE_SCALE, get_height
 from .flora import FloraManager
 from .sky import SkySystem
@@ -3590,10 +3600,19 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
     if config is None:
         config = WorldConfig.create_default()
     
+    # Check if modern renderer is requested
+    USE_MODERN_RENDERER = debug_flags.get('modern_renderer', False) and MODERNGL_AVAILABLE
+    
     pygame.init()
     display = (1400, 800)
+    
+    # Always use compatibility profile so we can mix legacy (HUD) with modern (terrain/flora)
+    # ModernGL can still work in compatibility mode
     pygame.display.set_mode(display, DOUBLEBUF | OPENGL)
     pygame.display.set_caption(f"Waverse - {config.name}")
+    
+    if USE_MODERN_RENDERER:
+        print("  [RENDERER] ModernGL hybrid mode (terrain+flora=modern, HUD=legacy)")
     
     pygame.mouse.set_visible(True)
     pygame.event.set_grab(False)
@@ -3608,13 +3627,27 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
     # Initialize gamepad
     gamepad = GamepadManager()
     
+    # Legacy OpenGL setup (always needed for HUD/structures/weather)
     setup_opengl()
-    
     glMatrixMode(GL_PROJECTION)
-    # Near clip at 1.0 - balance between close visibility and z-fighting
-    # Combined with slope_buffer of 2.5, camera stays ~5 units above terrain minimum
     gluPerspective(75, display[0]/display[1], 1.0, 2000)
     glMatrixMode(GL_MODELVIEW)
+    
+    # Initialize ModernGL if enabled (hybrid: modern terrain/flora, legacy everything else)
+    modern_renderer = None
+    modern_ctx = None
+    if USE_MODERN_RENDERER:
+        try:
+            # Create context from existing pygame window (compatibility mode)
+            modern_ctx = moderngl.create_context(require=330)
+            modern_renderer = ModernWorldRenderer(modern_ctx)
+            modern_renderer.set_chunk_params(CHUNK_SIZE, TILE_SCALE, HEIGHT_SCALE)
+            print(f"  [RENDERER] ModernGL context created (OpenGL {modern_ctx.version_code})")
+        except Exception as e:
+            print(f"  [RENDERER] ModernGL failed: {e}")
+            print(f"  [RENDERER] Falling back to legacy renderer")
+            USE_MODERN_RENDERER = False
+            modern_renderer = None
     
     # Create world with background chunk worker
     chunk_manager = ChunkManager(config)
@@ -4224,58 +4257,112 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                                        climate_manager.current_weather.visual_dna)
         
         _chunk_start = time.perf_counter()
-        chunk_renderer.render()
-        perf.record_time('chunk', _chunk_start)
         
-        # Render flora - call render_chunk_flora which handles LOD properly
-        _flora_start = time.perf_counter()
-        
-        # Fixed render radius - consistent to avoid flickering
-        # The LOD system handles distance-based simplification naturally
-        FLORA_RENDER_RADIUS = 18
-        height_above_ground = camera.y - chunk_manager.get_height_at(camera.x, camera.z)
-        
-        MAX_NEW_CHUNKS_PER_FRAME = 3  # Limit new chunk processing per frame
-        cam_cx, cam_cz = current_chunk
-        cam_x, cam_z = cam_pos[0], cam_pos[2]
-        new_chunks = 0
-        
-        # Render all flora chunks within radius (no frame budget - causes flickering)
-        for (cx, cz), (display_list, lod) in chunk_renderer.display_lists.items():
-            dx, dz = abs(cx - cam_cx), abs(cz - cam_cz)
-            if dx > FLORA_RENDER_RADIUS or dz > FLORA_RENDER_RADIUS:
-                continue
+        # Use modern renderer for terrain/flora if available
+        if USE_MODERN_RENDERER and modern_renderer:
+            # Update modern renderer camera
+            modern_renderer.set_camera_from_waverse(camera, display[0]/display[1])
             
-            key = (cx, cz)
+            # Sync lighting with sky system
+            sky_color = sky.get_sky_color()
+            # Compute sun direction from time of day
+            time_of_day = getattr(sky, 'time', 0.5)  # 0-1, 0.5 = noon
+            sun_angle = (time_of_day - 0.25) * math.pi * 2  # Sunrise at 0.25
+            sun_dir = (math.cos(sun_angle) * 0.5, max(0.2, math.sin(sun_angle)), 0.3)
+            modern_renderer.set_lighting(
+                sun_dir=sun_dir,
+                fog_color=sky_color,
+                fog_start=200.0,
+                fog_end=600.0
+            )
+            modern_renderer.set_water_level(water_level)
             
-            # Limit new chunk generation per frame to prevent stutters
-            needs_generation = key not in flora_manager.chunk_plants
-            if needs_generation:
-                if new_chunks >= MAX_NEW_CHUNKS_PER_FRAME:
+            # Load chunks around camera
+            modern_renderer.update_chunks_around_camera(camera, chunk_manager, flora_manager if not NO_FLORA_RENDER else None)
+            
+            # Enable ModernGL state
+            modern_ctx.enable(moderngl.DEPTH_TEST)
+            modern_ctx.enable(moderngl.CULL_FACE)
+            
+            # Render with ModernGL
+            modern_renderer.render(dt / 1000.0 if dt > 0 else 0.016)
+            
+            # Restore legacy OpenGL state for HUD/structures/weather
+            glEnable(GL_DEPTH_TEST)
+            glEnable(GL_CULL_FACE)
+            glMatrixMode(GL_MODELVIEW)
+            glLoadIdentity()
+            camera.apply()
+            
+            perf.record_time('chunk', _chunk_start)
+            perf.record_time('flora', _chunk_start)  # Combined in modern renderer
+        else:
+            # Legacy terrain rendering
+            chunk_renderer.render()
+            perf.record_time('chunk', _chunk_start)
+            
+            # Legacy flora rendering
+            _flora_start = time.perf_counter()
+            
+            # Fixed render radius - consistent to avoid flickering
+            FLORA_RENDER_RADIUS = 18
+            height_above_ground = camera.y - chunk_manager.get_height_at(camera.x, camera.z)
+            
+            MAX_NEW_CHUNKS_PER_FRAME = 3
+            cam_cx, cam_cz = current_chunk
+            cam_x, cam_z = cam_pos[0], cam_pos[2]
+            new_chunks = 0
+            
+            for (cx, cz), (display_list, lod) in chunk_renderer.display_lists.items():
+                dx, dz = abs(cx - cam_cx), abs(cz - cam_cz)
+                if dx > FLORA_RENDER_RADIUS or dz > FLORA_RENDER_RADIUS:
                     continue
-                new_chunks += 1
+                
+                key = (cx, cz)
+                
+                needs_generation = key not in flora_manager.chunk_plants
+                if needs_generation:
+                    if new_chunks >= MAX_NEW_CHUNKS_PER_FRAME:
+                        continue
+                    new_chunks += 1
+                
+                chunk = chunk_manager.get_chunk(cx, cz)
+                
+                if not NO_FLORA_RENDER:
+                    flora_manager.render_chunk_flora(
+                        cx, cz, cam_x, cam_z,
+                        chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE,
+                        height_above_ground=height_above_ground, speed_factor=speed_factor
+                    )
+                
+                if key not in animal_manager.chunk_animals:
+                    animal_manager.spawn_animals_for_chunk(
+                        cx, cz, chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE
+                    )
+                if needs_generation:
+                    structure_manager.spawn_random_buildings(
+                        cx, cz, chunk.world_x, chunk.world_z, chunk.heightmap, HEIGHT_SCALE, TILE_SCALE
+                    )
             
-            chunk = chunk_manager.get_chunk(cx, cz)
-            
-            # render_chunk_flora handles display lists and LOD properly
-            if not NO_FLORA_RENDER:
-                flora_manager.render_chunk_flora(
-                    cx, cz, cam_x, cam_z,
-                    chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE,
-                    height_above_ground=height_above_ground, speed_factor=speed_factor
-                )
-            
-            # Spawn animals/structures for new chunks (still need to spawn even if not rendering)
-            if key not in animal_manager.chunk_animals:
-                animal_manager.spawn_animals_for_chunk(
-                    cx, cz, chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE
-                )
-            if needs_generation:
-                structure_manager.spawn_random_buildings(
-                    cx, cz, chunk.world_x, chunk.world_z, chunk.heightmap, HEIGHT_SCALE, TILE_SCALE
-                )
+            perf.record_time('flora', _flora_start)
         
-        perf.record_time('flora', _flora_start)
+        # Always spawn animals/structures even with modern renderer
+        if USE_MODERN_RENDERER and modern_renderer:
+            cam_cx, cam_cz = current_chunk
+            for dx in range(-12, 13):
+                for dz in range(-12, 13):
+                    cx, cz = cam_cx + dx, cam_cz + dz
+                    key = (cx, cz)
+                    chunk = chunk_manager.chunks.get(key)
+                    if chunk:
+                        if key not in animal_manager.chunk_animals:
+                            animal_manager.spawn_animals_for_chunk(
+                                cx, cz, chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE
+                            )
+                        if key not in flora_manager.chunk_plants:
+                            structure_manager.spawn_random_buildings(
+                                cx, cz, chunk.world_x, chunk.world_z, chunk.heightmap, HEIGHT_SCALE, TILE_SCALE
+                            )
         
         # Update animals every few frames for performance
         _animal_start = time.perf_counter()
@@ -4344,6 +4431,11 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
     # Cleanup
     chunk_worker.stop()
     chunk_renderer.stop()
+    
+    # Cleanup modern renderer
+    if modern_renderer:
+        modern_renderer.cleanup()
+    
     pygame.quit()
 
 
