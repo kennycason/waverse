@@ -3680,6 +3680,27 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
     pygame.init()
     display = (1400, 800)
     
+    # On macOS, we can only use:
+    # - Legacy OpenGL 2.1 (default, supports glBegin/glEnd) 
+    # - Core OpenGL 3.2-4.1 (no legacy support)
+    # macOS does NOT support Compatibility profile for OpenGL 3.2+
+    # We'll try to detect the available version and work with it
+    if USE_MODERN_RENDERER:
+        import platform
+        if platform.system() == 'Darwin':
+            # macOS: Try Core 4.1 first, but we'll need to disable legacy for full modern
+            pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MAJOR_VERSION, 4)
+            pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MINOR_VERSION, 1)
+            pygame.display.gl_set_attribute(pygame.GL_CONTEXT_PROFILE_MASK, pygame.GL_CONTEXT_PROFILE_CORE)
+            pygame.display.gl_set_attribute(pygame.GL_CONTEXT_FLAGS, pygame.GL_CONTEXT_FORWARD_COMPATIBLE_FLAG)
+            print("  [RENDERER] macOS: Requesting OpenGL 4.1 Core profile...")
+        else:
+            # Linux/Windows: Try Compatibility profile to mix modern+legacy
+            pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MAJOR_VERSION, 3)
+            pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MINOR_VERSION, 3)
+            pygame.display.gl_set_attribute(pygame.GL_CONTEXT_PROFILE_MASK, pygame.GL_CONTEXT_PROFILE_COMPATIBILITY)
+            print("  [RENDERER] Requesting OpenGL 3.3 Compatibility profile...")
+    
     pygame.display.set_mode(display, DOUBLEBUF | OPENGL)
     pygame.display.set_caption(f"Waverse - {config.name}")
     
@@ -3688,6 +3709,39 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
     
     pygame.mouse.set_visible(True)
     pygame.event.set_grab(False)
+    
+    # Initialize ModernGL FIRST if enabled (before any legacy OpenGL calls)
+    # This must happen right after display creation while context is fresh
+    modern_renderer = None
+    modern_ctx = None
+    if USE_MODERN_RENDERER:
+        try:
+            import platform
+            # On macOS with Core profile, we need to init ModernGL before legacy GL calls
+            # because Core profile doesn't support legacy functions
+            modern_ctx = moderngl.create_context()
+            gl_version = modern_ctx.version_code
+            print(f"  [RENDERER] ModernGL context created (OpenGL {gl_version})")
+            
+            if gl_version < 330:
+                raise RuntimeError(f"OpenGL {gl_version} < 330, need 3.3+ for shaders")
+            
+            modern_renderer = ModernWorldRenderer(modern_ctx)
+            modern_renderer.set_chunk_params(CHUNK_SIZE, TILE_SCALE, HEIGHT_SCALE)
+            print(f"  [RENDERER] ModernGL initialized successfully!")
+            
+            # Check if we're on macOS with Core profile - legacy GL won't work
+            if platform.system() == 'Darwin':
+                print("  [RENDERER] Note: macOS Core profile - some legacy effects disabled")
+                
+        except Exception as e:
+            print(f"  [RENDERER] ModernGL failed: {e}")
+            import traceback
+            traceback.print_exc()
+            print(f"  [RENDERER] Falling back to legacy renderer")
+            USE_MODERN_RENDERER = False
+            modern_renderer = None
+            modern_ctx = None
     
     # Initialize font for HUD text
     pygame.font.init()
@@ -3699,32 +3753,15 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
     # Initialize gamepad
     gamepad = GamepadManager()
     
-    # Legacy OpenGL setup (always needed for HUD/structures/weather)
-    setup_opengl()
-    glMatrixMode(GL_PROJECTION)
-    gluPerspective(75, display[0]/display[1], 1.0, 2000)
-    glMatrixMode(GL_MODELVIEW)
-    
-    # Initialize ModernGL if enabled (hybrid: modern terrain/flora, legacy everything else)
-    modern_renderer = None
-    modern_ctx = None
-    if USE_MODERN_RENDERER:
-        try:
-            # Create context from existing pygame window
-            # Don't require specific version - use whatever is available
-            modern_ctx = moderngl.create_context()
-            print(f"  [RENDERER] ModernGL context created (OpenGL {modern_ctx.version_code})")
-            
-            if modern_ctx.version_code < 330:
-                print(f"  [RENDERER] Warning: OpenGL {modern_ctx.version_code} < 330, shaders may not work")
-            
-            modern_renderer = ModernWorldRenderer(modern_ctx)
-            modern_renderer.set_chunk_params(CHUNK_SIZE, TILE_SCALE, HEIGHT_SCALE)
-        except Exception as e:
-            print(f"  [RENDERER] ModernGL failed: {e}")
-            print(f"  [RENDERER] Falling back to legacy renderer")
-            USE_MODERN_RENDERER = False
-            modern_renderer = None
+    # Legacy OpenGL setup (needed for HUD/structures/weather)
+    # On macOS Core profile some of these may not work but we try anyway
+    try:
+        setup_opengl()
+        glMatrixMode(GL_PROJECTION)
+        gluPerspective(75, display[0]/display[1], 1.0, 2000)
+        glMatrixMode(GL_MODELVIEW)
+    except Exception as e:
+        print(f"  [RENDERER] Legacy OpenGL setup warning: {e}")
     
     # Create world with background chunk worker
     chunk_manager = ChunkManager(config)
