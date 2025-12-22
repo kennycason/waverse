@@ -22,6 +22,7 @@ from .modern_flora import ModernFloraRenderer
 from .modern_animals import ModernAnimalRenderer, get_animal_type_id
 from .modern_water import ModernWaterRenderer
 from .modern_sky import ModernSkyRenderer
+from .modern_clouds import ModernCloudRenderer
 from .modern_structures import ModernStructureRenderer
 from .modern_weather import ModernWeatherRenderer
 
@@ -46,6 +47,7 @@ class ModernWorldRenderer:
         
         # Sub-renderers
         self.sky = ModernSkyRenderer(ctx)  # Rendered first (background)
+        self.clouds = ModernCloudRenderer(ctx)  # After sky, volumetric
         self.terrain = ModernTerrainRenderer(ctx)
         self.structures = ModernStructureRenderer(ctx)  # Buildings, before flora
         self.flora = ModernFloraRenderer(ctx)
@@ -130,6 +132,7 @@ class ModernWorldRenderer:
         view = glm.lookAt(cam_pos, target, glm.vec3(0, 1, 0))
         
         self.sky.set_camera(projection, view, cam_pos)
+        self.clouds.set_camera(projection, view, cam_pos)
         self.structures.set_camera(projection, view, cam_pos)
         self.flora.set_camera(projection, view, cam_pos)
         self.animals.set_camera(projection, view, cam_pos)
@@ -414,8 +417,22 @@ class ModernWorldRenderer:
         self.water.water_level = level
     
     def set_weather(self, weather_type: str, intensity: float = 1.0):
-        """Set weather conditions for particle effects."""
+        """Set weather conditions for particle effects and clouds."""
         self.weather.set_weather(weather_type, intensity)
+        
+        # Sync cloud coverage with weather
+        if weather_type == 'clear':
+            self.clouds.set_weather(0.2)  # Few clouds
+        elif weather_type == 'rain':
+            self.clouds.set_weather(0.7, 1.5)  # Overcast, faster wind
+        elif weather_type == 'heavy_rain':
+            self.clouds.set_weather(0.9, 2.0)  # Very cloudy
+        elif weather_type == 'storm':
+            self.clouds.set_weather(1.0, 3.0)  # Full cloud cover, strong wind
+        elif weather_type == 'snow':
+            self.clouds.set_weather(0.6, 0.5)  # Moderate clouds, slow wind
+        else:
+            self.clouds.set_weather(0.4, 1.0)  # Default: partly cloudy
     
     def render(self, dt: float = 0.016):
         """
@@ -428,6 +445,9 @@ class ModernWorldRenderer:
         
         # Render sky first (background)
         self.sky.render()
+        
+        # Render volumetric clouds (after sky, blended)
+        self.clouds.render(dt)
         
         # Render terrain (opaque)
         self.terrain.render()
@@ -471,6 +491,7 @@ class ModernWorldRenderer:
     def set_time_of_day(self, time: float):
         """Set time of day (0.0 = midnight, 0.5 = noon, 1.0 = midnight)."""
         self.sky.set_time(time)
+        self.clouds.set_time(time)  # Sync clouds with sky
         
         # Sync sun direction and sky color with other renderers
         sun_dir = (self.sky.sun_dir.x, self.sky.sun_dir.y, self.sky.sun_dir.z)
@@ -481,6 +502,7 @@ class ModernWorldRenderer:
     def cleanup(self):
         """Release all GPU resources."""
         self.sky.cleanup()
+        self.clouds.cleanup()
         self.terrain.cleanup()
         self.structures.cleanup()
         self.flora.cleanup()
