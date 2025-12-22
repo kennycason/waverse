@@ -20,6 +20,7 @@ import time
 from .modern_terrain import ModernTerrainRenderer
 from .modern_flora import ModernFloraRenderer
 from .modern_animals import ModernAnimalRenderer, get_animal_type_id
+from .modern_water import ModernWaterRenderer
 
 
 # =============================================================================
@@ -44,6 +45,7 @@ class ModernWorldRenderer:
         self.terrain = ModernTerrainRenderer(ctx)
         self.flora = ModernFloraRenderer(ctx)
         self.animals = ModernAnimalRenderer(ctx)
+        self.water = ModernWaterRenderer(ctx)
         
         # Integration state
         self.loaded_terrain_chunks: set = set()
@@ -55,6 +57,7 @@ class ModernWorldRenderer:
             'terrain_tris': 0,
             'flora_instances': 0,
             'animal_instances': 0,
+            'water_tris': 0,
             'total_draw_calls': 0,
             'frame_time_ms': 0,
         }
@@ -106,6 +109,7 @@ class ModernWorldRenderer:
         
         self.flora.set_camera(projection, view, cam_pos)
         self.animals.set_camera(projection, view, cam_pos)
+        self.water.set_camera(projection, view, cam_pos)
     
     def load_terrain_chunk(self, cx: int, cz: int, chunk_manager: Any,
                            biome: str = 'grassland'):
@@ -315,6 +319,7 @@ class ModernWorldRenderer:
             self.terrain.light_dir = glm.vec3(*sun_dir)
             self.flora.light_dir = glm.vec3(*sun_dir)
             self.animals.light_dir = glm.vec3(*sun_dir)
+            self.water.light_dir = glm.vec3(*sun_dir)
         if ambient:
             self.terrain.ambient = glm.vec3(*ambient)
             self.flora.ambient = glm.vec3(*ambient)
@@ -323,6 +328,7 @@ class ModernWorldRenderer:
             self.terrain.fog_color = glm.vec3(*fog_color)
             self.flora.fog_color = glm.vec3(*fog_color)
             self.animals.fog_color = glm.vec3(*fog_color)
+            self.water.sky_color = glm.vec3(*fog_color)  # Sky color for reflections
         if fog_start is not None:
             self.terrain.fog_start = fog_start
             self.flora.fog_start = fog_start
@@ -333,8 +339,9 @@ class ModernWorldRenderer:
             self.animals.fog_end = fog_end
     
     def set_water_level(self, level: float):
-        """Set water level for terrain coloring."""
+        """Set water level for terrain coloring and water surface."""
         self.terrain.water_level = level
+        self.water.water_level = level
     
     def render(self, dt: float = 0.016):
         """
@@ -354,6 +361,9 @@ class ModernWorldRenderer:
         # Render animals
         self.animals.render(dt)
         
+        # Render water last (transparent, needs blending)
+        self.water.render(dt)
+        
         elapsed = time.perf_counter() - start
         
         # Update stats
@@ -362,9 +372,11 @@ class ModernWorldRenderer:
             'terrain_tris': self.terrain.frame_stats['triangles'],
             'flora_instances': self.flora.frame_stats['instances_rendered'],
             'animal_instances': self.animals.frame_stats['instances_rendered'],
+            'water_tris': self.water.frame_stats['triangles'],
             'total_draw_calls': (self.terrain.frame_stats['draw_calls'] + 
                                 self.flora.frame_stats['draw_calls'] +
-                                self.animals.frame_stats['draw_calls']),
+                                self.animals.frame_stats['draw_calls'] +
+                                self.water.frame_stats['draw_calls']),
             'frame_time_ms': elapsed * 1000,
         }
     
@@ -373,6 +385,7 @@ class ModernWorldRenderer:
         self.terrain.cleanup()
         self.flora.cleanup()
         self.animals.cleanup()
+        self.water.cleanup()
         self.loaded_terrain_chunks.clear()
         self.loaded_flora_chunks.clear()
 
