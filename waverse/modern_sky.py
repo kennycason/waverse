@@ -264,7 +264,7 @@ class ModernSkyRenderer:
         self.program['u_view'].write(self.view)
         self.program['u_time_of_day'].value = self.time_of_day
         self.program['u_sun_dir'].write(self.sun_dir)
-        self.program['u_camera_pos'].write(self.camera_pos)
+        # Note: u_camera_pos is unused in shader (optimized out), skip it
         
         # Render fullscreen quad as triangle strip
         self.vao.render(moderngl.TRIANGLE_STRIP)

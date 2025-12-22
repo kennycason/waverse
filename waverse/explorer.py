@@ -4366,25 +4366,41 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                     )
             life_simulator.pending_births.clear()
         
-        # Set sky color and fog based on time of day (now with DNA tint)
-        sky_color = sky.get_sky_color()
-        glClearColor(*sky_color, 1.0)
-        sky.apply_fog()
-        sky.apply_lighting()
-        
         # Render
         _render_start = time.perf_counter()
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
-        glLoadIdentity()
-        camera.apply()
-        
         cam_pos = camera.get_pos()
         
         # Use modern renderer for terrain/flora if available
         if USE_MODERN_RENDERER and modern_renderer:
-            # Modern renderer handles sky and clouds internally
-            pass
+            # Modern renderer handles everything via shaders
+            # Just need to sync camera and time/weather
+            modern_renderer.set_camera_from_waverse(camera, display[0]/display[1])
+            modern_renderer.set_time_of_day(getattr(sky, 'time', 0.5))
+            modern_renderer.set_lighting(fog_start=200.0, fog_end=600.0)
+            
+            # Sync weather
+            weather = climate_manager.current_weather
+            weather_type = weather.precipitation_type if hasattr(weather, 'precipitation_type') else 'none'
+            intensity = weather.precipitation if hasattr(weather, 'precipitation') else 0.0
+            modern_renderer.set_weather(weather_type, intensity)
+            
+            # Update chunk loading based on camera position
+            modern_renderer.update_chunks_around_camera(
+                camera, chunk_manager, flora_manager, animal_manager, structure_manager
+            )
+            
+            # Render everything via modern renderer
+            modern_renderer.render()
         else:
+            # Set sky color and fog based on time of day (now with DNA tint)
+            sky_color = sky.get_sky_color()
+            glClearColor(*sky_color, 1.0)
+            sky.apply_fog()
+            sky.apply_lighting()
+            
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+            glLoadIdentity()
+            camera.apply()
             # Legacy: Render sky (sun/moon/stars)
             sky.render(cam_pos[0], cam_pos[1], cam_pos[2])
             
@@ -4396,41 +4412,10 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
         
         _chunk_start = time.perf_counter()
         
-        # Use modern renderer for terrain/flora if available
+        # Continue rendering for legacy mode
         if USE_MODERN_RENDERER and modern_renderer:
-            # Update modern renderer camera
-            modern_renderer.set_camera_from_waverse(camera, display[0]/display[1])
-            
-            # Sync lighting with sky system
-            sky_color = sky.get_sky_color()
-            # Sync time of day (this also updates sun direction and fog color)
-            time_of_day = getattr(sky, 'time', 0.5)  # 0-1, 0.5 = noon
-            modern_renderer.set_time_of_day(time_of_day)
-            modern_renderer.set_lighting(fog_start=200.0, fog_end=600.0)
-            
-            # Sync weather
-            weather_state = climate_manager.current_weather
-            weather_type = getattr(weather_state, 'weather_type', 'clear') if hasattr(weather_state, 'weather_type') else str(weather_state)
-            modern_renderer.set_weather(weather_type, getattr(weather_state, 'intensity', 1.0) if hasattr(weather_state, 'intensity') else 1.0)
-            modern_renderer.set_water_level(water_level)
-            
-            # Load chunks around camera (includes terrain, flora, animals, structures)
-            modern_renderer.update_chunks_around_camera(
-                camera, chunk_manager, 
-                flora_manager if not NO_FLORA_RENDER else None,
-                animal_manager,
-                structure_manager
-            )
-            
-            # Enable ModernGL state
-            modern_ctx.enable(moderngl.DEPTH_TEST)
-            modern_ctx.enable(moderngl.CULL_FACE)
-            
-            # Render with ModernGL
-            modern_renderer.render(dt / 1000.0 if dt > 0 else 0.016)
-            
-            # On macOS Core profile, legacy OpenGL doesn't work
-            # Modern renderer handles everything - just record timing
+            # Modern renderer already rendered everything above
+            # Just record timing
             perf.record_time('chunk', _chunk_start)
             perf.record_time('flora', _chunk_start)  # Combined in modern renderer
         else:
