@@ -4332,8 +4332,12 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
             )
             modern_renderer.set_water_level(water_level)
             
-            # Load chunks around camera
-            modern_renderer.update_chunks_around_camera(camera, chunk_manager, flora_manager if not NO_FLORA_RENDER else None)
+            # Load chunks around camera (includes terrain, flora, and animals)
+            modern_renderer.update_chunks_around_camera(
+                camera, chunk_manager, 
+                flora_manager if not NO_FLORA_RENDER else None,
+                animal_manager
+            )
             
             # Enable ModernGL state
             modern_ctx.enable(moderngl.DEPTH_TEST)

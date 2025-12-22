@@ -7,7 +7,10 @@ Plants with similar shapes are batched together.
 
 import numpy as np
 import moderngl
-import glm
+try:
+    from pyglm import glm
+except ImportError:
+    import glm
 from typing import Dict, Tuple, List, Optional
 from dataclasses import dataclass, field
 import math

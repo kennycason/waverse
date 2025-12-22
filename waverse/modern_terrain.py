@@ -6,7 +6,10 @@ Converts existing heightmap data to GPU-optimized VBOs for fast rendering.
 
 import numpy as np
 import moderngl
-import glm
+try:
+    from pyglm import glm
+except ImportError:
+    import glm
 from typing import Dict, Tuple, Optional, List
 from dataclasses import dataclass
 

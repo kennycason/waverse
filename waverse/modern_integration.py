@@ -7,7 +7,10 @@ the new modern renderers. Allows incremental migration.
 
 import numpy as np
 import moderngl
-import glm
+try:
+    from pyglm import glm
+except ImportError:
+    import glm
 import pygame
 from typing import Dict, Tuple, List, Optional, Any
 from dataclasses import dataclass
@@ -16,6 +19,7 @@ import time
 
 from .modern_terrain import ModernTerrainRenderer
 from .modern_flora import ModernFloraRenderer
+from .modern_animals import ModernAnimalRenderer, get_animal_type_id
 
 
 # =============================================================================
@@ -39,6 +43,7 @@ class ModernWorldRenderer:
         # Sub-renderers
         self.terrain = ModernTerrainRenderer(ctx)
         self.flora = ModernFloraRenderer(ctx)
+        self.animals = ModernAnimalRenderer(ctx)
         
         # Integration state
         self.loaded_terrain_chunks: set = set()
@@ -49,6 +54,7 @@ class ModernWorldRenderer:
             'terrain_chunks': 0,
             'terrain_tris': 0,
             'flora_instances': 0,
+            'animal_instances': 0,
             'total_draw_calls': 0,
             'frame_time_ms': 0,
         }
@@ -56,6 +62,7 @@ class ModernWorldRenderer:
         # Render settings
         self.render_distance = 12  # Chunks
         self.flora_render_distance = 8  # Chunks
+        self.animal_render_distance = 10  # Chunks
         
         # Chunk size info (set by waverse)
         self.chunk_size = 64  # Grid cells per chunk
@@ -98,6 +105,7 @@ class ModernWorldRenderer:
         view = glm.lookAt(cam_pos, target, glm.vec3(0, 1, 0))
         
         self.flora.set_camera(projection, view, cam_pos)
+        self.animals.set_camera(projection, view, cam_pos)
     
     def load_terrain_chunk(self, cx: int, cz: int, chunk_manager: Any,
                            biome: str = 'grassland'):
@@ -192,7 +200,8 @@ class ModernWorldRenderer:
         self.loaded_flora_chunks.add(key)
     
     def update_chunks_around_camera(self, camera: Any, chunk_manager: Any,
-                                    flora_manager: Any = None):
+                                    flora_manager: Any = None,
+                                    animal_manager: Any = None):
         """
         Load/unload chunks based on camera position.
         
@@ -200,6 +209,7 @@ class ModernWorldRenderer:
             camera: waverse Camera
             chunk_manager: waverse ChunkManager
             flora_manager: waverse FloraManager (optional)
+            animal_manager: waverse AnimalManager (optional)
         """
         # Calculate camera chunk
         chunk_world_size = self.chunk_size * self.tile_scale
@@ -241,6 +251,60 @@ class ModernWorldRenderer:
                     self.load_flora_for_chunk(key[0], key[1], flora_manager)
                 
                 self.flora.upload_instances()
+        
+        # Handle animals if manager provided
+        if animal_manager:
+            self.update_animals(camera, animal_manager)
+    
+    def update_animals(self, camera: Any, animal_manager: Any):
+        """
+        Update animal instances from the animal manager.
+        
+        Animals are more dynamic than flora - they move, so we rebuild every frame.
+        """
+        self.animals.clear_instances()
+        
+        cam_x, cam_z = camera.x, camera.z
+        render_dist_sq = (self.animal_render_distance * self.chunk_size * self.tile_scale) ** 2
+        
+        # Get all animals and filter by distance
+        for animal in animal_manager.animals:
+            dx = animal.x - cam_x
+            dz = animal.z - cam_z
+            dist_sq = dx * dx + dz * dz
+            
+            if dist_sq > render_dist_sq:
+                continue
+            
+            # Get animal properties
+            x, y, z = animal.x, animal.y, animal.z
+            scale = getattr(animal, 'scale', 1.0)
+            
+            # Calculate facing direction from velocity or random
+            vx = getattr(animal, 'vx', 0)
+            vz = getattr(animal, 'vz', 0)
+            if vx != 0 or vz != 0:
+                rotation = math.atan2(vx, vz)
+            else:
+                rotation = getattr(animal, 'rotation', 0)
+            
+            # Animation phase based on movement/time
+            anim_phase = getattr(animal, 'anim_time', 0)
+            
+            # Get type and color from DNA
+            dna = getattr(animal, 'dna', None)
+            if dna:
+                animal_type = getattr(dna, 'animal_type', 'worm')
+                type_id = get_animal_type_id(animal_type)
+                
+                # Get color
+                color = getattr(dna, 'primary_color', (0.6, 0.5, 0.4))
+                r, g, b = color[:3] if len(color) >= 3 else (0.6, 0.5, 0.4)
+            else:
+                type_id = 0  # Default to worm
+                r, g, b = 0.6, 0.5, 0.4
+            
+            self.animals.add_instance(type_id, x, y, z, scale, rotation, anim_phase, r, g, b)
     
     def set_lighting(self, sun_dir: Tuple[float, float, float] = None,
                      ambient: Tuple[float, float, float] = None,
@@ -250,18 +314,23 @@ class ModernWorldRenderer:
         if sun_dir:
             self.terrain.light_dir = glm.vec3(*sun_dir)
             self.flora.light_dir = glm.vec3(*sun_dir)
+            self.animals.light_dir = glm.vec3(*sun_dir)
         if ambient:
             self.terrain.ambient = glm.vec3(*ambient)
             self.flora.ambient = glm.vec3(*ambient)
+            self.animals.ambient = glm.vec3(*ambient)
         if fog_color:
             self.terrain.fog_color = glm.vec3(*fog_color)
             self.flora.fog_color = glm.vec3(*fog_color)
+            self.animals.fog_color = glm.vec3(*fog_color)
         if fog_start is not None:
             self.terrain.fog_start = fog_start
             self.flora.fog_start = fog_start
+            self.animals.fog_start = fog_start
         if fog_end is not None:
             self.terrain.fog_end = fog_end
             self.flora.fog_end = fog_end
+            self.animals.fog_end = fog_end
     
     def set_water_level(self, level: float):
         """Set water level for terrain coloring."""
@@ -276,11 +345,14 @@ class ModernWorldRenderer:
         """
         start = time.perf_counter()
         
-        # Render terrain
+        # Render terrain first (opaque)
         self.terrain.render()
         
         # Render flora
         self.flora.render(dt)
+        
+        # Render animals
+        self.animals.render(dt)
         
         elapsed = time.perf_counter() - start
         
@@ -289,8 +361,10 @@ class ModernWorldRenderer:
             'terrain_chunks': self.terrain.frame_stats['chunks_rendered'],
             'terrain_tris': self.terrain.frame_stats['triangles'],
             'flora_instances': self.flora.frame_stats['instances_rendered'],
+            'animal_instances': self.animals.frame_stats['instances_rendered'],
             'total_draw_calls': (self.terrain.frame_stats['draw_calls'] + 
-                                self.flora.frame_stats['draw_calls']),
+                                self.flora.frame_stats['draw_calls'] +
+                                self.animals.frame_stats['draw_calls']),
             'frame_time_ms': elapsed * 1000,
         }
     
@@ -298,6 +372,7 @@ class ModernWorldRenderer:
         """Release all GPU resources."""
         self.terrain.cleanup()
         self.flora.cleanup()
+        self.animals.cleanup()
         self.loaded_terrain_chunks.clear()
         self.loaded_flora_chunks.clear()
 
