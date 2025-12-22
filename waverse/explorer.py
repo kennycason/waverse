@@ -3819,12 +3819,41 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
     # Pre-load chunks around camera position
     start_chunk = camera.get_chunk_pos()
     print("  Loading terrain (this may take a moment on first run)...")
-    chunk_renderer.update_chunks(start_chunk, force_all=True)
-    total_chunks = len(chunk_renderer.display_lists)
-    print(f"  Loaded {total_chunks} chunks!")
+    
+    if USE_MODERN_RENDERER and modern_renderer:
+        # Modern renderer handles terrain via VBOs, not display lists
+        # Load chunks into modern renderer instead
+        cx, cz = start_chunk
+        render_dist = RenderConfig.MODERN_TERRAIN_RENDER_DISTANCE
+        chunks_to_load = []
+        for dx in range(-render_dist, render_dist + 1):
+            for dz in range(-render_dist, render_dist + 1):
+                if dx*dx + dz*dz <= render_dist*render_dist:
+                    chunks_to_load.append((cx + dx, cz + dz))
+        
+        total_chunks = len(chunks_to_load)
+        for i, (chunk_x, chunk_z) in enumerate(chunks_to_load):
+            if i % 20 == 0:
+                print(f"    Loading chunks: {i}/{total_chunks}")
+            # Load chunk data
+            chunk = chunk_manager.get_or_generate_chunk(chunk_x, chunk_z)
+            if chunk is not None:
+                modern_renderer.update_chunks_around_camera(
+                    cx * CHUNK_SIZE * TILE_SCALE, 
+                    camera.y, 
+                    cz * CHUNK_SIZE * TILE_SCALE,
+                    chunk_manager, flora_manager, animal_manager, structure_manager
+                )
+        print(f"  Loaded {total_chunks} chunks!")
+    else:
+        # Legacy: use display lists
+        chunk_renderer.update_chunks(start_chunk, force_all=True)
+        total_chunks = len(chunk_renderer.display_lists)
+        print(f"  Loaded {total_chunks} chunks!")
     
     # Precompute flora/animals if requested (for performance testing)
-    if precompute_chunks > 0:
+    # Skip in modern mode - modern renderer handles loading dynamically
+    if precompute_chunks > 0 and not USE_MODERN_RENDERER:
         import math as _math
         # Calculate radius needed for requested chunk count
         # For a square grid: (2r+1)^2 = num_chunks, so r = (sqrt(num_chunks) - 1) / 2
@@ -4263,7 +4292,8 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
         
         # Update chunks (stream in new ones as we move)
         current_chunk = camera.get_chunk_pos()
-        chunk_renderer.update_chunks(current_chunk)
+        if not USE_MODERN_RENDERER:
+            chunk_renderer.update_chunks(current_chunk)
         chunk_worker.update_player_position(current_chunk[0], current_chunk[1])
         last_chunk = current_chunk
         
@@ -4417,42 +4447,8 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
             # Render with ModernGL
             modern_renderer.render(dt / 1000.0 if dt > 0 else 0.016)
             
-            # Restore legacy OpenGL state for HUD/structures/weather
-            # ModernGL uses VAOs/VBOs/shaders which must be unbound for legacy to work
-            # Note: finish() can cause frame stalls, so we skip it - flush is implicit
-            
-            # Unbind modern GL objects
-            from OpenGL.GL import glBindVertexArray, glBindBuffer, glUseProgram
-            from OpenGL.GL import GL_ARRAY_BUFFER, GL_ELEMENT_ARRAY_BUFFER
-            try:
-                glBindVertexArray(0)
-                glBindBuffer(GL_ARRAY_BUFFER, 0)
-                glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0)
-                glUseProgram(0)
-            except Exception:
-                pass  # Some systems may not support these
-            
-            glEnable(GL_DEPTH_TEST)
-            glEnable(GL_CULL_FACE)
-            glEnable(GL_LIGHTING)
-            glEnable(GL_LIGHT0)
-            glEnable(GL_FOG)
-            glEnable(GL_COLOR_MATERIAL)
-            
-            # Restore projection matrix
-            glMatrixMode(GL_PROJECTION)
-            glLoadIdentity()
-            gluPerspective(75, display[0]/display[1], 1.0, 2000)
-            
-            # Restore modelview and apply camera
-            glMatrixMode(GL_MODELVIEW)
-            glLoadIdentity()
-            camera.apply()
-            
-            # Re-apply sky lighting/fog (may have been changed by ModernGL)
-            sky.apply_fog()
-            sky.apply_lighting()
-            
+            # On macOS Core profile, legacy OpenGL doesn't work
+            # Modern renderer handles everything - just record timing
             perf.record_time('chunk', _chunk_start)
             perf.record_time('flora', _chunk_start)  # Combined in modern renderer
         else:
@@ -4551,32 +4547,36 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
         if not NO_ANIMAL_UPDATE and frame_count % animal_update_interval == 0:
             animal_manager.update(dt, cam_pos, None)
         
-        # Render animals (skip when very high up - they're invisible anyway)
-        if not NO_ANIMAL_RENDER and height_above_ground < 150:
-            animal_manager.render(cam_pos[0], cam_pos[1], cam_pos[2])
-        perf.record_time('animal', _animal_start)
+        # Skip legacy rendering in modern mode (modern renderer handles all of this)
+        if not (USE_MODERN_RENDERER and modern_renderer):
+            # Render animals (skip when very high up - they're invisible anyway)
+            if not NO_ANIMAL_RENDER and height_above_ground < 150:
+                animal_manager.render(cam_pos[0], cam_pos[1], cam_pos[2])
+            perf.record_time('animal', _animal_start)
+            
+            # Render eggs from life simulation
+            life_simulator.render_eggs(cam_pos[0], cam_pos[2])
+            
+            # Render structures (buildings)
+            structure_manager.render(cam_pos[0], cam_pos[1], cam_pos[2])
+            
+            # Render water plane at water level, centered on camera
+            render_water(camera.x, camera.z, water_level)
+            
+            # Render weather effects (rain/snow particles, lightning)
+            weather_renderer.render(cam_pos[0], cam_pos[1], cam_pos[2],
+                                   climate_manager.current_weather,
+                                   climate_manager.lightning_flash)
+        else:
+            perf.record_time('animal', _animal_start)
         
-        # Render eggs from life simulation
-        life_simulator.render_eggs(cam_pos[0], cam_pos[2])
-        
-        # Render structures (buildings)
-        structure_manager.render(cam_pos[0], cam_pos[1], cam_pos[2])
-        
-        # Cleanup distant chunks occasionally
+        # Cleanup distant chunks occasionally (always run, not rendering-related)
         if frame_count % 60 == 0:
             flora_manager.cleanup_distant_chunks(current_chunk[0], current_chunk[1])
             animal_manager.cleanup_distant_chunks(current_chunk[0], current_chunk[1])
             chunk_dna_manager.cleanup_distant(current_chunk[0], current_chunk[1])
             climate_manager.cleanup_distant(current_chunk[0], current_chunk[1])
             structure_manager.cleanup_distant(current_chunk[0], current_chunk[1])
-        
-        # Render water plane at water level, centered on camera
-        render_water(camera.x, camera.z, water_level)
-        
-        # Render weather effects (rain/snow particles, lightning)
-        weather_renderer.render(cam_pos[0], cam_pos[1], cam_pos[2],
-                               climate_manager.current_weather,
-                               climate_manager.lightning_flash)
         
         perf.record_time('render', _render_start)
         
@@ -4590,14 +4590,17 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                 len(structure_manager.structures)
             )
         
-        draw_crosshair(display)
-        draw_hud(display, camera, sky, climate_manager, hud_font)
-        draw_menu(display, camera, hud_font)  # Draw menu overlay if open
-        minimap.draw(display, camera.x, camera.z)
-        
-        # Perf overlay (if enabled)
-        if perf.show_overlay:
-            draw_perf_overlay(display, perf, hud_font)
+        # HUD/overlay rendering (uses legacy OpenGL, skip in modern mode on macOS Core profile)
+        if not (USE_MODERN_RENDERER and modern_renderer):
+            draw_crosshair(display)
+            draw_hud(display, camera, sky, climate_manager, hud_font)
+            draw_menu(display, camera, hud_font)  # Draw menu overlay if open
+            minimap.draw(display, camera.x, camera.z)
+            
+            # Perf overlay (if enabled)
+            if perf.show_overlay:
+                draw_perf_overlay(display, perf, hud_font)
+        # TODO: Add modern HUD rendering for Core profile
         
         pygame.display.flip()
         perf.end_frame()
