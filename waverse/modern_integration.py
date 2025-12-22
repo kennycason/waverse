@@ -21,6 +21,7 @@ from .modern_terrain import ModernTerrainRenderer
 from .modern_flora import ModernFloraRenderer
 from .modern_animals import ModernAnimalRenderer, get_animal_type_id
 from .modern_water import ModernWaterRenderer
+from .modern_sky import ModernSkyRenderer
 
 
 # =============================================================================
@@ -42,10 +43,11 @@ class ModernWorldRenderer:
         self.ctx = ctx
         
         # Sub-renderers
+        self.sky = ModernSkyRenderer(ctx)  # Rendered first (background)
         self.terrain = ModernTerrainRenderer(ctx)
         self.flora = ModernFloraRenderer(ctx)
         self.animals = ModernAnimalRenderer(ctx)
-        self.water = ModernWaterRenderer(ctx)
+        self.water = ModernWaterRenderer(ctx)  # Rendered last (transparent)
         
         # Integration state
         self.loaded_terrain_chunks: set = set()
@@ -107,6 +109,7 @@ class ModernWorldRenderer:
         target = cam_pos + glm.vec3(dir_x, dir_y, dir_z)
         view = glm.lookAt(cam_pos, target, glm.vec3(0, 1, 0))
         
+        self.sky.set_camera(projection, view, cam_pos)
         self.flora.set_camera(projection, view, cam_pos)
         self.animals.set_camera(projection, view, cam_pos)
         self.water.set_camera(projection, view, cam_pos)
@@ -352,7 +355,10 @@ class ModernWorldRenderer:
         """
         start = time.perf_counter()
         
-        # Render terrain first (opaque)
+        # Render sky first (background)
+        self.sky.render()
+        
+        # Render terrain (opaque)
         self.terrain.render()
         
         # Render flora
@@ -380,8 +386,19 @@ class ModernWorldRenderer:
             'frame_time_ms': elapsed * 1000,
         }
     
+    def set_time_of_day(self, time: float):
+        """Set time of day (0.0 = midnight, 0.5 = noon, 1.0 = midnight)."""
+        self.sky.set_time(time)
+        
+        # Sync sun direction and sky color with other renderers
+        sun_dir = (self.sky.sun_dir.x, self.sky.sun_dir.y, self.sky.sun_dir.z)
+        sky_color = self.sky.get_sky_color()
+        
+        self.set_lighting(sun_dir=sun_dir, fog_color=sky_color)
+    
     def cleanup(self):
         """Release all GPU resources."""
+        self.sky.cleanup()
         self.terrain.cleanup()
         self.flora.cleanup()
         self.animals.cleanup()

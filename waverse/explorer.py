@@ -4320,16 +4320,10 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
             
             # Sync lighting with sky system
             sky_color = sky.get_sky_color()
-            # Compute sun direction from time of day
+            # Sync time of day (this also updates sun direction and fog color)
             time_of_day = getattr(sky, 'time', 0.5)  # 0-1, 0.5 = noon
-            sun_angle = (time_of_day - 0.25) * math.pi * 2  # Sunrise at 0.25
-            sun_dir = (math.cos(sun_angle) * 0.5, max(0.2, math.sin(sun_angle)), 0.3)
-            modern_renderer.set_lighting(
-                sun_dir=sun_dir,
-                fog_color=sky_color,
-                fog_start=200.0,
-                fog_end=600.0
-            )
+            modern_renderer.set_time_of_day(time_of_day)
+            modern_renderer.set_lighting(fog_start=200.0, fog_end=600.0)
             modern_renderer.set_water_level(water_level)
             
             # Load chunks around camera (includes terrain, flora, and animals)
