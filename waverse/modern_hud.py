@@ -1700,6 +1700,7 @@ class ModernHUDRenderer:
             if feat_type == 'eye':
                 # Draw eyes on the head (first segment)
                 eye_spacing = size * 0.08
+                feat_count = int(feat_count) if isinstance(feat_count, (int, float, str)) else 2
                 for e in range(min(feat_count, 8)):
                     eye_x = cx - total_len * body_scale * 0.35 + (e - feat_count/2) * eye_spacing * 0.5
                     eye_y = cy - size * 0.05 + anim_y
