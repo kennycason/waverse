@@ -1335,7 +1335,7 @@ class ModernHUDRenderer:
             self.vao.render(moderngl.TRIANGLES, vertices=len(vertices) // 8)
     
     def _draw_plant_preview(self, vertices: List, dna: Dict, cx: float, cy: float, size: float):
-        """Draw a stylized 2D plant from DNA colors."""
+        """Draw a high-detail 2D plant from DNA with actual parameters."""
         # Get the actual DNA dict (might be nested)
         plant_dna = dna.get('dna', dna)
         
@@ -1344,153 +1344,412 @@ class ModernHUDRenderer:
         leaf_color = self._extract_rgb_dict(plant_dna.get('leaf_color'), (0.2, 0.6, 0.2))
         flower_color = self._extract_rgb_dict(plant_dna.get('flower_color'), (0.8, 0.4, 0.6))
         
+        # Get actual DNA parameters for sizing
+        height_gene = plant_dna.get('height_gene', {})
+        width_gene = plant_dna.get('width_gene', {})
+        plant_height = height_gene.get('value', 1.0) if isinstance(height_gene, dict) else 1.0
+        plant_width = width_gene.get('value', 1.0) if isinstance(width_gene, dict) else 1.0
+        
+        leaf_density = plant_dna.get('leaf_density', 0.5)
+        leaf_size_val = plant_dna.get('leaf_size', 0.5)
+        branch_count = plant_dna.get('branch_count', 3)
+        branch_angle = plant_dna.get('branch_angle', 0.5)
+        
         # Get plant type for shape variation
         plant_type = plant_dna.get('plant_type', 'tree')
         
-        # Draw trunk (rectangle)
-        trunk_h = size * 0.6
-        trunk_w = size * 0.15
-        trunk_x = cx - trunk_w / 2
-        trunk_y = cy + size * 0.1  # Bottom half
-        self._add_quad(vertices, trunk_x, trunk_y, trunk_w, trunk_h,
-                      0, 0, 0, 0, *trunk_color, 1.0)
+        # Animation for gentle sway
+        anim_t = self._preview_rotation
+        sway = math.sin(anim_t * 1.5) * size * 0.02
         
-        # Draw canopy/leaves based on plant type
+        # Scale based on DNA height/width
+        trunk_h = size * 0.5 * min(plant_height, 2.0)
+        trunk_w = size * 0.08 * min(plant_width, 2.0)
+        
+        # Base of trunk
+        trunk_base_y = cy + size * 0.35
+        trunk_top_y = trunk_base_y - trunk_h
+        
         if plant_type in ('tree', 'conifer', 'palm'):
-            # Tree - circular canopy
-            canopy_size = size * 0.8
-            self._draw_circle_shape(vertices, cx, cy - size * 0.2, canopy_size, leaf_color, 8)
+            # Draw detailed trunk with taper
+            for i in range(5):
+                seg_y = trunk_base_y - (trunk_h * i / 5)
+                seg_w = trunk_w * (1 - i * 0.12)  # Taper
+                seg_h = trunk_h / 5 + 2
+                seg_sway = sway * (i / 5)
+                self._add_quad(vertices, cx - seg_w/2 + seg_sway, seg_y - seg_h, seg_w, seg_h,
+                              0, 0, 0, 0, 
+                              trunk_color[0] * (0.9 + i * 0.02), 
+                              trunk_color[1] * (0.9 + i * 0.02), 
+                              trunk_color[2] * (0.9 + i * 0.02), 1.0)
+            
+            if plant_type == 'conifer':
+                # Draw layered triangle canopy
+                layers = int(3 + branch_count / 2)
+                for layer in range(layers):
+                    layer_y = trunk_top_y - layer * size * 0.12
+                    layer_w = size * (0.15 + layer * 0.18) * plant_width
+                    layer_h = size * 0.2
+                    layer_sway = sway * (1 + layer * 0.2)
+                    # Triangle as 3 vertices
+                    shade = 0.85 + layer * 0.05
+                    self._draw_triangle(vertices, 
+                                       cx + layer_sway, layer_y - layer_h,  # top
+                                       cx - layer_w/2 + layer_sway, layer_y,  # bottom left
+                                       cx + layer_w/2 + layer_sway, layer_y,  # bottom right
+                                       (leaf_color[0] * shade, leaf_color[1] * shade, leaf_color[2] * shade))
+            elif plant_type == 'palm':
+                # Draw fronds radiating from top
+                frond_count = max(5, int(branch_count * 1.5))
+                for i in range(frond_count):
+                    angle = (i / frond_count) * math.pi + math.pi
+                    frond_len = size * 0.5 * (0.8 + leaf_size_val * 0.4)
+                    frond_sway = math.sin(anim_t * 2 + i * 0.5) * size * 0.05
+                    frond_end_x = cx + math.cos(angle) * frond_len + frond_sway
+                    frond_end_y = trunk_top_y + math.sin(angle) * frond_len * 0.6
+                    self._draw_line(vertices, cx + sway, trunk_top_y, 
+                                   frond_end_x, frond_end_y, size * 0.03, leaf_color)
+            else:
+                # Regular tree - layered circular canopy (high detail)
+                canopy_layers = int(2 + leaf_density * 3)
+                for layer in range(canopy_layers):
+                    layer_size = size * (0.4 + layer * 0.15) * plant_width
+                    layer_y = trunk_top_y + layer * size * 0.08
+                    layer_sway = sway * (1.2 - layer * 0.1)
+                    shade = 0.7 + layer * 0.1
+                    self._draw_circle_shape(vertices, cx + layer_sway, layer_y, layer_size, 
+                                           (leaf_color[0] * shade, leaf_color[1] * shade, leaf_color[2] * shade), 16)
+                
+                # Add some highlight dots for leaves
+                for i in range(int(leaf_density * 8)):
+                    angle = i * 0.8 + anim_t * 0.5
+                    dist = size * 0.2 + (i % 3) * size * 0.1
+                    lx = cx + math.cos(angle) * dist + sway
+                    ly = trunk_top_y + math.sin(angle) * dist * 0.5
+                    self._draw_circle_shape(vertices, lx, ly, size * 0.06, 
+                                           (leaf_color[0] * 1.2, leaf_color[1] * 1.2, leaf_color[2]), 6)
+        
         elif plant_type in ('bush', 'shrub'):
-            # Bush - wider, shorter
-            canopy_w = size * 1.0
-            canopy_h = size * 0.5
-            self._add_quad(vertices, cx - canopy_w/2, cy - canopy_h, canopy_w, canopy_h,
-                          0, 0, 0, 0, *leaf_color, 1.0)
+            # Low spreading bush
+            trunk_h = size * 0.15
+            self._add_quad(vertices, cx - trunk_w/2, trunk_base_y - trunk_h, trunk_w, trunk_h,
+                          0, 0, 0, 0, *trunk_color, 1.0)
+            # Multiple overlapping circles for foliage
+            foliage_count = int(3 + leaf_density * 4)
+            for i in range(foliage_count):
+                angle = (i / foliage_count) * math.pi * 2
+                dist = size * 0.15
+                fx = cx + math.cos(angle) * dist + sway * (0.5 + i * 0.1)
+                fy = trunk_base_y - trunk_h - size * 0.1 + math.sin(angle) * size * 0.1
+                fsize = size * (0.25 + leaf_size_val * 0.15)
+                shade = 0.8 + (i % 3) * 0.1
+                self._draw_circle_shape(vertices, fx, fy, fsize, 
+                                       (leaf_color[0] * shade, leaf_color[1] * shade, leaf_color[2] * shade), 12)
+        
         elif plant_type in ('flower', 'succulent'):
-            # Flower - small with colored petals
-            self._draw_circle_shape(vertices, cx, cy - size * 0.1, size * 0.5, flower_color, 6)
-            self._draw_circle_shape(vertices, cx, cy - size * 0.1, size * 0.2, (0.9, 0.8, 0.2), 6)
+            # Draw stem
+            stem_h = size * 0.3
+            self._add_quad(vertices, cx - trunk_w * 0.3 + sway, trunk_base_y - stem_h, trunk_w * 0.6, stem_h,
+                          0, 0, 0, 0, *trunk_color, 1.0)
+            # Draw petals radiating from center
+            petal_count = max(5, int(branch_count * 1.5))
+            flower_y = trunk_base_y - stem_h - size * 0.1
+            for i in range(petal_count):
+                angle = (i / petal_count) * math.pi * 2 + anim_t * 0.3
+                petal_len = size * 0.2 * (1 + leaf_size_val * 0.5)
+                px = cx + math.cos(angle) * petal_len + sway
+                py = flower_y + math.sin(angle) * petal_len * 0.5
+                petal_size = size * 0.12
+                self._draw_circle_shape(vertices, px, py, petal_size, flower_color, 8)
+            # Center
+            self._draw_circle_shape(vertices, cx + sway, flower_y, size * 0.1, 
+                                   (leaf_color[0] * 0.8, leaf_color[1] * 1.2, leaf_color[2] * 0.5), 10)
+        
         elif plant_type in ('grass', 'fern'):
-            # Grass - multiple thin blades
-            for i in range(-2, 3):
-                blade_x = cx + i * size * 0.12
-                blade_w = size * 0.06
-                blade_h = size * 0.7 + abs(i) * 0.1
-                self._add_quad(vertices, blade_x - blade_w/2, cy - blade_h * 0.3, blade_w, blade_h,
-                              0, 0, 0, 0, *leaf_color, 0.9)
+            # Multiple blades with curve
+            blade_count = int(5 + leaf_density * 6)
+            for i in range(blade_count):
+                blade_x = cx + (i - blade_count/2) * size * 0.07
+                blade_h = size * (0.4 + plant_height * 0.2) * (0.8 + (i % 3) * 0.1)
+                blade_w = size * 0.025
+                # Draw curved blade using multiple segments
+                for j in range(4):
+                    seg_y = trunk_base_y - blade_h * j / 4
+                    seg_h = blade_h / 4 + 2
+                    curve = math.sin(j * 0.5 + i * 0.3) * size * 0.03 + sway * (j / 4)
+                    seg_w = blade_w * (1 - j * 0.15)
+                    shade = 0.7 + j * 0.1
+                    self._add_quad(vertices, blade_x - seg_w/2 + curve, seg_y - seg_h, seg_w, seg_h,
+                                  0, 0, 0, 0, 
+                                  leaf_color[0] * shade, leaf_color[1] * shade, leaf_color[2] * shade, 0.95)
+        
         elif plant_type == 'mushroom':
-            # Mushroom - stem and cap
+            # Detailed mushroom with spots
             cap_color = self._extract_rgb_dict(plant_dna.get('cap_color'), flower_color)
-            stem_h = size * 0.4
-            stem_w = size * 0.15
-            self._add_quad(vertices, cx - stem_w/2, cy, stem_w, stem_h,
-                          0, 0, 0, 0, 0.9, 0.85, 0.8, 1.0)
-            # Cap
-            cap_w = size * 0.6
-            cap_h = size * 0.35
-            self._add_quad(vertices, cx - cap_w/2, cy - cap_h, cap_w, cap_h,
-                          0, 0, 0, 0, *cap_color, 1.0)
+            stem_h = size * 0.35
+            stem_w = size * 0.1
+            # Draw stem with slight bulge at base
+            for i in range(3):
+                seg_y = trunk_base_y - stem_h * i / 3
+                bulge = 1 + (2 - i) * 0.1
+                seg_w = stem_w * bulge
+                self._add_quad(vertices, cx - seg_w/2, seg_y - stem_h/3, seg_w, stem_h/3 + 2,
+                              0, 0, 0, 0, 0.95, 0.9, 0.85, 1.0)
+            # Cap (dome shape using circles)
+            cap_y = trunk_base_y - stem_h
+            cap_size = size * 0.45 * plant_width
+            self._draw_circle_shape(vertices, cx, cap_y - cap_size * 0.2, cap_size, cap_color, 16)
+            # Spots on cap
+            spot_count = int(leaf_density * 5)
+            for i in range(spot_count):
+                angle = i * 1.2 + 0.5
+                dist = cap_size * 0.25
+                sx = cx + math.cos(angle) * dist
+                sy = cap_y - cap_size * 0.2 + math.sin(angle) * dist * 0.3
+                spot_size = size * 0.04
+                self._draw_circle_shape(vertices, sx, sy, spot_size, (0.95, 0.95, 0.9), 6)
+        
+        elif plant_type == 'cactus':
+            # Tall cactus with arms
+            cactus_h = size * 0.6 * plant_height
+            cactus_w = size * 0.12 * plant_width
+            # Main body
+            self._add_quad(vertices, cx - cactus_w/2, trunk_base_y - cactus_h, cactus_w, cactus_h,
+                          0, 0, 0, 0, *trunk_color, 1.0)
+            # Arms
+            if branch_count > 1:
+                arm_h = cactus_h * 0.3
+                arm_w = cactus_w * 0.8
+                arm_y = trunk_base_y - cactus_h * 0.5
+                # Left arm
+                self._add_quad(vertices, cx - cactus_w/2 - arm_w, arm_y, arm_w, arm_h * 0.3,
+                              0, 0, 0, 0, *trunk_color, 1.0)
+                self._add_quad(vertices, cx - cactus_w/2 - arm_w, arm_y - arm_h, arm_w * 0.3, arm_h,
+                              0, 0, 0, 0, *trunk_color, 1.0)
+                # Right arm
+                self._add_quad(vertices, cx + cactus_w/2, arm_y - arm_h * 0.5, arm_w, arm_h * 0.3,
+                              0, 0, 0, 0, *trunk_color, 1.0)
+                self._add_quad(vertices, cx + cactus_w/2 + arm_w * 0.7, arm_y - arm_h * 0.5 - arm_h, arm_w * 0.3, arm_h,
+                              0, 0, 0, 0, *trunk_color, 1.0)
+            # Flower on top
+            if leaf_density > 0.3:
+                self._draw_circle_shape(vertices, cx, trunk_base_y - cactus_h - size * 0.05, size * 0.08, flower_color, 8)
+        
         else:
-            # Default - simple tree
-            self._draw_circle_shape(vertices, cx, cy - size * 0.2, size * 0.6, leaf_color, 6)
+            # Default - medium detail tree
+            self._add_quad(vertices, cx - trunk_w/2, trunk_base_y - trunk_h, trunk_w, trunk_h,
+                          0, 0, 0, 0, *trunk_color, 1.0)
+            self._draw_circle_shape(vertices, cx + sway, trunk_base_y - trunk_h - size * 0.15, size * 0.5, leaf_color, 12)
+    
+    def _draw_triangle(self, vertices: List, x1: float, y1: float, x2: float, y2: float, 
+                       x3: float, y3: float, color: Tuple[float, float, float]):
+        """Draw a triangle with the given vertices."""
+        vertices.extend([x1, y1, 0, 0, *color, 1.0])
+        vertices.extend([x2, y2, 0, 0, *color, 1.0])
+        vertices.extend([x3, y3, 0, 0, *color, 1.0])
     
     def _draw_animal_preview(self, vertices: List, dna: Dict, cx: float, cy: float, size: float):
-        """Draw a stylized 2D animal from DNA colors."""
+        """Draw a high-detail 2D animal from DNA using actual body segments."""
         # Get the actual DNA dict (might be nested)
         animal_dna = dna.get('dna', dna)
         
-        # Extract colors from body_segments (array of [r, g, b])
+        # Get actual body segments and their colors/sizes
         body_segments = animal_dna.get('body_segments', [])
-        if body_segments and len(body_segments) > 0:
-            primary = self._extract_array_color(body_segments[0].get('color'), (0.5, 0.4, 0.3))
-        else:
-            primary = (0.5, 0.4, 0.3)
+        limbs = animal_dna.get('limbs', [])
+        features = animal_dna.get('features', [])
+        base_scale = animal_dna.get('base_scale', 1.0)
         
-        if body_segments and len(body_segments) > 1:
-            secondary = self._extract_array_color(body_segments[1].get('color'), primary)
-        else:
-            # Slightly different shade
-            secondary = (primary[0] * 0.8, primary[1] * 0.8, primary[2] * 0.8)
+        # Calculate scale factor for the preview area
+        scale = size / max(base_scale, 0.5)
         
-        # Get animal type
+        # Get animal type for shape variations
         animal_type = animal_dna.get('animal_type', 'mammal')
         
-        # Simple animation offset
-        anim = math.sin(self._preview_rotation * 2) * size * 0.05
+        # Animation phase
+        anim_t = self._preview_rotation
+        anim_y = math.sin(anim_t * 2) * size * 0.03
         
-        if animal_type in ('bird', 'bat', 'pterosaur', 'moth'):
-            # Flying - draw wings spread
-            body_w = size * 0.3
-            body_h = size * 0.5
-            self._add_quad(vertices, cx - body_w/2, cy - body_h/2 + anim, body_w, body_h,
-                          0, 0, 0, 0, *primary, 1.0)
-            # Wings
-            wing_w = size * 0.5
-            wing_h = size * 0.2
-            wing_offset = math.sin(self._preview_rotation * 8) * size * 0.1
-            self._add_quad(vertices, cx - body_w/2 - wing_w, cy - wing_h/2 + wing_offset, wing_w, wing_h,
-                          0, 0, 0, 0, *secondary, 0.9)
-            self._add_quad(vertices, cx + body_w/2, cy - wing_h/2 + wing_offset, wing_w, wing_h,
-                          0, 0, 0, 0, *secondary, 0.9)
-        elif animal_type in ('spider', 'scorpion', 'centipede', 'millipede', 'beetle', 'mantis'):
-            # Crawler - body with legs
-            body_w = size * 0.4
-            body_h = size * 0.25
-            self._add_quad(vertices, cx - body_w/2, cy - body_h/2, body_w, body_h,
-                          0, 0, 0, 0, *primary, 1.0)
-            # Legs (animated)
-            leg_w = size * 0.08
-            leg_h = size * 0.3
-            for i in range(-2, 3):
+        # Default colors if no segments
+        primary = (0.5, 0.4, 0.3)
+        secondary = (0.4, 0.3, 0.2)
+        
+        # --- DRAW BODY SEGMENTS (HIGH DETAIL) ---
+        num_segs = len(body_segments)
+        total_len = 1.0  # Default
+        body_scale = scale * 0.4  # Default
+        
+        if num_segs > 0:
+            # Calculate total body length for positioning
+            total_len = 0.0
+            for seg in body_segments:
+                seg_size = seg.get('size', [0.3, 0.3, 0.3])
+                total_len += seg_size[0] if isinstance(seg_size, (list, tuple)) else 0.3
+            
+            # Scale to fit preview
+            body_scale = min(scale * 0.4, size * 0.9 / max(total_len, 1.0))
+            
+            # Starting position (left side of body)
+            seg_x = cx - total_len * body_scale * 0.4
+            
+            for i, seg in enumerate(body_segments):
+                seg_color = self._extract_array_color(seg.get('color'), primary)
+                seg_size = seg.get('size', [0.3, 0.3, 0.3])
+                if isinstance(seg_size, (list, tuple)) and len(seg_size) >= 3:
+                    seg_w = seg_size[0] * body_scale * 1.5
+                    seg_h = seg_size[1] * body_scale * 1.5
+                else:
+                    seg_w = 0.3 * body_scale
+                    seg_h = 0.3 * body_scale
+                
+                # Animate segments with wave motion for snake/serpent types
+                if animal_type in ('worm', 'serpent', 'snake', 'centipede', 'millipede'):
+                    wave = math.sin(anim_t * 3 + i * 0.6) * size * 0.08
+                    seg_y_offset = wave
+                else:
+                    seg_y_offset = anim_y
+                
+                # Draw segment as circle (higher detail)
+                self._draw_circle_shape(vertices, seg_x + seg_w/2, cy + seg_y_offset, 
+                                       max(seg_w, seg_h), seg_color, 16)
+                
+                # Store primary/secondary for features
                 if i == 0:
-                    continue
-                leg_x = cx + i * size * 0.12
-                leg_anim = math.sin(self._preview_rotation * 6 + i) * size * 0.05
-                self._add_quad(vertices, leg_x - leg_w/2, cy + body_h/2 + leg_anim, leg_w, leg_h,
-                              0, 0, 0, 0, *secondary, 0.8)
-        elif animal_type in ('worm', 'serpent', 'snake'):
-            # Snake - wavy body
-            seg_count = 6
-            seg_w = size * 0.15
-            for i in range(seg_count):
-                wave = math.sin(self._preview_rotation * 3 + i * 0.8) * size * 0.1
-                seg_x = cx - size * 0.4 + i * size * 0.15
-                seg_y = cy + wave
-                seg_size = seg_w * (1 - i * 0.1)
-                self._add_quad(vertices, seg_x, seg_y - seg_size/2, seg_size, seg_size,
-                              0, 0, 0, 0, *primary, 1.0)
-        elif animal_type in ('fish', 'squid', 'octopus', 'jellyfish', 'cephalopod'):
-            # Aquatic - body with fins/tentacles
-            body_w = size * 0.5
-            body_h = size * 0.3
-            wave = math.sin(self._preview_rotation * 4) * size * 0.05
-            self._add_quad(vertices, cx - body_w/2 + wave, cy - body_h/2, body_w, body_h,
-                          0, 0, 0, 0, *primary, 1.0)
-            # Tail fin
-            self._add_quad(vertices, cx + body_w/2 + wave, cy - size * 0.15, size * 0.2, size * 0.3,
-                          0, 0, 0, 0, *secondary, 0.8)
+                    primary = seg_color
+                elif i == 1:
+                    secondary = seg_color
+                
+                seg_x += seg_w * 0.7  # Overlap segments slightly
         else:
-            # Default quadruped - body, head, legs
-            body_w = size * 0.6
-            body_h = size * 0.35
-            self._add_quad(vertices, cx - body_w/2, cy - body_h/2 + anim, body_w, body_h,
-                          0, 0, 0, 0, *primary, 1.0)
-            # Head
-            head_size = size * 0.25
-            self._add_quad(vertices, cx - body_w/2 - head_size * 0.5, cy - head_size/2 + anim, 
-                          head_size, head_size, 0, 0, 0, 0, *primary, 1.0)
-            # Legs (animated walk)
-            leg_w = size * 0.1
-            leg_h = size * 0.25
-            for i, lx in enumerate([cx - size * 0.2, cx + size * 0.15]):
-                leg_anim = math.sin(self._preview_rotation * 5 + i * 3.14) * size * 0.05
-                self._add_quad(vertices, lx - leg_w/2, cy + body_h/2 + leg_anim, leg_w, leg_h,
-                              0, 0, 0, 0, *secondary, 0.9)
+            # Fallback: single body circle
+            self._draw_circle_shape(vertices, cx, cy + anim_y, size * 0.6, primary, 16)
         
-        # Eyes (small dots)
-        eye_size = size * 0.06
-        self._add_quad(vertices, cx - size * 0.35 - eye_size, cy - size * 0.1 + anim, eye_size, eye_size,
-                      0, 0, 0, 0, 0.1, 0.1, 0.1, 1.0)
+        # --- DRAW LIMBS (HIGH DETAIL) ---
+        if limbs:
+            for limb_data in limbs:
+                limb_color = self._extract_array_color(limb_data.get('color'), secondary)
+                limb_segs = limb_data.get('segments', [])
+                limb_type = limb_data.get('limb_type', 'leg')
+                
+                # Calculate limb position based on attachment
+                attach = limb_data.get('attachment_point', [0, 0, 0])
+                if isinstance(attach, (list, tuple)) and len(attach) >= 2:
+                    limb_x = cx + attach[0] * scale * 0.3
+                    limb_y = cy + attach[1] * scale * 0.3 + anim_y
+                else:
+                    limb_x = cx
+                    limb_y = cy + anim_y
+                
+                # Draw limb segments
+                for j, lseg in enumerate(limb_segs):
+                    lseg_len = lseg.get('length', 0.2) * scale * 0.5
+                    lseg_thick = lseg.get('thickness', 0.05) * scale * 0.4
+                    
+                    # Animate limbs
+                    limb_anim = math.sin(anim_t * 6 + j * 1.5) * size * 0.04
+                    
+                    # Draw as rectangle (leg segment)
+                    self._add_quad(vertices, limb_x - lseg_thick/2, limb_y + limb_anim, 
+                                  lseg_thick, lseg_len, 0, 0, 0, 0, *limb_color, 0.9)
+                    limb_y += lseg_len * 0.8
+        else:
+            # Draw type-based limbs if no explicit limb data
+            limb_pairs = animal_dna.get('limb_pairs', 0)
+            if animal_type in ('bird', 'bat', 'pterosaur', 'moth'):
+                # Wings
+                wing_w = size * 0.6
+                wing_h = size * 0.15
+                wing_anim = math.sin(anim_t * 8) * size * 0.15
+                # Left wing
+                self._add_quad(vertices, cx - size * 0.3 - wing_w, cy - wing_h/2 + wing_anim, 
+                              wing_w, wing_h, 0, 0, 0, 0, *secondary, 0.85)
+                # Right wing
+                self._add_quad(vertices, cx + size * 0.3, cy - wing_h/2 + wing_anim, 
+                              wing_w, wing_h, 0, 0, 0, 0, *secondary, 0.85)
+            elif animal_type in ('spider', 'scorpion', 'beetle', 'mantis'):
+                # 8 legs for arachnids
+                leg_count = 8 if animal_type == 'spider' else 6
+                for i in range(leg_count):
+                    angle = (i / leg_count) * math.pi - math.pi/2
+                    leg_len = size * 0.4
+                    leg_w = size * 0.04
+                    leg_anim = math.sin(anim_t * 6 + i * 0.8) * size * 0.06
+                    leg_x = cx + math.cos(angle) * size * 0.2
+                    leg_y = cy + math.sin(angle) * size * 0.1 + leg_anim
+                    leg_end_x = leg_x + math.cos(angle) * leg_len
+                    leg_end_y = leg_y + math.sin(angle) * leg_len * 0.5 + size * 0.2
+                    # Draw as line (two triangles)
+                    self._draw_line(vertices, leg_x, leg_y, leg_end_x, leg_end_y, leg_w, secondary)
+            elif limb_pairs > 0 and animal_type not in ('worm', 'serpent', 'snake', 'fish', 'jellyfish'):
+                # Default legs for quadrupeds etc
+                leg_w = size * 0.08
+                leg_h = size * 0.25
+                positions = [(-0.25, 0), (0.2, 0)] if limb_pairs <= 2 else [(-0.3, 0), (-0.1, 0), (0.1, 0), (0.25, 0)]
+                for i, (lx, ly) in enumerate(positions[:limb_pairs * 2]):
+                    leg_anim = math.sin(anim_t * 5 + i * 1.5) * size * 0.06
+                    self._add_quad(vertices, cx + lx * size - leg_w/2, cy + size * 0.15 + leg_anim, 
+                                  leg_w, leg_h, 0, 0, 0, 0, *secondary, 0.9)
+        
+        # --- DRAW FEATURES (EYES, HORNS, ETC) ---
+        for feat in features:
+            feat_type = feat.get('feature_type', '')
+            feat_color = self._extract_array_color(feat.get('color'), (0.1, 0.1, 0.1))
+            feat_size = feat.get('size', 0.1) * scale * 0.2
+            feat_count = feat.get('count', 1)
+            feat_pos = feat.get('position', [0, 0, 0])
+            
+            if feat_type == 'eye':
+                # Draw eyes on the head (first segment)
+                eye_spacing = size * 0.08
+                for e in range(min(feat_count, 8)):
+                    eye_x = cx - total_len * body_scale * 0.35 + (e - feat_count/2) * eye_spacing * 0.5
+                    eye_y = cy - size * 0.05 + anim_y
+                    # White of eye
+                    self._draw_circle_shape(vertices, eye_x, eye_y, feat_size * 1.5, (0.95, 0.95, 0.95), 12)
+                    # Pupil
+                    self._draw_circle_shape(vertices, eye_x, eye_y, feat_size * 0.8, feat_color, 8)
+            elif feat_type == 'horn' or animal_dna.get('has_horns', False):
+                horn_len = animal_dna.get('horn_length', 0.3) * scale * 0.4
+                horn_w = size * 0.04
+                horn_x = cx - total_len * body_scale * 0.4
+                self._add_quad(vertices, horn_x - horn_w, cy - size * 0.1 - horn_len + anim_y, 
+                              horn_w, horn_len, 0, 0, 0, 0, 0.8, 0.75, 0.6, 1.0)
+            elif feat_type == 'antenna':
+                ant_len = size * 0.2
+                ant_w = size * 0.02
+                ant_x = cx - total_len * body_scale * 0.35
+                ant_anim = math.sin(anim_t * 4) * size * 0.03
+                self._add_quad(vertices, ant_x - ant_w/2 - size * 0.05, cy - size * 0.1 - ant_len + ant_anim + anim_y, 
+                              ant_w, ant_len, 0, 0, 0, 0, *feat_color, 0.9)
+                self._add_quad(vertices, ant_x - ant_w/2 + size * 0.05, cy - size * 0.1 - ant_len - ant_anim + anim_y, 
+                              ant_w, ant_len, 0, 0, 0, 0, *feat_color, 0.9)
+        
+        # Draw default eyes if no eye feature found
+        if not any(f.get('feature_type') == 'eye' for f in features):
+            eye_size = size * 0.05
+            head_x = cx - (total_len * body_scale * 0.35 if num_segs > 0 else size * 0.25)
+            self._draw_circle_shape(vertices, head_x, cy - size * 0.03 + anim_y, eye_size, (0.1, 0.1, 0.1), 8)
+    
+    def _draw_line(self, vertices: List, x1: float, y1: float, x2: float, y2: float, 
+                   width: float, color: Tuple[float, float, float]):
+        """Draw a line as a quad between two points."""
+        dx = x2 - x1
+        dy = y2 - y1
+        length = math.sqrt(dx*dx + dy*dy)
+        if length < 0.001:
+            return
+        # Perpendicular unit vector
+        px = -dy / length * width / 2
+        py = dx / length * width / 2
+        # Four corners
+        corners = [
+            (x1 + px, y1 + py),
+            (x1 - px, y1 - py),
+            (x2 - px, y2 - py),
+            (x2 + px, y2 + py),
+        ]
+        # Two triangles
+        for i in [0, 1, 2, 0, 2, 3]:
+            vertices.extend([corners[i][0], corners[i][1], 0, 0, *color, 0.9])
     
     def _draw_circle_shape(self, vertices: List, cx: float, cy: float, size: float, 
                           color: Tuple[float, float, float], segments: int = 8):
