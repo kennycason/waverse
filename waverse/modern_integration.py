@@ -230,11 +230,20 @@ class ModernWorldRenderer:
                 # Generate plants for this chunk
                 from .world import TILE_SCALE
                 from .explorer import HEIGHT_SCALE
+                
+                # Get biome name for this chunk if climate_manager available
+                biome_name = None
+                if hasattr(self, '_climate_manager') and self._climate_manager:
+                    biome_dna = self._climate_manager.get_biome(cx, cz)
+                    if biome_dna:
+                        biome_name = biome_dna.get_biome_name()
+                
                 plants = flora_manager.get_plants_for_chunk(
                     cx, cz, chunk.heightmap, 
                     cx * self.chunk_size * self.tile_scale,  # chunk_world_x
                     cz * self.chunk_size * self.tile_scale,  # chunk_world_z
-                    TILE_SCALE, HEIGHT_SCALE
+                    TILE_SCALE, HEIGHT_SCALE,
+                    biome_name=biome_name
                 )
             else:
                 plants = []
@@ -541,6 +550,9 @@ class ModernWorldRenderer:
         
         # Handle flora if manager provided (INCREMENTAL loading)
         if flora_manager:
+            # Store climate_manager reference for biome-based flora
+            self._climate_manager = climate_manager
+            
             # Find chunks that need flora but don't have it yet
             flora_to_load = [(cx, cz) for _, cx, cz in chunks_by_dist 
                              if (cx, cz) in needed_flora and (cx, cz) not in self.loaded_flora_chunks]

@@ -3884,17 +3884,26 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                         if chunk is None:
                             continue
                         
-                        # Generate flora
+                        # Get biome for this chunk
+                        biome_name = None
+                        if climate_manager:
+                            biome_dna = climate_manager.get_biome(cx, cz)
+                            if biome_dna:
+                                biome_name = biome_dna.get_biome_name()
+                        
+                        # Generate flora (biome-specific density/types)
                         flora_manager.get_plants_for_chunk(
-                            cx, cz, chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE
+                            cx, cz, chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE,
+                            biome_name=biome_name
                         )
                         # Create flora display lists
                         plants = flora_manager.chunk_plants.get((cx, cz), [])
                         if plants:
                             flora_manager.create_display_lists(cx, cz, plants)
-                        # Spawn animals
+                        # Spawn animals (biome-specific density/types)
                         animal_manager.spawn_animals_for_chunk(
-                            cx, cz, chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE
+                            cx, cz, chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE,
+                            biome_name=biome_name
                         )
                         # Spawn structures
                         structure_manager.spawn_random_buildings(
@@ -4484,8 +4493,15 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                     )
                 
                 if key not in animal_manager.chunk_animals:
+                    # Get biome for this chunk
+                    biome_name = None
+                    if climate_manager:
+                        biome_dna = climate_manager.get_biome(cx, cz)
+                        if biome_dna:
+                            biome_name = biome_dna.get_biome_name()
                     animal_manager.spawn_animals_for_chunk(
-                        cx, cz, chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE
+                        cx, cz, chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE,
+                        biome_name=biome_name
                     )
                 if needs_generation:
                     structure_manager.spawn_random_buildings(
@@ -4510,9 +4526,17 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                 key = (cx, cz)
                 chunk = chunk_manager.chunks.get(key)
                 if chunk:
+                    # Get biome for this chunk
+                    biome_name = None
+                    if climate_manager:
+                        biome_dna = climate_manager.get_biome(cx, cz)
+                        if biome_dna:
+                            biome_name = biome_dna.get_biome_name()
+                    
                     if key not in animal_manager.chunk_animals:
                         animal_manager.spawn_animals_for_chunk(
-                            cx, cz, chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE
+                            cx, cz, chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE,
+                            biome_name=biome_name
                         )
                     if key not in flora_manager.chunk_plants:
                         structure_manager.spawn_random_buildings(
@@ -4530,7 +4554,10 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
             animal_update_interval = 8  # Every 8th frame (very fast)
         
         if not NO_ANIMAL_UPDATE and frame_count % animal_update_interval == 0:
-            animal_manager.update(dt, cam_pos, None)
+            # Ground height function for animals to stay on terrain
+            def get_ground_height(x, z):
+                return chunk_manager.get_height_at(x, z) * HEIGHT_SCALE
+            animal_manager.update(dt, cam_pos, get_ground_height)
         
         # Skip legacy rendering in modern mode (modern renderer handles all of this)
         if not (USE_MODERN_RENDERER and modern_renderer):

@@ -57,7 +57,7 @@ class LifeConfig:
     ANIMAL_GROWTH_RATE = 1.0
     
     # Plant spawn chance per update when conditions are good
-    PLANT_SPAWN_CHANCE = 0.03  # 3% chance
+    PLANT_SPAWN_CHANCE = 0.06  # 6% chance - doubled for more flora
     
     # Pregnancy duration in game-hours
     PREGNANCY_DURATION = 2.0  # 2 hours
@@ -66,10 +66,10 @@ class LifeConfig:
     EGG_HATCH_MIN = 1.0
     EGG_HATCH_MAX = 3.0
     
-    # Performance caps
-    MAX_PLANTS_PER_CHUNK = 40
-    MAX_TOTAL_ANIMALS = 150
-    MAX_EGGS = 30
+    # Performance caps - INCREASED for more life!
+    MAX_PLANTS_PER_CHUNK = 80      # Doubled from 40
+    MAX_TOTAL_ANIMALS = 400        # More than doubled from 150
+    MAX_EGGS = 60                  # Doubled from 30
     
     # === PERFORMANCE TUNING ===
     # Life simulation runs every UPDATE_INTERVAL seconds (NOT every frame!)

@@ -802,13 +802,21 @@ class AnimalManager:
             ]
         return templates
     
-    # Animal cap - balanced for optimized rendering
-    MAX_TOTAL_ANIMALS = 500
+    # Animal cap - increased for more life!
+    MAX_TOTAL_ANIMALS = 800
     
     def spawn_animals_for_chunk(self, cx: int, cz: int, heightmap, 
                                  chunk_world_x: float, chunk_world_z: float,
-                                 tile_scale: float, height_scale: float):
-        """Spawn animals for a chunk."""
+                                 tile_scale: float, height_scale: float,
+                                 biome_name: str = None):
+        """Spawn animals for a chunk.
+        
+        Args:
+            biome_name: Optional biome for adjusting animal density/types.
+                       Rainforest/Tropical = many animals
+                       Desert = few, hardy animals
+                       Tundra = sparse arctic creatures
+        """
         key = (cx, cz)
         if key in self.chunk_animals:
             return
@@ -823,8 +831,30 @@ class AnimalManager:
         h, w = heightmap.shape
         animals = []
         
-        # Animals per chunk - balanced with chunk radius culling
-        num_animals = rng.integers(2, 5)  # 2-4 animals per chunk
+        # BIOME-BASED animal density!
+        biome = (biome_name or '').lower()
+        
+        if biome in ('rainforest', 'tropical'):
+            # Jungle! Many animals - insects, birds, mammals, reptiles
+            num_animals = rng.integers(8, 16)
+        elif biome == 'savanna':
+            # Lots of grazers and predators
+            num_animals = rng.integers(6, 12)
+        elif biome in ('temperate', 'taiga'):
+            # Moderate wildlife
+            num_animals = rng.integers(5, 10)
+        elif biome == 'desert':
+            # Sparse - reptiles, insects
+            num_animals = rng.integers(2, 5)
+        elif biome in ('tundra', 'frozen'):
+            # Sparse arctic creatures
+            num_animals = rng.integers(2, 6)
+        elif biome == 'swamp':
+            # Lots of amphibians, insects, crocs
+            num_animals = rng.integers(7, 14)
+        else:
+            # Default (grassland, etc.)
+            num_animals = rng.integers(5, 11)
         
         for _ in range(num_animals):
             local_x = rng.integers(5, w - 5)
@@ -905,6 +935,61 @@ class AnimalManager:
                     AnimalType.METROID,  # They float up high
                     AnimalType.ALIEN,    # Aliens too
                 ])
+            
+            # BIOME-SPECIFIC animal type overrides!
+            # This adds biome flavor on top of height-based selection
+            if biome in ('rainforest', 'tropical'):
+                # Jungle: more birds, insects, reptiles, exotic creatures
+                if rng.random() < 0.4:  # 40% chance to override with jungle creature
+                    animal_type = rng.choice([
+                        AnimalType.BIRD, AnimalType.BIRD, AnimalType.BIRD,
+                        AnimalType.INSECT, AnimalType.INSECT,
+                        AnimalType.SPIDER, AnimalType.SPIDER,
+                        AnimalType.REPTILE, AnimalType.REPTILE,
+                        AnimalType.WORM,  # Snakes!
+                        AnimalType.HOPPER,  # Tree frogs
+                        AnimalType.ALIEN,  # Exotic creatures
+                        AnimalType.OCTOPUS,  # Weird jungle things
+                    ])
+            elif biome == 'desert':
+                # Desert: reptiles, insects, scorpion-like
+                if rng.random() < 0.5:
+                    animal_type = rng.choice([
+                        AnimalType.REPTILE, AnimalType.REPTILE, AnimalType.REPTILE,
+                        AnimalType.INSECT, AnimalType.INSECT,
+                        AnimalType.SPIDER, AnimalType.SPIDER,
+                        AnimalType.WORM,  # Sand snakes
+                        AnimalType.CENTIPEDE,
+                    ])
+            elif biome in ('tundra', 'frozen'):
+                # Arctic: hardy mammals, birds
+                if rng.random() < 0.5:
+                    animal_type = rng.choice([
+                        AnimalType.MAMMAL, AnimalType.MAMMAL, AnimalType.MAMMAL,
+                        AnimalType.BIRD, AnimalType.BIRD,
+                        AnimalType.HOPPER,  # Arctic hares
+                    ])
+            elif biome == 'savanna':
+                # Savanna: herds of mammals, birds
+                if rng.random() < 0.5:
+                    animal_type = rng.choice([
+                        AnimalType.MAMMAL, AnimalType.MAMMAL, AnimalType.MAMMAL, AnimalType.MAMMAL,
+                        AnimalType.DINOSAUR, AnimalType.DINOSAUR,
+                        AnimalType.BIRD, AnimalType.BIRD,
+                        AnimalType.REPTILE,
+                        AnimalType.INSECT,
+                    ])
+            elif biome == 'swamp':
+                # Swamp: amphibians, crocs, insects
+                if rng.random() < 0.5:
+                    animal_type = rng.choice([
+                        AnimalType.CROC, AnimalType.CROC, AnimalType.CROC,
+                        AnimalType.HOPPER, AnimalType.HOPPER,  # Frogs
+                        AnimalType.AMPHIBIAN, AnimalType.AMPHIBIAN,
+                        AnimalType.INSECT, AnimalType.INSECT,
+                        AnimalType.WORM,  # Water snakes
+                        AnimalType.FISH,
+                    ])
             
             # Get template and mutate
             templates = self.species_templates.get(animal_type, self.species_templates[AnimalType.MAMMAL])

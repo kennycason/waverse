@@ -1327,8 +1327,8 @@ class FloraManager:
         self.chunk_plants: Dict[Tuple[int, int], List[PlantInstance]] = {}
         self.display_lists: Dict[Tuple[int, int], Tuple[int, int, int]] = {}
     
-    # Max plants - higher cap since rendering is optimized
-    MAX_TOTAL_PLANTS = 16000
+    # Max plants - MUCH higher cap for lush worlds
+    MAX_TOTAL_PLANTS = 50000  # Increased from 16000 for dense jungles
     
     def cleanup_distant_chunks(self, center_cx: int, center_cz: int, max_distance: int = 15):
         """Remove plants from distant chunks to prevent memory bloat."""
@@ -1373,8 +1373,17 @@ class FloraManager:
     
     def get_plants_for_chunk(self, cx: int, cz: int, heightmap, 
                              chunk_world_x: float, chunk_world_z: float,
-                             tile_scale: float, height_scale: float) -> List[PlantInstance]:
-        """Generate or retrieve plants for a chunk using DNA from the pool."""
+                             tile_scale: float, height_scale: float,
+                             biome_name: str = None) -> List[PlantInstance]:
+        """Generate or retrieve plants for a chunk using DNA from the pool.
+        
+        Args:
+            biome_name: Optional biome name to adjust density/types.
+                        Rainforest/Tropical = jungle-dense
+                        Desert = sparse cacti
+                        Tundra/Frozen = sparse hardy plants
+                        etc.
+        """
         key = (cx, cz)
         if key in self.chunk_plants:
             return self.chunk_plants[key]
@@ -1395,12 +1404,42 @@ class FloraManager:
         plants = []
         h, w = heightmap.shape
         
-        # Place plants - increased density since rendering is optimized
-        # ~625 nearby chunks (radius 12) * 15-25 plants = 9,375-15,625 rendered
-        num_plants = rng.integers(15, 25)
+        # BIOME-BASED DENSITY!
+        # Rainforest/Tropical = jungle-dense (80-120 plants)
+        # Temperate/Taiga = moderate (50-80 plants)
+        # Desert = sparse (8-20 plants, mostly cacti)
+        # Tundra/Frozen = sparse (10-25 plants)
+        # Savanna = moderate-sparse (25-45 plants)
+        biome = (biome_name or '').lower()
         
-        # Underwater plants  
-        num_underwater = rng.integers(5, 12)
+        if biome in ('rainforest', 'tropical'):
+            # JUNGLE! Dense canopy, vines everywhere, flowers
+            num_plants = rng.integers(80, 120)
+            num_underwater = rng.integers(15, 25)
+        elif biome in ('temperate', 'taiga'):
+            # Moderate forest
+            num_plants = rng.integers(50, 80)
+            num_underwater = rng.integers(10, 18)
+        elif biome == 'desert':
+            # Sparse, mostly cacti and hardy plants
+            num_plants = rng.integers(8, 20)
+            num_underwater = 0
+        elif biome in ('tundra', 'frozen'):
+            # Sparse arctic plants
+            num_plants = rng.integers(10, 25)
+            num_underwater = rng.integers(0, 5)
+        elif biome == 'savanna':
+            # Grassland with scattered trees
+            num_plants = rng.integers(25, 45)
+            num_underwater = rng.integers(3, 8)
+        elif biome == 'swamp':
+            # Very dense, lots of water plants
+            num_plants = rng.integers(60, 100)
+            num_underwater = rng.integers(20, 35)
+        else:
+            # Default (grassland, etc.) - moderate-high density
+            num_plants = rng.integers(40, 70)
+            num_underwater = rng.integers(10, 20)
         
         for _ in range(num_plants + num_underwater):
             local_x = rng.integers(2, w - 2)
@@ -1451,17 +1490,95 @@ class FloraManager:
                 else:
                     dna = rng.choice(chunk_dna_list)
             else:
-                # Normal terrain - occasionally spawn ground cover
-                if rng.random() < 0.15:  # 15% chance of ground cover
-                    ground_types = [PlantType.GROUNDCOVER, PlantType.CREEPER, 
-                                   PlantType.LICHEN, PlantType.MOSS_PAD]
-                    ground_dnas = [d for d in chunk_dna_list if d.plant_type in ground_types]
-                    if ground_dnas:
-                        dna = rng.choice(ground_dnas)
-                    else:
-                        dna = PlantDNA.create_random(rng.choice(ground_types), int(rng.integers(0, 2**31)))
+                # Normal terrain - biome-specific plant selection!
+                # This gives each biome a unique feel
+                if biome in ('rainforest', 'tropical'):
+                    # JUNGLE: Dense trees, vines, flowers, ferns, exotic plants
+                    roll = rng.random()
+                    if roll < 0.15:  # 15% tall trees
+                        dna = PlantDNA.create_random(PlantType.TALL_TREE, int(rng.integers(0, 2**31)))
+                    elif roll < 0.30:  # 15% vines
+                        dna = PlantDNA.create_random(rng.choice([PlantType.VINE, PlantType.SPINY_VINE]), int(rng.integers(0, 2**31)))
+                    elif roll < 0.45:  # 15% ferns/large leaves
+                        dna = PlantDNA.create_random(PlantType.FERN, int(rng.integers(0, 2**31)))
+                    elif roll < 0.55:  # 10% exotic flowers
+                        dna = PlantDNA.create_random(PlantType.FLOWER, int(rng.integers(0, 2**31)))
+                    elif roll < 0.65:  # 10% mushrooms  
+                        dna = PlantDNA.create_random(PlantType.MUSHROOM, int(rng.integers(0, 2**31)))
+                    elif roll < 0.75:  # 10% palm trees
+                        dna = PlantDNA.create_random(PlantType.PALM, int(rng.integers(0, 2**31)))
+                    elif roll < 0.85:  # 10% bushes
+                        dna = PlantDNA.create_random(PlantType.BUSH, int(rng.integers(0, 2**31)))
+                    else:  # 15% from DNA pool
+                        dna = rng.choice(chunk_dna_list)
+                elif biome == 'desert':
+                    # DESERT: Cacti, sparse grass, rocks
+                    roll = rng.random()
+                    if roll < 0.50:  # 50% cacti
+                        dna = PlantDNA.create_random(PlantType.CACTUS, int(rng.integers(0, 2**31)))
+                    elif roll < 0.70:  # 20% dead grass tufts
+                        dna = PlantDNA.create_random(PlantType.GRASS, int(rng.integers(0, 2**31)))
+                    elif roll < 0.85:  # 15% rocks
+                        dna = PlantDNA.create_random(rng.choice([PlantType.CRYSTAL, PlantType.LICHEN]), int(rng.integers(0, 2**31)))
+                    else:  # 15% from DNA pool
+                        dna = rng.choice(chunk_dna_list)
+                elif biome in ('tundra', 'frozen'):
+                    # TUNDRA: Sparse hardy plants, moss, lichen
+                    roll = rng.random()
+                    if roll < 0.35:  # 35% lichen/moss
+                        dna = PlantDNA.create_random(rng.choice([PlantType.LICHEN, PlantType.MOSS_PAD]), int(rng.integers(0, 2**31)))
+                    elif roll < 0.55:  # 20% grass tufts
+                        dna = PlantDNA.create_random(PlantType.GRASS, int(rng.integers(0, 2**31)))
+                    elif roll < 0.70:  # 15% small shrubs
+                        dna = PlantDNA.create_random(PlantType.SHRUB, int(rng.integers(0, 2**31)))
+                    elif roll < 0.85:  # 15% crystals (ice-like)
+                        dna = PlantDNA.create_random(PlantType.CRYSTAL, int(rng.integers(0, 2**31)))
+                    else:  # 15% from DNA pool
+                        dna = rng.choice(chunk_dna_list)
+                elif biome == 'savanna':
+                    # SAVANNA: Tall grass, scattered acacia-like trees
+                    roll = rng.random()
+                    if roll < 0.45:  # 45% tall grass
+                        dna = PlantDNA.create_random(PlantType.GRASS, int(rng.integers(0, 2**31)))
+                    elif roll < 0.60:  # 15% scattered trees
+                        dna = PlantDNA.create_random(PlantType.TREE, int(rng.integers(0, 2**31)))
+                    elif roll < 0.75:  # 15% bushes
+                        dna = PlantDNA.create_random(PlantType.BUSH, int(rng.integers(0, 2**31)))
+                    elif roll < 0.85:  # 10% flowers
+                        dna = PlantDNA.create_random(PlantType.FLOWER, int(rng.integers(0, 2**31)))
+                    else:  # 15% from DNA pool
+                        dna = rng.choice(chunk_dna_list)
+                elif biome == 'taiga':
+                    # TAIGA: Pine forests, ferns, mushrooms
+                    roll = rng.random()
+                    if roll < 0.35:  # 35% pines
+                        dna = PlantDNA.create_random(PlantType.PINE, int(rng.integers(0, 2**31)))
+                    elif roll < 0.50:  # 15% ferns
+                        dna = PlantDNA.create_random(PlantType.FERN, int(rng.integers(0, 2**31)))
+                    elif roll < 0.65:  # 15% mushrooms
+                        dna = PlantDNA.create_random(PlantType.MUSHROOM, int(rng.integers(0, 2**31)))
+                    elif roll < 0.80:  # 15% moss/groundcover
+                        dna = PlantDNA.create_random(rng.choice([PlantType.MOSS_PAD, PlantType.GROUNDCOVER]), int(rng.integers(0, 2**31)))
+                    else:  # 20% from DNA pool
+                        dna = rng.choice(chunk_dna_list)
                 else:
-                    dna = rng.choice(chunk_dna_list)
+                    # DEFAULT (Grassland/Temperate): Mixed forest/meadow
+                    roll = rng.random()
+                    if roll < 0.25:  # 25% grass
+                        dna = PlantDNA.create_random(PlantType.GRASS, int(rng.integers(0, 2**31)))
+                    elif roll < 0.40:  # 15% flowers
+                        dna = PlantDNA.create_random(PlantType.FLOWER, int(rng.integers(0, 2**31)))
+                    elif roll < 0.50:  # 10% ferns
+                        dna = PlantDNA.create_random(PlantType.FERN, int(rng.integers(0, 2**31)))
+                    elif roll < 0.60:  # 10% trees
+                        dna = PlantDNA.create_random(PlantType.TREE, int(rng.integers(0, 2**31)))
+                    elif roll < 0.70:  # 10% bushes
+                        dna = PlantDNA.create_random(PlantType.BUSH, int(rng.integers(0, 2**31)))
+                    elif roll < 0.75:  # 5% mushrooms
+                        dna = PlantDNA.create_random(PlantType.MUSHROOM, int(rng.integers(0, 2**31)))
+                    else:
+                        # 25% from chunk DNA pool (includes exotic types)
+                        dna = rng.choice(chunk_dna_list)
             
             # Apply slight per-plant mutation for variety
             if rng.random() < 0.3:
