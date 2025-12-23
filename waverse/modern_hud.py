@@ -16,6 +16,7 @@ import moderngl
 from typing import Dict, Tuple, Optional, List
 import math
 import os
+import time
 from pathlib import Path
 
 try:
@@ -281,6 +282,7 @@ class ModernHUDRenderer:
         # Current state
         self.selected_tool = 0  # Index into TOOLS
         self.status_text = ""
+        self.status_timer = 0.0  # Remaining time to display (synced from camera)
         self.yaw = 0.0  # Camera yaw for compass
         
         # Frame stats
@@ -465,9 +467,10 @@ class ModernHUDRenderer:
         """Select previous tool."""
         self.selected_tool = (self.selected_tool - 1) % len(self.TOOLS)
     
-    def set_status(self, text: str):
-        """Set status text."""
+    def set_status(self, text: str, duration: float = 3.0):
+        """Set status text with timer."""
         self.status_text = text
+        self.status_timer = duration
     
     def get_current_tool(self) -> str:
         """Get current tool name."""
@@ -674,24 +677,73 @@ class ModernHUDRenderer:
                                         0.9, 0.9, 0.9, label_alpha, shadow_offset=1)
     
     def _draw_status_text(self, vertices: List):
-        """Draw status text at bottom-left with shadow."""
-        if not self.status_text:
+        """Draw status text in top-right area (below compass) with auto-fade."""
+        if not self.status_text or self.status_timer <= 0:
             return
         
-        scale = 2.0
-        text_width = len(self.status_text) * 8 * scale
-        x = 15  # Bottom-left
-        y = self.screen_height - 40  # Near bottom
+        # Fade out during last 0.5 seconds
+        if self.status_timer < 0.5:
+            alpha = self.status_timer / 0.5
+        else:
+            alpha = 1.0
         
-        # Background bar
-        padding = 8
-        self._add_quad(vertices, x - padding, y - padding/2, 
-                      text_width + padding * 2, 8 * scale + padding,
-                      0, 0, 0, 0, 0.0, 0.0, 0.0, 0.6)
+        scale = 1.6
+        char_width = 8 * scale
+        line_height = int(8 * scale + 4)
         
-        # Text with shadow
-        self._draw_text_with_shadow(vertices, self.status_text, x, y, scale, 
-                                    1.0, 1.0, 0.5, 1.0, shadow_offset=2)
+        # Max width for text (right side of screen, leave margin)
+        max_width = 350
+        max_chars = int(max_width / char_width)
+        
+        # Position: top-right, below compass
+        margin_right = 15
+        start_y = 50  # Below compass
+        
+        # Word wrap the text
+        words = self.status_text.split(' ')
+        lines = []
+        current_line = ""
+        
+        for word in words:
+            test_line = current_line + (" " if current_line else "") + word
+            if len(test_line) <= max_chars:
+                current_line = test_line
+            else:
+                if current_line:
+                    lines.append(current_line)
+                # Handle very long words
+                if len(word) > max_chars:
+                    while len(word) > max_chars:
+                        lines.append(word[:max_chars])
+                        word = word[max_chars:]
+                    current_line = word
+                else:
+                    current_line = word
+        if current_line:
+            lines.append(current_line)
+        
+        # Calculate box dimensions
+        total_height = len(lines) * line_height
+        max_line_width = max(len(line) for line in lines) * char_width if lines else 0
+        
+        # Position from right edge
+        box_x = self.screen_width - max_line_width - margin_right - 12
+        box_y = start_y
+        
+        # Background box
+        padding = 6
+        self._add_quad(vertices, box_x - padding, box_y - padding/2, 
+                      max_line_width + padding * 2, total_height + padding,
+                      0, 0, 0, 0, 0.0, 0.0, 0.0, 0.7 * alpha)
+        
+        # Draw each line
+        for i, line in enumerate(lines):
+            line_y = box_y + i * line_height
+            # Right-align each line
+            line_width = len(line) * char_width
+            line_x = self.screen_width - line_width - margin_right - 6
+            self._draw_text_with_shadow(vertices, line, line_x, line_y, scale, 
+                                        1.0, 1.0, 0.5, alpha, shadow_offset=1)
     
     def _draw_menu(self, vertices: List):
         """Draw the menu overlay."""
@@ -1042,9 +1094,11 @@ class ModernHUDRenderer:
         self.log_filter = camera.log_filter
         self.favorites = set(camera.favorites)  # Copy set to get current state
         
-        # Sync status text
-        if hasattr(camera, 'status_message') and camera.status_message:
+        # Sync status text and timer from camera
+        if hasattr(camera, 'status_message'):
             self.status_text = camera.status_message
+        if hasattr(camera, 'status_timer'):
+            self.status_timer = camera.status_timer
         
         # Sync inventory selection
         self.inventory_index = camera.inventory_index if hasattr(camera, 'inventory_index') else 0
