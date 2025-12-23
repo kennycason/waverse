@@ -1,0 +1,15 @@
+What Could Be Next
+Here's my priority list based on impact:
+🔥 High Impact
+Volumetric Clouds - GPU-based, would look amazing with the sky system
+Merge to Main - The moderngl-renderer branch is very stable now
+Post-processing - Bloom on sun, ambient occlusion for depth
+🎮 Gameplay
+More Animal AI - Flocking, hunting, herding behaviors
+Building Interiors - Furniture, rooms, more detail
+NPC Creatures - Creatures you can interact with
+🛠 Technical
+Frustum Culling - Don't render what's behind camera
+Occlusion Culling - Don't render what's behind mountains
+LOD Distance Tuning - Fine-tune when to switch detail levels
+What interests you most? Or test the new distances first and let me know if you want to push them even further! 🚀

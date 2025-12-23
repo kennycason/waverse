@@ -70,6 +70,14 @@ def main():
     parser.add_argument('--max-animals', type=int, default=None, metavar='N',
                         help='Max total animals in world (default: 500)')
     
+    # Renderer selection (ModernGL is now default)
+    parser.add_argument('--legacy', action='store_true', 
+                        help='Use legacy OpenGL renderer (slower, deprecated)')
+    parser.add_argument('--disable-waves', action='store_true',
+                        help='Disable animated water waves (enabled by default)')
+    parser.add_argument('--debug-biomes', action='store_true',
+                        help='Make exotic biomes appear much more frequently for testing')
+    
     args = parser.parse_args()
     
     if args.clear_cache:
@@ -120,7 +128,15 @@ def main():
         'no_animal_update': args.no_animal_update or args.no_life_sim,
         'max_flora': args.max_flora,
         'max_animals': args.max_animals,
+        'modern_renderer': not args.legacy,  # ModernGL ON by default
+        'enable_waves': not args.disable_waves,  # Waves ON by default
+        'debug_biomes': args.debug_biomes,
     }
+    
+    # Set environment variable for debug biomes (used by climate.py)
+    if args.debug_biomes:
+        os.environ['WAVERSE_DEBUG_BIOMES'] = '1'
+        print("DEBUG MODE: Exotic biomes will appear much more frequently!")
     
     # Run!
     run_explorer(config, precompute_chunks=args.precompute_chunks, debug_flags=debug_flags)

@@ -515,6 +515,37 @@ def _add_roof(structure: Structure, x: float, roof_y: float, z: float,
     elif dna.roof_type == RoofType.STEPPED:
         # Stepped/ziggurat roof
         _add_stepped_roof(structure, x, roof_y, z, hw, hd, dna.colors.roof, rng)
+    
+    elif dna.roof_type == RoofType.CONICAL:
+        # Conical/pointed roof (lighthouse, tower)
+        cone_height = min(hw, hd) * 0.8
+        _add_conical_roof(structure, x, roof_y, z, min(hw, hd), cone_height, dna.colors.roof, rng)
+    
+    elif dna.roof_type == RoofType.PAGODA:
+        # Multi-tiered Asian style
+        _add_pagoda_roof(structure, x, roof_y, z, hw, hd, dna.colors.roof, rng)
+    
+    elif dna.roof_type == RoofType.MANSARD:
+        # French style with two slopes
+        _add_mansard_roof(structure, x, roof_y, z, hw, hd, dna.colors.roof, rng)
+    
+    elif dna.roof_type == RoofType.BUTTERFLY:
+        # Modern V-shaped roof
+        _add_butterfly_roof(structure, x, roof_y, z, hw, hd, dna.colors.roof, rng)
+    
+    elif dna.roof_type == RoofType.GEODESIC:
+        # Triangulated dome
+        dome_height = min(hw, hd) * 0.5
+        _add_geodesic_roof(structure, x, roof_y, z, min(hw, hd), dome_height, dna.colors.roof, rng)
+    
+    elif dna.roof_type == RoofType.SAWTOOTH:
+        # Industrial zigzag
+        _add_sawtooth_roof(structure, x, roof_y, z, hw, hd, dna.colors.roof, rng)
+    
+    elif dna.roof_type == RoofType.BARREL:
+        # Curved/cylindrical roof
+        barrel_height = min(hw, hd) * 0.35
+        _add_barrel_roof(structure, x, roof_y, z, hw, hd, barrel_height, dna.colors.roof, rng)
 
 
 def _add_gabled_roof(structure: Structure, x: float, y: float, z: float,
@@ -645,6 +676,181 @@ def _add_stepped_roof(structure: Structure, x: float, y: float, z: float,
             width=hw * 2 * scale, depth=hd * 2 * scale,
             thickness=step_height,
             color=tuple(c * (0.9 + 0.03 * i) for c in color)
+        ))
+
+
+def _add_conical_roof(structure: Structure, x: float, y: float, z: float,
+                      radius: float, height: float,
+                      color: Tuple[float, float, float], rng: np.random.Generator):
+    """Add a conical/pointed roof (lighthouse, tower)."""
+    segments = 6
+    for i in range(segments):
+        t = i / segments
+        level_y = y + height * t
+        scale = 1.0 - t * 0.85  # Taper to point
+        
+        if scale > 0.05:
+            structure.floors.append(Floor(
+                x=x, y=level_y, z=z,
+                width=radius * 2 * scale, depth=radius * 2 * scale,
+                thickness=height / segments * 1.2,
+                color=tuple(c * (0.9 + 0.1 * t) for c in color)
+            ))
+
+
+def _add_pagoda_roof(structure: Structure, x: float, y: float, z: float,
+                     hw: float, hd: float,
+                     color: Tuple[float, float, float], rng: np.random.Generator):
+    """Add a multi-tiered pagoda-style roof."""
+    tiers = 2 + rng.integers(0, 2)
+    tier_height = min(hw, hd) * 0.25
+    
+    for tier in range(tiers):
+        tier_y = y + tier * tier_height * 0.8
+        # Each tier is slightly smaller and has curved-looking edges (approximated)
+        scale = 1.0 - tier * 0.25
+        overhang = 1.0 + (tiers - tier) * 0.3  # Lower tiers extend further
+        
+        # Main tier platform with overhang
+        structure.floors.append(Floor(
+            x=x, y=tier_y + tier_height * 0.7, z=z,
+            width=hw * 2 * scale * overhang, depth=hd * 2 * scale * overhang,
+            thickness=0.3,
+            color=color
+        ))
+        
+        # Upturned corners (approximated with small ramps)
+        if tier < tiers - 1:
+            for dx, dz in [(-1, -1), (-1, 1), (1, -1), (1, 1)]:
+                cx = x + dx * hw * scale * overhang * 0.9
+                cz = z + dz * hd * scale * overhang * 0.9
+                structure.floors.append(Floor(
+                    x=cx, y=tier_y + tier_height * 0.85, z=cz,
+                    width=hw * 0.3, depth=hd * 0.3,
+                    thickness=0.2,
+                    color=tuple(c * 1.1 for c in color)
+                ))
+
+
+def _add_mansard_roof(structure: Structure, x: float, y: float, z: float,
+                      hw: float, hd: float,
+                      color: Tuple[float, float, float], rng: np.random.Generator):
+    """Add a mansard (French) roof with two slopes on each side."""
+    lower_height = min(hw, hd) * 0.25
+    upper_height = min(hw, hd) * 0.15
+    lower_inset = 0.3  # How much the lower slope goes in
+    
+    # Lower steep section (approximated as walls)
+    for dx, dz, rot, length in [(0, hd, 0, hw * 2), (0, -hd, 180, hw * 2), 
+                                  (-hw, 0, 90, hd * 2), (hw, 0, -90, hd * 2)]:
+        structure.walls.append(Wall(
+            x=x + dx, y=y, z=z + dz,
+            width=length, height=lower_height,
+            thickness=0.3, rotation=rot,
+            color=color
+        ))
+    
+    # Upper flat-ish section
+    structure.floors.append(Floor(
+        x=x, y=y + lower_height, z=z,
+        width=hw * 2 * (1 - lower_inset), depth=hd * 2 * (1 - lower_inset),
+        thickness=upper_height,
+        color=tuple(c * 0.95 for c in color)
+    ))
+
+
+def _add_butterfly_roof(structure: Structure, x: float, y: float, z: float,
+                        hw: float, hd: float,
+                        color: Tuple[float, float, float], rng: np.random.Generator):
+    """Add a butterfly (V-shaped) roof."""
+    wing_height = min(hw, hd) * 0.2
+    
+    # Two sloped sections going DOWN to center
+    structure.ramps.append(Ramp(
+        x=x, y_bottom=y + wing_height, z=z - hd,
+        length=hd, height=wing_height,
+        width=hw * 2,
+        rotation=180,  # Slope down toward center
+        color=color
+    ))
+    structure.ramps.append(Ramp(
+        x=x, y_bottom=y + wing_height, z=z + hd,
+        length=hd, height=wing_height,
+        width=hw * 2,
+        rotation=0,  # Slope down toward center
+        color=color
+    ))
+
+
+def _add_geodesic_roof(structure: Structure, x: float, y: float, z: float,
+                       radius: float, height: float,
+                       color: Tuple[float, float, float], rng: np.random.Generator):
+    """Add a geodesic dome roof (triangulated appearance)."""
+    # Approximate with stacked hexagonal-ish rings
+    rings = 4
+    for i in range(rings):
+        t = i / rings
+        level_y = y + height * (1 - math.cos(t * math.pi / 2))
+        scale = math.cos(t * math.pi / 2.2)
+        
+        if scale > 0.15:
+            # Slightly irregular sizing for triangulated look
+            w_scale = scale * (0.95 + rng.random() * 0.1)
+            d_scale = scale * (0.95 + rng.random() * 0.1)
+            structure.floors.append(Floor(
+                x=x, y=level_y, z=z,
+                width=radius * 2 * w_scale, depth=radius * 2 * d_scale,
+                thickness=height / rings * 1.3,
+                color=tuple(min(1.0, c * (0.85 + 0.15 * t)) for c in color)
+            ))
+
+
+def _add_sawtooth_roof(structure: Structure, x: float, y: float, z: float,
+                       hw: float, hd: float,
+                       color: Tuple[float, float, float], rng: np.random.Generator):
+    """Add an industrial sawtooth roof (zigzag profile)."""
+    teeth = 2 + rng.integers(0, 3)
+    tooth_width = hw * 2 / teeth
+    tooth_height = min(hw, hd) * 0.25
+    
+    for i in range(teeth):
+        tooth_x = x - hw + tooth_width * (i + 0.5)
+        
+        # Vertical face (window side)
+        structure.walls.append(Wall(
+            x=tooth_x - tooth_width * 0.4, y=y, z=z,
+            width=hd * 2, height=tooth_height,
+            thickness=0.2, rotation=90,
+            color=tuple(c * 0.9 for c in color)
+        ))
+        
+        # Sloped face
+        structure.ramps.append(Ramp(
+            x=tooth_x + tooth_width * 0.1, y_bottom=y, z=z,
+            length=tooth_width * 0.8, height=tooth_height,
+            width=hd * 2,
+            rotation=-90,
+            color=color
+        ))
+
+
+def _add_barrel_roof(structure: Structure, x: float, y: float, z: float,
+                     hw: float, hd: float, height: float,
+                     color: Tuple[float, float, float], rng: np.random.Generator):
+    """Add a barrel (curved/cylindrical) roof."""
+    segments = 5
+    for i in range(segments):
+        t = (i + 0.5) / segments
+        # Arc across width (X axis)
+        arc_x = x - hw + hw * 2 * t
+        arc_y = y + height * math.sin(t * math.pi)
+        seg_width = hw * 2 / segments * 1.1
+        
+        structure.floors.append(Floor(
+            x=arc_x, y=arc_y, z=z,
+            width=seg_width, depth=hd * 2,
+            thickness=height / 3,
+            color=tuple(c * (0.9 + 0.1 * math.sin(t * math.pi)) for c in color)
         ))
 
 
