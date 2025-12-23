@@ -1336,13 +1336,16 @@ class ModernHUDRenderer:
     
     def _draw_plant_preview(self, vertices: List, dna: Dict, cx: float, cy: float, size: float):
         """Draw a stylized 2D plant from DNA colors."""
-        # Extract colors from DNA
-        trunk_color = self._extract_color(dna, 'trunk_segments', 0, (0.4, 0.25, 0.15))
-        leaf_color = self._extract_color(dna, 'leaf_color', None, (0.2, 0.6, 0.2))
-        flower_color = self._extract_color(dna, 'flower_color', None, (0.8, 0.4, 0.6))
+        # Get the actual DNA dict (might be nested)
+        plant_dna = dna.get('dna', dna)
+        
+        # Extract colors from DNA - plant colors are {r, g, b} dicts
+        trunk_color = self._extract_rgb_dict(plant_dna.get('trunk_color'), (0.4, 0.25, 0.15))
+        leaf_color = self._extract_rgb_dict(plant_dna.get('leaf_color'), (0.2, 0.6, 0.2))
+        flower_color = self._extract_rgb_dict(plant_dna.get('flower_color'), (0.8, 0.4, 0.6))
         
         # Get plant type for shape variation
-        plant_type = dna.get('plant_type', 'tree')
+        plant_type = plant_dna.get('plant_type', 'tree')
         
         # Draw trunk (rectangle)
         trunk_h = size * 0.6
@@ -1377,7 +1380,7 @@ class ModernHUDRenderer:
                               0, 0, 0, 0, *leaf_color, 0.9)
         elif plant_type == 'mushroom':
             # Mushroom - stem and cap
-            cap_color = self._extract_color(dna, 'cap_color', None, (0.7, 0.2, 0.2))
+            cap_color = self._extract_rgb_dict(plant_dna.get('cap_color'), flower_color)
             stem_h = size * 0.4
             stem_w = size * 0.15
             self._add_quad(vertices, cx - stem_w/2, cy, stem_w, stem_h,
@@ -1393,12 +1396,24 @@ class ModernHUDRenderer:
     
     def _draw_animal_preview(self, vertices: List, dna: Dict, cx: float, cy: float, size: float):
         """Draw a stylized 2D animal from DNA colors."""
-        # Extract colors
-        primary = self._extract_color(dna, 'primary_color', None, (0.5, 0.4, 0.3))
-        secondary = self._extract_color(dna, 'secondary_color', None, (0.6, 0.5, 0.4))
+        # Get the actual DNA dict (might be nested)
+        animal_dna = dna.get('dna', dna)
+        
+        # Extract colors from body_segments (array of [r, g, b])
+        body_segments = animal_dna.get('body_segments', [])
+        if body_segments and len(body_segments) > 0:
+            primary = self._extract_array_color(body_segments[0].get('color'), (0.5, 0.4, 0.3))
+        else:
+            primary = (0.5, 0.4, 0.3)
+        
+        if body_segments and len(body_segments) > 1:
+            secondary = self._extract_array_color(body_segments[1].get('color'), primary)
+        else:
+            # Slightly different shade
+            secondary = (primary[0] * 0.8, primary[1] * 0.8, primary[2] * 0.8)
         
         # Get animal type
-        animal_type = dna.get('animal_type', 'mammal')
+        animal_type = animal_dna.get('animal_type', 'mammal')
         
         # Simple animation offset
         anim = math.sin(self._preview_rotation * 2) * size * 0.05
@@ -1494,25 +1509,27 @@ class ModernHUDRenderer:
             vertices.extend([x1, y1, 0, 0, *color, 1.0])
             vertices.extend([x2, y2, 0, 0, *color, 1.0])
     
-    def _extract_color(self, dna: Dict, key: str, index: Optional[int], 
-                      default: Tuple[float, float, float]) -> Tuple[float, float, float]:
-        """Extract a color from DNA data."""
-        try:
-            if key in dna:
-                val = dna[key]
-                if index is not None and isinstance(val, list) and len(val) > index:
-                    val = val[index]
-                if isinstance(val, dict):
-                    if 'color' in val:
-                        c = val['color']
-                        if isinstance(c, (list, tuple)) and len(c) >= 3:
-                            return (float(c[0]), float(c[1]), float(c[2]))
-                    elif 'r' in val:
-                        return (float(val.get('r', 0.5)), float(val.get('g', 0.5)), float(val.get('b', 0.5)))
-                elif isinstance(val, (list, tuple)) and len(val) >= 3:
-                    return (float(val[0]), float(val[1]), float(val[2]))
-        except:
-            pass
+    def _extract_rgb_dict(self, color_dict: Optional[Dict], 
+                         default: Tuple[float, float, float]) -> Tuple[float, float, float]:
+        """Extract color from {r, g, b} dict format (used by plants)."""
+        if color_dict and isinstance(color_dict, dict):
+            try:
+                r = float(color_dict.get('r', default[0]))
+                g = float(color_dict.get('g', default[1]))
+                b = float(color_dict.get('b', default[2]))
+                return (r, g, b)
+            except:
+                pass
+        return default
+    
+    def _extract_array_color(self, color_array: Optional[List], 
+                            default: Tuple[float, float, float]) -> Tuple[float, float, float]:
+        """Extract color from [r, g, b] array format (used by animals)."""
+        if color_array and isinstance(color_array, (list, tuple)) and len(color_array) >= 3:
+            try:
+                return (float(color_array[0]), float(color_array[1]), float(color_array[2]))
+            except:
+                pass
         return default
     
     def cleanup(self):
