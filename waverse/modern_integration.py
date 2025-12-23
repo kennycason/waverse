@@ -26,6 +26,8 @@ from .modern_clouds import ModernCloudRenderer
 from .modern_structures import ModernStructureRenderer
 from .modern_weather import ModernWeatherRenderer
 from .modern_hud import ModernHUDRenderer
+from .wind_system import WindManager
+from .wind_particles import WindParticleRenderer
 
 
 # =============================================================================
@@ -43,8 +45,9 @@ class ModernWorldRenderer:
     - Camera for view state
     """
     
-    def __init__(self, ctx: moderngl.Context):
+    def __init__(self, ctx: moderngl.Context, enable_waves: bool = False):
         self.ctx = ctx
+        self.enable_waves = enable_waves
         
         # Sub-renderers
         self.sky = ModernSkyRenderer(ctx)  # Rendered first (background)
@@ -53,9 +56,13 @@ class ModernWorldRenderer:
         self.structures = ModernStructureRenderer(ctx)  # Buildings, before flora
         self.flora = ModernFloraRenderer(ctx)
         self.animals = ModernAnimalRenderer(ctx)
-        self.water = ModernWaterRenderer(ctx)
+        self.water = ModernWaterRenderer(ctx, enable_waves=enable_waves)  # Flat or waves
         self.weather = ModernWeatherRenderer(ctx)  # Rendered last (particles)
+        self.wind_particles = WindParticleRenderer(ctx)  # Debris following wind
         self.hud = ModernHUDRenderer(ctx)  # HUD overlay
+        
+        # Wind system
+        self.wind = WindManager(seed=42)
         
         # Integration state
         self.loaded_terrain_chunks: set = set()
@@ -147,6 +154,7 @@ class ModernWorldRenderer:
         self.animals.set_camera(projection, view, cam_pos)
         self.water.set_camera(projection, view, cam_pos)
         self.weather.set_camera(projection, view, cam_pos)
+        self.wind_particles.set_camera(projection, view, cam_pos)
     
     def load_terrain_chunk(self, cx: int, cz: int, chunk_manager: Any,
                            climate_manager: Any = None):
@@ -369,6 +377,26 @@ class ModernWorldRenderer:
                 mesh_type = 'lily_pad'
             elif type_str == 'coral':
                 mesh_type = 'coral'
+            # Tropical plants
+            elif type_str in ('banana', 'monstera', 'heliconia', 'ficus'):
+                mesh_type = 'tree_palm'  # Use palm for tropical trees
+            elif type_str == 'baobab':
+                mesh_type = 'tree_dome'  # Thick trunk, sparse top
+            elif type_str == 'mangrove':
+                mesh_type = 'tree_weeping'  # Exposed roots style
+            # Dead plants
+            elif type_str in ('dead_tree', 'snag'):
+                mesh_type = 'tree_sparse'  # Bare branches
+            elif type_str in ('stump', 'fallen_log'):
+                mesh_type = 'mushroom'  # Low stump shape
+            # Rocks/stones (environmental)
+            elif type_str in ('stone', 'boulder', 'mossy_rock', 'rock_cluster', 'flat_rock'):
+                mesh_type = 'crystal'  # Use crystal for rock-like shapes
+            elif type_str == 'crystal_formation':
+                mesh_type = 'crystal'
+            # Exotic tree variants
+            elif type_str in ('blob_tree', 'layered_tree', 'clump_tree'):
+                mesh_type = 'tree_dome'
             else:
                 mesh_type = 'bush'
             
@@ -695,6 +723,15 @@ class ModernWorldRenderer:
         """Set weather conditions for particle effects and clouds."""
         self.weather.set_weather(weather_type, intensity)
         
+        # Track stormy state for wind system (can spawn tornadoes)
+        self._is_stormy = weather_type in ['storm', 'heavy_rain']
+        
+        # Adjust wind strength based on weather
+        if weather_type == 'storm':
+            self.wind.set_stormy(True)
+        else:
+            self.wind.set_stormy(False)
+        
         # Sync cloud coverage with weather
         if weather_type == 'clear':
             self.clouds.set_weather(0.2)  # Few clouds
@@ -717,6 +754,31 @@ class ModernWorldRenderer:
             dt: Delta time for animations
         """
         start = time.perf_counter()
+        
+        # Update wind system
+        is_stormy = getattr(self, '_is_stormy', False)
+        self.wind.update(dt, is_stormy=is_stormy)
+        
+        # Get wind uniforms and pass to renderers
+        wind_dir = self.wind.direction
+        wind_strength = self.wind.strength
+        wind_time = self.wind.time
+        tide_level = self.wind.tide_level
+        has_tornado = self.wind.tornado is not None
+        tornado_center = (self.wind.tornado.center_x, self.wind.tornado.center_z) if has_tornado else (0, 0)
+        tornado_radius = self.wind.tornado.radius if has_tornado else 0
+        tornado_strength = self.wind.tornado.strength * self.wind.tornado.intensity if has_tornado else 0
+        
+        # Set wind on flora
+        self.flora.set_wind(wind_dir, wind_strength, wind_time,
+                           has_tornado, tornado_center, tornado_radius, tornado_strength)
+        
+        # Set wind on water
+        self.water.set_wind(wind_dir, wind_strength, tide_level)
+        
+        # Set wind on particles
+        self.wind_particles.set_wind(wind_dir, wind_strength, 
+                                      has_tornado, tornado_center, tornado_radius, tornado_strength)
         
         # Clear the framebuffer (color and depth)
         # Get sky color for clear color
@@ -743,6 +805,10 @@ class ModernWorldRenderer:
         
         # Render water (transparent, needs blending)
         self.water.render(dt)
+        
+        # Render wind particles (debris)
+        self.wind_particles.update(dt)
+        self.wind_particles.render()
         
         # Render weather particles last (in front of everything)
         self.weather.render(dt)
@@ -789,6 +855,27 @@ class ModernWorldRenderer:
         
         self.set_lighting(sun_dir=sun_dir, fog_color=sky_color)
     
+    def force_tornado(self, offset_x: float = 0, offset_z: float = 50):
+        """
+        Force spawn a tornado for testing.
+        
+        Args:
+            offset_x, offset_z: Offset from camera position
+        """
+        self.wind.force_tornado(offset_x, offset_z)
+        print(f"[RENDERER] Forced tornado spawned at camera offset ({offset_x}, {offset_z})")
+    
+    def get_wind_info(self) -> dict:
+        """Get current wind state info for debug display."""
+        return {
+            'direction': self.wind.direction,
+            'strength': self.wind.strength,
+            'gust': self.wind.gust_factor,
+            'tide': self.wind.tide_level,
+            'tornado': self.wind.tornado is not None,
+            'tornado_strength': self.wind.tornado.strength if self.wind.tornado else 0,
+        }
+    
     def cleanup(self):
         """Release all GPU resources."""
         self.sky.cleanup()
@@ -799,6 +886,7 @@ class ModernWorldRenderer:
         self.animals.cleanup()
         self.water.cleanup()
         self.weather.cleanup()
+        self.wind_particles.cleanup()
         self.hud.cleanup()
         self.loaded_terrain_chunks.clear()
         self.loaded_flora_chunks.clear()

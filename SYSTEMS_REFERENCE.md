@@ -17,6 +17,38 @@
 ### Special Structures
 - Procedurally placed based on terrain and biome
 
+### Building Types (from building_dna.py)
+
+| Category | Types |
+|----------|-------|
+| **Residential** | house, apartment, villa, cabin, modern_house, split_level, ranch, bungalow, townhouse, loft, penthouse, duplex, mansion, cottage, beach_house, tree_house, tiny_house, a_frame, container_house, geodome_home, floating_house, underground_home, capsule, greenhouse |
+| **Commercial** | shop, office, tower, hotel, hospital, restaurant |
+| **Industrial** | warehouse, factory, hangar, silo, powerplant |
+| **Sci-Fi** | skyscraper, planetarium, solar_station, landing_pad, spaceport, research_lab, modular_hub, power_node, comm_tower, shield_generator, cryo_chamber, cargo_bay, docking_arm, reactor_core |
+| **Recreation** | playground, stadium, pool |
+| **Special** | temple, monument, observatory, ruins, parkour, lighthouse, bridge, gazebo |
+| **Ancient/Cultural** | nubian_complex, pyramid_temple, stone_portal, ziggurat, obelisk, amphitheater, colosseum, aqueduct, mausoleum, pagoda_tower |
+| **Cyberpunk** | cyberpunk_bar, neon_diner, arcade, holo_billboard, tech_shop |
+| **City Infrastructure** | bus_stop, metro_entrance, parking_garage, gas_station, fire_station, police_station, post_office, library, school, church, mosque, bank, theater, mall, supermarket |
+
+### Roof Types
+| Type | Description |
+|------|-------------|
+| `flat` | Modern flat with parapet |
+| `gabled` | Classic triangular |
+| `hipped` | All sides slope |
+| `pyramid` | Four-sided pyramid |
+| `shed` | Single slope |
+| `dome` | Hemispherical |
+| `barrel` | Cylindrical/curved |
+| `stepped` | Ziggurat style |
+| `sawtooth` | Industrial zigzag |
+| `conical` | Pointed tower style |
+| `pagoda` | Multi-tiered Asian |
+| `mansard` | French two-slope |
+| `butterfly` | V-shaped modern |
+| `geodesic` | Triangulated dome |
+
 ---
 
 ## Life Types (Animals)
@@ -87,18 +119,22 @@
 
 ## Biome Types (from ClimateManager)
 
-| Biome | Temperature | Humidity |
-|-------|-------------|----------|
-| `Tundra` | < 0.25 | > 0.5 |
-| `Frozen` | < 0.25 | ≤ 0.5 |
-| `Taiga` | 0.25-0.45 | > 0.6 |
-| `Cold` | 0.25-0.45 | ≤ 0.6 |
-| `Rainforest` | 0.45-0.65 | > 0.7 |
-| `Temperate` | 0.45-0.65 | 0.4-0.7 |
-| `Grassland` | 0.45-0.65 | < 0.4 |
-| `Tropical` | > 0.65 | > 0.6 |
-| `Desert` | > 0.65 | < 0.3 |
-| `Savanna` | > 0.65 | 0.3-0.6 |
+| Biome | Temperature | Humidity | Building Styles |
+|-------|-------------|----------|-----------------|
+| `Tundra` | < 0.25 | > 0.5 | cabin, warehouse, research_lab |
+| `Frozen` | < 0.25 | ≤ 0.5 | cabin, factory, observatory |
+| `Taiga` | 0.25-0.45 | > 0.6 | cabin, a_frame, cottage |
+| `Cold` | 0.25-0.45 | ≤ 0.6 | house, apartment, factory |
+| `Rainforest` | 0.45-0.65 | > 0.7 | tree_house, temple, ruins |
+| `Temperate` | 0.45-0.65 | 0.4-0.7 | house, modern_house, shop |
+| `Grassland` | 0.45-0.65 | < 0.4 | ranch, bungalow, gazebo |
+| `Tropical` | > 0.65 | > 0.6 | beach_house, villa, floating_house |
+| `Desert` | > 0.65 | < 0.3 | nubian_complex, pyramid_temple, ziggurat |
+| `Savanna` | > 0.65 | 0.3-0.6 | house, temple, monument |
+| `Urban/City` | - | - | skyscraper, parking_garage, mall |
+| `Cyberpunk/Neon` | - | - | cyberpunk_bar, neon_diner, arcade |
+| `Ancient/Historical` | - | - | colosseum, amphitheater, aqueduct |
+| `Futuristic/SciFi` | - | - | modular_hub, reactor_core, spaceport |
 
 ---
 

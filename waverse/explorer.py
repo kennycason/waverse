@@ -1947,7 +1947,8 @@ class Camera:
             return 0, 0, 0
         
         dt_seconds = dt / 60.0
-        speed_mult = SPEED_LEVELS[self.speed_level] * 3.0
+        # Tour mode is slower to let chunks load - use lower multiplier
+        speed_mult = SPEED_LEVELS[self.speed_level] * 1.0  # Reduced from 3.0
         
         if self.auto_fly_mode == 1:
             # === WANDER MODE ===
@@ -1992,7 +1993,8 @@ class Camera:
         move_x = -math.sin(self.wander_direction)
         move_z = -math.cos(self.wander_direction)
         
-        move_speed = speed_mult * 0.25 * dt_seconds * 60  # Slower for chunk gen to keep up
+        # Very slow movement to let chunks load (reduced from 0.25)
+        move_speed = speed_mult * 0.2 * dt_seconds * 60
         self.x += move_x * move_speed
         self.z += move_z * move_speed
         
@@ -2013,7 +2015,7 @@ class Camera:
         
         if self.showcase_phase == 0:
             # === TRAVELING PHASE - fly in arc toward viewing position (not target itself) ===
-            self.showcase_arc_progress += dt_seconds * 0.08 * speed_mult  # Slower for chunk gen
+            self.showcase_arc_progress += dt_seconds * 0.08 * speed_mult  # Very slow for chunk loading
             
             # Calculate viewing position (offset from target)
             # We orbit at showcase_view_distance from target
@@ -3676,6 +3678,7 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
     
     # Check if modern renderer is requested
     USE_MODERN_RENDERER = debug_flags.get('modern_renderer', False) and MODERNGL_AVAILABLE
+    ENABLE_WAVES = debug_flags.get('enable_waves', False)
     
     pygame.init()
     display = (1400, 800)
@@ -3726,7 +3729,7 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
             if gl_version < 330:
                 raise RuntimeError(f"OpenGL {gl_version} < 330, need 3.3+ for shaders")
             
-            modern_renderer = ModernWorldRenderer(modern_ctx)
+            modern_renderer = ModernWorldRenderer(modern_ctx, enable_waves=ENABLE_WAVES)
             modern_renderer.set_chunk_params(CHUNK_SIZE, TILE_SCALE, HEIGHT_SCALE)
             modern_renderer.set_screen_size(display[0], display[1])
             print(f"  [RENDERER] ModernGL initialized successfully!")
@@ -3743,6 +3746,18 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
             USE_MODERN_RENDERER = False
             modern_renderer = None
             modern_ctx = None
+            
+            # On macOS, we need to recreate the display with legacy profile
+            # because Core profile doesn't support glGenLists etc.
+            if platform.system() == 'Darwin':
+                print("  [RENDERER] Recreating display with legacy OpenGL for fallback...")
+                pygame.display.quit()
+                pygame.display.init()
+                # Reset to default (legacy) OpenGL - don't set any profile
+                pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MAJOR_VERSION, 2)
+                pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MINOR_VERSION, 1)
+                pygame.display.set_mode(display, DOUBLEBUF | OPENGL)
+                pygame.display.set_caption(f"Waverse - {config.name}")
     
     # Initialize font for HUD text
     pygame.font.init()

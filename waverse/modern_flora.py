@@ -41,6 +41,15 @@ out float v_height;
 uniform mat4 u_projection;
 uniform mat4 u_view;
 
+// Wind uniforms
+uniform vec2 u_wind_dir;
+uniform float u_wind_strength;
+uniform float u_wind_time;
+uniform float u_has_tornado;
+uniform vec2 u_tornado_center;
+uniform float u_tornado_radius;
+uniform float u_tornado_strength;
+
 mat3 rotateY(float angle) {
     float c = cos(angle);
     float s = sin(angle);
@@ -48,14 +57,44 @@ mat3 rotateY(float angle) {
 }
 
 void main() {
-    // No wind - match legacy behavior
     vec3 pos = in_position;
     
-    // Apply instance transform (simple scale + translate)
-    // Note: in_instance_rot is kept to prevent shader optimization removing it
+    // Apply instance rotation
+    pos = rotateY(in_instance_rot) * pos;
+    
+    // Apply instance transform
     vec3 scaled = pos * in_instance_scale;
     vec3 world_pos = scaled + in_instance_pos;
-    float _unused_rot = in_instance_rot;  // Keep attribute alive
+    
+    // Wind sway - based on height in local space
+    float height_factor = max(0.0, in_position.y) / (in_instance_scale * 2.0 + 0.1);
+    height_factor = clamp(height_factor, 0.0, 1.0);
+    height_factor = height_factor * height_factor; // Quadratic falloff - base stays still
+    
+    // Base wind sway
+    float sway_phase = u_wind_time * 2.0 + in_instance_pos.x * 0.05 + in_instance_pos.z * 0.07;
+    float sway = sin(sway_phase) * u_wind_strength * height_factor * 0.8;
+    float sway2 = sin(sway_phase * 0.7 + 1.3) * u_wind_strength * height_factor * 0.3;
+    
+    world_pos.x += u_wind_dir.x * sway + u_wind_dir.y * sway2;
+    world_pos.z += u_wind_dir.y * sway - u_wind_dir.x * sway2;
+    
+    // Tornado effect (if active)
+    if (u_has_tornado > 0.5) {
+        vec2 to_tornado = u_tornado_center - in_instance_pos.xz;
+        float dist = length(to_tornado);
+        if (dist < u_tornado_radius && dist > 0.1) {
+            float falloff = 1.0 - (dist / u_tornado_radius);
+            falloff = falloff * falloff; // Stronger near center
+            
+            // Rotational wind
+            vec2 tangent = normalize(vec2(-to_tornado.y, to_tornado.x));
+            float tornado_sway = u_tornado_strength * falloff * height_factor * 2.0;
+            
+            world_pos.x += tangent.x * tornado_sway * sin(u_wind_time * 5.0);
+            world_pos.z += tangent.y * tornado_sway * sin(u_wind_time * 5.0);
+        }
+    }
     
     v_world_pos = world_pos;
     v_height = in_instance_pos.y;
@@ -2100,6 +2139,18 @@ class ModernFloraRenderer:
                 ]
             )
     
+    def set_wind(self, wind_dir: tuple, wind_strength: float, wind_time: float,
+                  has_tornado: bool = False, tornado_center: tuple = (0, 0),
+                  tornado_radius: float = 0, tornado_strength: float = 0):
+        """Set wind parameters for sway animation."""
+        self.wind_dir = wind_dir
+        self.wind_strength = wind_strength
+        self.wind_time = wind_time
+        self.has_tornado = has_tornado
+        self.tornado_center = tornado_center
+        self.tornado_radius = tornado_radius
+        self.tornado_strength = tornado_strength
+    
     def render(self, dt: float = 0.016):
         """Render all flora instances."""
         self.time += dt
@@ -2114,6 +2165,15 @@ class ModernFloraRenderer:
         self.program['u_fog_start'].value = self.fog_start
         self.program['u_fog_end'].value = self.fog_end
         self.program['u_fog_color'].value = tuple(self.fog_color)
+        
+        # Wind uniforms
+        self.program['u_wind_dir'].value = getattr(self, 'wind_dir', (1.0, 0.0))
+        self.program['u_wind_strength'].value = getattr(self, 'wind_strength', 0.3)
+        self.program['u_wind_time'].value = getattr(self, 'wind_time', self.time)
+        self.program['u_has_tornado'].value = 1.0 if getattr(self, 'has_tornado', False) else 0.0
+        self.program['u_tornado_center'].value = getattr(self, 'tornado_center', (0.0, 0.0))
+        self.program['u_tornado_radius'].value = getattr(self, 'tornado_radius', 0.0)
+        self.program['u_tornado_strength'].value = getattr(self, 'tornado_strength', 0.0)
         
         # Render each batch
         for mesh_type, batch in self.batches.items():

@@ -868,11 +868,44 @@ def get_animal_type_id(animal_type: str) -> int:
         
         # Birds
         'bird': ModernAnimalRenderer.TYPE_BIRD,
+        'screamer': ModernAnimalRenderer.TYPE_BIRD,
+        'floater': ModernAnimalRenderer.TYPE_BIRD,
         
         # Fish
         'fish': ModernAnimalRenderer.TYPE_FISH,
         'eel': ModernAnimalRenderer.TYPE_FISH,
         'shark': ModernAnimalRenderer.TYPE_FISH,
+        'manta': ModernAnimalRenderer.TYPE_FISH,
+        
+        # More exotic types - map to closest visual
+        'alien': ModernAnimalRenderer.TYPE_JELLYFISH,
+        'metroid': ModernAnimalRenderer.TYPE_JELLYFISH,
+        'amoeba': ModernAnimalRenderer.TYPE_JELLYFISH,
+        'blob': ModernAnimalRenderer.TYPE_JELLYFISH,
+        'polyp': ModernAnimalRenderer.TYPE_JELLYFISH,
+        'hydra': ModernAnimalRenderer.TYPE_JELLYFISH,
+        'nudibranch': ModernAnimalRenderer.TYPE_JELLYFISH,
+        'coral': ModernAnimalRenderer.TYPE_JELLYFISH,
+        'anemone': ModernAnimalRenderer.TYPE_JELLYFISH,
+        'seastar': ModernAnimalRenderer.TYPE_CRAB,
+        'urchin': ModernAnimalRenderer.TYPE_CRAB,
+        'barnacle': ModernAnimalRenderer.TYPE_CRAB,
+        'nautilus': ModernAnimalRenderer.TYPE_FISH,
+        
+        # Sci-fi creatures
+        'biomech_spider': ModernAnimalRenderer.TYPE_INSECT,
+        'mech_crawler': ModernAnimalRenderer.TYPE_CRAB,
+        'drone': ModernAnimalRenderer.TYPE_BIRD,
+        'hive_creature': ModernAnimalRenderer.TYPE_INSECT,
+        'symbiote': ModernAnimalRenderer.TYPE_JELLYFISH,
+        'xenomorph': ModernAnimalRenderer.TYPE_REPTILE,
+        'facehugger': ModernAnimalRenderer.TYPE_CRAB,
+        'headcrab': ModernAnimalRenderer.TYPE_CRAB,
+        'stalker': ModernAnimalRenderer.TYPE_REPTILE,
+        'brute': ModernAnimalRenderer.TYPE_MAMMAL,
+        
+        # More standard types
+        'hopper': ModernAnimalRenderer.TYPE_AMPHIBIAN,
     }
     return type_map.get(animal_type, ModernAnimalRenderer.TYPE_WORM)
 

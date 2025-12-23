@@ -73,6 +73,8 @@ def main():
     # Renderer selection
     parser.add_argument('--modern', action='store_true', 
                         help='Use ModernGL renderer (experimental, faster)')
+    parser.add_argument('--enable-waves', action='store_true',
+                        help='Enable animated water waves (experimental, may affect perf)')
     
     args = parser.parse_args()
     
@@ -125,6 +127,7 @@ def main():
         'max_flora': args.max_flora,
         'max_animals': args.max_animals,
         'modern_renderer': args.modern,
+        'enable_waves': args.enable_waves,
     }
     
     # Run!
