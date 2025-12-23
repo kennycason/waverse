@@ -38,9 +38,42 @@ class BiomeDNA:
     cloud_base: float = 0.4       # Base cloud cover (was 0.3)
     wind_base: float = 0.3        # Base wind strength
     
+    # SPECIAL BIOMES - rare exotic zones!
+    # None = normal biome, otherwise overrides everything
+    special_biome: str = None  # "psychedelic", "hellfire", "shadow", "crystal", "void"
+    chaos_factor: float = 0.0  # 0=normal terrain, 1=extremely chaotic/jagged
+    
     def mutate(self, rng: np.random.Generator, strength: float = 0.02) -> "BiomeDNA":
         """Very slow mutation - biomes should span many chunks."""
-        # Only 8% chance of any mutation
+        # Special biomes are sticky - they persist across the zone
+        new_special = self.special_biome
+        new_chaos = self.chaos_factor
+        
+        # Check for debug mode (more frequent biome changes for testing)
+        import os
+        debug_biomes = os.environ.get('WAVERSE_DEBUG_BIOMES', '0') == '1'
+        
+        # Chance to exit or enter a special biome
+        # Debug mode: 10% chance, Normal mode: 0.5% chance
+        change_chance = 0.10 if debug_biomes else 0.005
+        enter_chance = 0.50 if debug_biomes else 0.02  # Debug: 50% to enter, Normal: 2%
+        
+        if rng.random() < change_chance:
+            if self.special_biome:
+                # Exiting special biome
+                new_special = None
+                new_chaos = 0.0
+            else:
+                # Chance to enter a special biome
+                if rng.random() < enter_chance:
+                    new_special = rng.choice(['psychedelic', 'hellfire', 'shadow', 'crystal', 'void'])
+                    new_chaos = 0.5 + rng.random() * 0.5  # High chaos in special biomes
+        
+        # If in special biome, chaos can vary
+        if new_special:
+            new_chaos = _clamp(new_chaos + rng.normal(0, 0.1))
+        
+        # Only 8% chance of any mutation for normal params
         if rng.random() > 0.08:
             return BiomeDNA(
                 temperature=self.temperature,
@@ -51,6 +84,8 @@ class BiomeDNA:
                 storm_tendency=self.storm_tendency,
                 cloud_base=self.cloud_base,
                 wind_base=self.wind_base,
+                special_biome=new_special,
+                chaos_factor=new_chaos,
             )
         
         # Tiny mutations
@@ -64,11 +99,23 @@ class BiomeDNA:
             storm_tendency=_clamp(self.storm_tendency + rng.normal(0, s * 0.5)),
             cloud_base=_clamp(self.cloud_base + rng.normal(0, s)),
             wind_base=_clamp(self.wind_base + rng.normal(0, s)),
+            special_biome=new_special,
+            chaos_factor=new_chaos,
         )
     
     def crossover(self, other: "BiomeDNA", rng: np.random.Generator) -> "BiomeDNA":
         """Blend two biome DNAs."""
         t = 0.3 + rng.random() * 0.4
+        
+        # Special biomes: prefer the one that exists, or pick randomly if both exist
+        if self.special_biome and other.special_biome:
+            new_special = rng.choice([self.special_biome, other.special_biome])
+        else:
+            new_special = self.special_biome or other.special_biome
+        
+        # Blend chaos
+        new_chaos = self.chaos_factor * (1-t) + other.chaos_factor * t
+        
         return BiomeDNA(
             temperature=self.temperature * (1-t) + other.temperature * t,
             humidity=self.humidity * (1-t) + other.humidity * t,
@@ -78,10 +125,16 @@ class BiomeDNA:
             storm_tendency=self.storm_tendency * (1-t) + other.storm_tendency * t,
             cloud_base=self.cloud_base * (1-t) + other.cloud_base * t,
             wind_base=self.wind_base * (1-t) + other.wind_base * t,
+            special_biome=new_special,
+            chaos_factor=new_chaos,
         )
     
     def get_biome_name(self) -> str:
         """Get human-readable biome name."""
+        # Special exotic biomes override normal temperature/humidity logic
+        if self.special_biome:
+            return self.special_biome.capitalize()
+        
         if self.temperature < 0.25:
             if self.humidity > 0.5:
                 return "Tundra"
@@ -265,6 +318,94 @@ class ClimateManager:
         
         self.biomes[key] = new_biome
         return new_biome
+    
+    def get_blended_biome(self, world_x: float, world_z: float, blend_radius: int = 2) -> BiomeDNA:
+        """
+        Get a BLENDED biome at a specific world position.
+        Samples nearby chunks and interpolates based on distance.
+        This creates smooth transitions between biomes!
+        
+        Args:
+            world_x, world_z: World position
+            blend_radius: How many chunks to sample in each direction
+        
+        Returns:
+            A blended BiomeDNA that may mix properties from multiple biomes
+        """
+        chunk_size = 32  # Standard chunk size
+        cx = int(world_x // chunk_size)
+        cz = int(world_z // chunk_size)
+        
+        # Position within chunk (0-1)
+        local_x = (world_x % chunk_size) / chunk_size
+        local_z = (world_z % chunk_size) / chunk_size
+        
+        # Sample surrounding biomes with distance-based weights
+        total_weight = 0.0
+        blended = {
+            'temperature': 0.0, 'humidity': 0.0, 'elevation_factor': 0.0,
+            'rain_tendency': 0.0, 'snow_tendency': 0.0, 'storm_tendency': 0.0,
+            'cloud_base': 0.0, 'wind_base': 0.0, 'chaos_factor': 0.0
+        }
+        special_biomes = {}  # Track special biomes and their weights
+        
+        for dx in range(-blend_radius, blend_radius + 1):
+            for dz in range(-blend_radius, blend_radius + 1):
+                biome = self.get_biome(cx + dx, cz + dz)
+                
+                # Distance from position to chunk center
+                chunk_center_x = (cx + dx + 0.5)
+                chunk_center_z = (cz + dz + 0.5)
+                pos_x = cx + local_x
+                pos_z = cz + local_z
+                dist = math.sqrt((chunk_center_x - pos_x)**2 + (chunk_center_z - pos_z)**2)
+                
+                # Weight: closer = stronger influence (inverse square falloff)
+                weight = 1.0 / (1.0 + dist * dist)
+                total_weight += weight
+                
+                # Accumulate blended values
+                blended['temperature'] += biome.temperature * weight
+                blended['humidity'] += biome.humidity * weight
+                blended['elevation_factor'] += biome.elevation_factor * weight
+                blended['rain_tendency'] += biome.rain_tendency * weight
+                blended['snow_tendency'] += biome.snow_tendency * weight
+                blended['storm_tendency'] += biome.storm_tendency * weight
+                blended['cloud_base'] += biome.cloud_base * weight
+                blended['wind_base'] += biome.wind_base * weight
+                blended['chaos_factor'] += getattr(biome, 'chaos_factor', 0.0) * weight
+                
+                # Track special biomes
+                if biome.special_biome:
+                    if biome.special_biome not in special_biomes:
+                        special_biomes[biome.special_biome] = 0.0
+                    special_biomes[biome.special_biome] += weight
+        
+        # Normalize
+        if total_weight > 0:
+            for key in blended:
+                blended[key] /= total_weight
+        
+        # Determine special biome: use the one with highest weight, if any
+        final_special = None
+        if special_biomes:
+            dominant = max(special_biomes.items(), key=lambda x: x[1])
+            # Only set if it has significant presence (>30% of weight)
+            if dominant[1] / total_weight > 0.3:
+                final_special = dominant[0]
+        
+        return BiomeDNA(
+            temperature=blended['temperature'],
+            humidity=blended['humidity'],
+            elevation_factor=blended['elevation_factor'],
+            rain_tendency=blended['rain_tendency'],
+            snow_tendency=blended['snow_tendency'],
+            storm_tendency=blended['storm_tendency'],
+            cloud_base=blended['cloud_base'],
+            wind_base=blended['wind_base'],
+            special_biome=final_special,
+            chaos_factor=blended['chaos_factor']
+        )
     
     def _chunk_to_region(self, cx: int, cz: int) -> Tuple[int, int]:
         """Convert chunk coords to weather region coords."""

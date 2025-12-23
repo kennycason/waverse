@@ -50,6 +50,9 @@ uniform vec2 u_tornado_center;
 uniform float u_tornado_radius;
 uniform float u_tornado_strength;
 
+// Special biome mode
+uniform float u_dance_mode;  // 1.0 = psychedelic dance/bop mode!
+
 mat3 rotateY(float angle) {
     float c = cos(angle);
     float s = sin(angle);
@@ -66,33 +69,61 @@ void main() {
     vec3 scaled = pos * in_instance_scale;
     vec3 world_pos = scaled + in_instance_pos;
     
-    // Wind sway - based on height in local space
-    float height_factor = max(0.0, in_position.y) / (in_instance_scale * 2.0 + 0.1);
-    height_factor = clamp(height_factor, 0.0, 1.0);
-    height_factor = height_factor * height_factor; // Quadratic falloff - base stays still
-    
-    // Base wind sway
-    float sway_phase = u_wind_time * 2.0 + in_instance_pos.x * 0.05 + in_instance_pos.z * 0.07;
-    float sway = sin(sway_phase) * u_wind_strength * height_factor * 0.8;
-    float sway2 = sin(sway_phase * 0.7 + 1.3) * u_wind_strength * height_factor * 0.3;
-    
-    world_pos.x += u_wind_dir.x * sway + u_wind_dir.y * sway2;
-    world_pos.z += u_wind_dir.y * sway - u_wind_dir.x * sway2;
-    
-    // Tornado effect (if active)
-    if (u_has_tornado > 0.5) {
-        vec2 to_tornado = u_tornado_center - in_instance_pos.xz;
-        float dist = length(to_tornado);
-        if (dist < u_tornado_radius && dist > 0.1) {
-            float falloff = 1.0 - (dist / u_tornado_radius);
-            falloff = falloff * falloff; // Stronger near center
-            
-            // Rotational wind
-            vec2 tangent = normalize(vec2(-to_tornado.y, to_tornado.x));
-            float tornado_sway = u_tornado_strength * falloff * height_factor * 2.0;
-            
-            world_pos.x += tangent.x * tornado_sway * sin(u_wind_time * 5.0);
-            world_pos.z += tangent.y * tornado_sway * sin(u_wind_time * 5.0);
+    // === PSYCHEDELIC DANCE MODE ===
+    if (u_dance_mode > 0.5) {
+        // Plants BOP to the beat! No wind, just rhythmic bouncing
+        // Each plant has its own phase based on position
+        float plant_phase = in_instance_pos.x * 0.1 + in_instance_pos.z * 0.13;
+        
+        // Multiple frequency bops (like dancing to a beat)
+        float bop1 = sin(u_wind_time * 4.0 + plant_phase) * 0.3;  // Main beat
+        float bop2 = sin(u_wind_time * 8.0 + plant_phase * 1.5) * 0.15;  // Double time
+        float bop3 = sin(u_wind_time * 2.0 + plant_phase * 0.5) * 0.2;  // Half time sway
+        
+        float height_factor = max(0.0, in_position.y) / (in_instance_scale * 2.0 + 0.1);
+        height_factor = clamp(height_factor, 0.0, 1.0);
+        
+        // Vertical bop (bounce up and down)
+        world_pos.y += (bop1 + bop2) * height_factor * in_instance_scale * 0.5;
+        
+        // Side sway (like swaying to music)
+        world_pos.x += bop3 * height_factor * in_instance_scale * 0.4;
+        world_pos.z += bop1 * 0.5 * height_factor * in_instance_scale * 0.3;
+        
+        // Slight rotation wobble
+        float wobble = sin(u_wind_time * 3.0 + plant_phase * 2.0) * 0.1;
+        vec3 wobbled = rotateY(wobble * height_factor) * (world_pos - in_instance_pos) + in_instance_pos;
+        world_pos = wobbled;
+    } else {
+        // === NORMAL WIND SWAY ===
+        // Wind sway - based on height in local space
+        float height_factor = max(0.0, in_position.y) / (in_instance_scale * 2.0 + 0.1);
+        height_factor = clamp(height_factor, 0.0, 1.0);
+        height_factor = height_factor * height_factor; // Quadratic falloff - base stays still
+        
+        // Base wind sway
+        float sway_phase = u_wind_time * 2.0 + in_instance_pos.x * 0.05 + in_instance_pos.z * 0.07;
+        float sway = sin(sway_phase) * u_wind_strength * height_factor * 0.8;
+        float sway2 = sin(sway_phase * 0.7 + 1.3) * u_wind_strength * height_factor * 0.3;
+        
+        world_pos.x += u_wind_dir.x * sway + u_wind_dir.y * sway2;
+        world_pos.z += u_wind_dir.y * sway - u_wind_dir.x * sway2;
+        
+        // Tornado effect (if active) - only in normal mode
+        if (u_has_tornado > 0.5) {
+            vec2 to_tornado = u_tornado_center - in_instance_pos.xz;
+            float dist = length(to_tornado);
+            if (dist < u_tornado_radius && dist > 0.1) {
+                float falloff = 1.0 - (dist / u_tornado_radius);
+                falloff = falloff * falloff; // Stronger near center
+                
+                // Rotational wind
+                vec2 tangent = normalize(vec2(-to_tornado.y, to_tornado.x));
+                float tornado_sway = u_tornado_strength * falloff * height_factor * 2.0;
+                
+                world_pos.x += tangent.x * tornado_sway * sin(u_wind_time * 5.0);
+                world_pos.z += tangent.y * tornado_sway * sin(u_wind_time * 5.0);
+            }
         }
     }
     
@@ -1915,6 +1946,370 @@ def create_bush_flowering_mesh() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
 
 
 # =============================================================================
+# ABSTRACT/WEIRD/TRIPPY MESHES - For exotic biomes!
+# =============================================================================
+
+def create_twisted_spire_mesh() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """A twisting spiral spire that defies gravity."""
+    verts = []
+    normals = []
+    colors = []
+    
+    spire_color = (1.0, 1.0, 1.0)
+    segments = 16
+    height = 0.8
+    twist = 4 * math.pi  # 2 full rotations
+    
+    for i in range(segments):
+        t1 = i / segments
+        t2 = (i + 1) / segments
+        y1, y2 = t1 * height, t2 * height
+        angle1 = t1 * twist
+        angle2 = t2 * twist
+        r1 = 0.08 * (1 - t1 * 0.7)  # Tapers
+        r2 = 0.08 * (1 - t2 * 0.7)
+        
+        for j in range(4):
+            a1 = j * math.pi / 2 + angle1
+            a2 = (j + 1) * math.pi / 2 + angle1
+            a3 = j * math.pi / 2 + angle2
+            
+            verts.extend([
+                (math.cos(a1) * r1, y1, math.sin(a1) * r1),
+                (math.cos(a2) * r1, y1, math.sin(a2) * r1),
+                (math.cos(a3) * r2, y2, math.sin(a3) * r2)
+            ])
+            n = (math.cos(a1), 0.5, math.sin(a1))
+            normals.extend([n, n, n])
+            colors.extend([spire_color, spire_color, spire_color])
+    
+    return (np.array(verts, dtype='f4'), np.array(normals, dtype='f4'), np.array(colors, dtype='f4'))
+
+
+def create_blob_creature_mesh() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Amorphous blob with pseudopods."""
+    verts = []
+    normals = []
+    colors = []
+    
+    blob_color = (1.0, 1.0, 1.0)
+    
+    # Main blob body (irregular sphere using random offsets)
+    for i in range(12):
+        for j in range(6):
+            theta1 = i * 2 * math.pi / 12
+            theta2 = (i + 1) * 2 * math.pi / 12
+            phi1 = j * math.pi / 6
+            phi2 = (j + 1) * math.pi / 6
+            
+            r = 0.15 + 0.05 * math.sin(i * 3) * math.cos(j * 2)  # Irregular
+            
+            x1 = r * math.sin(phi1) * math.cos(theta1)
+            y1 = r * math.cos(phi1) + 0.15
+            z1 = r * math.sin(phi1) * math.sin(theta1)
+            
+            x2 = r * math.sin(phi1) * math.cos(theta2)
+            y2 = r * math.cos(phi1) + 0.15
+            z2 = r * math.sin(phi1) * math.sin(theta2)
+            
+            x3 = r * math.sin(phi2) * math.cos(theta1)
+            y3 = r * math.cos(phi2) + 0.15
+            z3 = r * math.sin(phi2) * math.sin(theta1)
+            
+            verts.extend([(x1, y1, z1), (x2, y2, z2), (x3, y3, z3)])
+            n = (x1, y1 - 0.15, z1)
+            normals.extend([n, n, n])
+            colors.extend([blob_color, blob_color, blob_color])
+    
+    # Pseudopods extending outward
+    for p in range(3):
+        angle = p * 2 * math.pi / 3
+        px, pz = math.cos(angle) * 0.15, math.sin(angle) * 0.15
+        
+        for i in range(4):
+            t = i / 4
+            r = 0.04 * (1 - t)
+            px2 = px + math.cos(angle) * t * 0.2
+            pz2 = pz + math.sin(angle) * t * 0.2
+            py = 0.1 + t * 0.05
+            
+            verts.extend([
+                (px2, py, pz2), (px2 + r, py - r, pz2), (px2, py - r, pz2 + r)
+            ])
+            normals.extend([(0, 1, 0)] * 3)
+            colors.extend([blob_color, blob_color, blob_color])
+    
+    return (np.array(verts, dtype='f4'), np.array(normals, dtype='f4'), np.array(colors, dtype='f4'))
+
+
+def create_eye_flower_mesh() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Creepy flower with an eye-like center."""
+    verts = []
+    normals = []
+    colors = []
+    
+    petal_color = (1.0, 1.0, 1.0)
+    eye_white = (0.95, 0.95, 0.95)
+    pupil = (0.1, 0.05, 0.15)
+    
+    # Stem
+    for i in range(4):
+        angle = i * math.pi / 2
+        r = 0.02
+        verts.extend([
+            (math.cos(angle) * r, 0, math.sin(angle) * r),
+            (math.cos(angle + math.pi/2) * r, 0, math.sin(angle + math.pi/2) * r),
+            (0, 0.3, 0)
+        ])
+        normals.extend([(0, 0, 1)] * 3)
+        colors.extend([petal_color, petal_color, petal_color])
+    
+    # Petals
+    for i in range(8):
+        angle = i * 2 * math.pi / 8
+        px1 = math.cos(angle) * 0.03
+        pz1 = math.sin(angle) * 0.03
+        px2 = math.cos(angle) * 0.15
+        pz2 = math.sin(angle) * 0.15
+        
+        verts.extend([
+            (0, 0.3, 0), (px2, 0.28, pz2), (px1, 0.32, pz1)
+        ])
+        normals.extend([(0, 1, 0)] * 3)
+        colors.extend([petal_color, petal_color, petal_color])
+    
+    # Eye (white part) - dome
+    for i in range(6):
+        angle1 = i * 2 * math.pi / 6
+        angle2 = (i + 1) * 2 * math.pi / 6
+        r = 0.05
+        
+        verts.extend([
+            (0, 0.32, 0),
+            (math.cos(angle1) * r, 0.3, math.sin(angle1) * r),
+            (math.cos(angle2) * r, 0.3, math.sin(angle2) * r)
+        ])
+        normals.extend([(0, 1, 0)] * 3)
+        colors.extend([eye_white, eye_white, eye_white])
+    
+    # Pupil (small dark center)
+    for i in range(4):
+        angle1 = i * math.pi / 2
+        angle2 = (i + 1) * math.pi / 2
+        r = 0.02
+        
+        verts.extend([
+            (0, 0.33, 0),
+            (math.cos(angle1) * r, 0.31, math.sin(angle1) * r),
+            (math.cos(angle2) * r, 0.31, math.sin(angle2) * r)
+        ])
+        normals.extend([(0, 1, 0)] * 3)
+        colors.extend([pupil, pupil, pupil])
+    
+    return (np.array(verts, dtype='f4'), np.array(normals, dtype='f4'), np.array(colors, dtype='f4'))
+
+
+def create_impossible_geometry_mesh() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """An impossible/Escherian structure that doesn't make sense."""
+    verts = []
+    normals = []
+    colors = []
+    
+    color = (1.0, 1.0, 1.0)
+    
+    # Interlocking rings that couldn't exist
+    for ring in range(3):
+        angle_offset = ring * 2 * math.pi / 3
+        tilt = ring * 0.4
+        
+        for i in range(8):
+            t1 = i * 2 * math.pi / 8
+            t2 = (i + 1) * 2 * math.pi / 8
+            
+            # Ring points (tilted)
+            r = 0.12
+            y_off = 0.15 + ring * 0.1
+            
+            x1 = math.cos(t1 + angle_offset) * r
+            z1 = math.sin(t1 + angle_offset) * r
+            y1 = y_off + math.sin(t1) * tilt * 0.1
+            
+            x2 = math.cos(t2 + angle_offset) * r
+            z2 = math.sin(t2 + angle_offset) * r
+            y2 = y_off + math.sin(t2) * tilt * 0.1
+            
+            # Thin ring segment
+            verts.extend([
+                (x1, y1, z1), (x2, y2, z2), (x1 * 0.8, y1 + 0.02, z1 * 0.8)
+            ])
+            normals.extend([(0, 1, 0)] * 3)
+            colors.extend([color, color, color])
+    
+    # Central impossible cube (vertices don't connect properly)
+    cube_verts = [
+        (0.05, 0.1, 0.05), (0.05, 0.3, 0.05), (-0.05, 0.2, -0.05),
+        (-0.05, 0.2, -0.05), (-0.05, 0.4, -0.05), (0.05, 0.3, 0.05),
+    ]
+    for v in cube_verts:
+        verts.append(v)
+        normals.append((0, 1, 0))
+        colors.append(color)
+    
+    return (np.array(verts, dtype='f4'), np.array(normals, dtype='f4'), np.array(colors, dtype='f4'))
+
+
+def create_fire_plant_mesh() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Plant made of flames - for hellfire biome."""
+    verts = []
+    normals = []
+    colors = []
+    
+    # Multiple flame tongues
+    flames = 5
+    for f in range(flames):
+        base_angle = f * 2 * math.pi / flames
+        bx = math.cos(base_angle) * 0.05
+        bz = math.sin(base_angle) * 0.05
+        
+        height = 0.3 + f * 0.08
+        flicker = math.sin(f * 1.7) * 0.05
+        
+        # Each flame is a tapered cone with jagged edges
+        for i in range(3):
+            angle1 = i * 2 * math.pi / 3 + base_angle
+            angle2 = (i + 1) * 2 * math.pi / 3 + base_angle
+            
+            r_base = 0.06
+            r_mid = 0.04 + flicker
+            
+            # Bottom to middle
+            verts.extend([
+                (bx + math.cos(angle1) * r_base, 0, bz + math.sin(angle1) * r_base),
+                (bx + math.cos(angle2) * r_base, 0, bz + math.sin(angle2) * r_base),
+                (bx + math.cos(angle1) * r_mid + flicker, height * 0.5, bz + math.sin(angle1) * r_mid)
+            ])
+            
+            # Middle to tip
+            verts.extend([
+                (bx + math.cos(angle1) * r_mid + flicker, height * 0.5, bz + math.sin(angle1) * r_mid),
+                (bx + math.cos(angle2) * r_mid - flicker, height * 0.5, bz + math.sin(angle2) * r_mid),
+                (bx + flicker * 2, height, bz)  # Tip
+            ])
+            
+            for _ in range(6):
+                normals.append((0, 0.8, 0.2))
+                colors.append((1.0, 1.0, 1.0))  # White, tinted by instance
+    
+    return (np.array(verts, dtype='f4'), np.array(normals, dtype='f4'), np.array(colors, dtype='f4'))
+
+
+def create_shadow_tendril_mesh() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Creeping shadow tendril for shadow biome."""
+    verts = []
+    normals = []
+    colors = []
+    
+    tendril_color = (1.0, 1.0, 1.0)
+    
+    # Multiple tendrils reaching upward
+    tendrils = 4
+    for t in range(tendrils):
+        base_angle = t * 2 * math.pi / tendrils + t * 0.5
+        
+        segments = 8
+        for i in range(segments):
+            s1 = i / segments
+            s2 = (i + 1) / segments
+            
+            # Creepy curving path
+            curl = math.sin(s1 * 3) * 0.1
+            x1 = math.cos(base_angle) * 0.02 + curl
+            x2 = math.cos(base_angle) * 0.02 + math.sin(s2 * 3) * 0.1
+            z1 = math.sin(base_angle) * 0.02 + curl * 0.5
+            z2 = math.sin(base_angle) * 0.02 + math.sin(s2 * 3) * 0.05
+            y1 = s1 * 0.5
+            y2 = s2 * 0.5
+            r1 = 0.02 * (1 - s1 * 0.6)
+            r2 = 0.02 * (1 - s2 * 0.6)
+            
+            verts.extend([
+                (x1 - r1, y1, z1), (x1 + r1, y1, z1), (x2, y2, z2)
+            ])
+            normals.extend([(0, 0, 1)] * 3)
+            colors.extend([tendril_color, tendril_color, tendril_color])
+    
+    return (np.array(verts, dtype='f4'), np.array(normals, dtype='f4'), np.array(colors, dtype='f4'))
+
+
+def create_void_shard_mesh() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Sharp angular shard from the void."""
+    verts = []
+    normals = []
+    colors = []
+    
+    shard_color = (1.0, 1.0, 1.0)
+    
+    # Multiple jagged shards
+    shards = [
+        (0, 0.4, 0, 0.05),
+        (0.05, 0.25, 0.03, 0.03),
+        (-0.04, 0.3, -0.02, 0.04),
+    ]
+    
+    for sx, sy, sz, sr in shards:
+        # Each shard is a sharp pyramid
+        for i in range(4):
+            angle1 = i * math.pi / 2
+            angle2 = (i + 1) * math.pi / 2
+            
+            verts.extend([
+                (sx + math.cos(angle1) * sr, 0, sz + math.sin(angle1) * sr),
+                (sx + math.cos(angle2) * sr, 0, sz + math.sin(angle2) * sr),
+                (sx, sy, sz)  # Sharp tip
+            ])
+            
+            n = (math.cos(angle1 + math.pi/4), 0.5, math.sin(angle1 + math.pi/4))
+            normals.extend([n, n, n])
+            colors.extend([shard_color, shard_color, shard_color])
+    
+    return (np.array(verts, dtype='f4'), np.array(normals, dtype='f4'), np.array(colors, dtype='f4'))
+
+
+def create_rainbow_spiral_mesh() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """A psychedelic spiral of pure rainbow energy."""
+    verts = []
+    normals = []
+    colors = []
+    
+    # Helix spiral going up
+    segments = 24
+    for i in range(segments):
+        t1 = i / segments
+        t2 = (i + 1) / segments
+        angle1 = t1 * 6 * math.pi  # 3 full rotations
+        angle2 = t2 * 6 * math.pi
+        
+        r = 0.1 - t1 * 0.05  # Tapers
+        y1 = t1 * 0.6
+        y2 = t2 * 0.6
+        
+        x1 = math.cos(angle1) * r
+        z1 = math.sin(angle1) * r
+        x2 = math.cos(angle2) * r
+        z2 = math.sin(angle2) * r
+        
+        verts.extend([
+            (x1, y1, z1), (x2, y2, z2), (x1 * 0.7, y1 + 0.02, z1 * 0.7)
+        ])
+        
+        n = (x1, 0.5, z1)
+        normals.extend([n, n, n])
+        colors.extend([(1, 1, 1)] * 3)  # White, will be rainbow tinted
+    
+    return (np.array(verts, dtype='f4'), np.array(normals, dtype='f4'), np.array(colors, dtype='f4'))
+
+
+# =============================================================================
 # INSTANCED MESH
 # =============================================================================
 
@@ -2004,6 +2399,15 @@ class ModernFloraRenderer:
             'droopy': create_droopy_mesh(),
             'fractal': create_fractal_mesh(),
             'tube': create_tube_mesh(),
+            # === ABSTRACT/TRIPPY/WEIRD MESHES for exotic biomes ===
+            'twisted_spire': create_twisted_spire_mesh(),
+            'blob_creature': create_blob_creature_mesh(),
+            'eye_flower': create_eye_flower_mesh(),
+            'impossible_geometry': create_impossible_geometry_mesh(),
+            'fire_plant': create_fire_plant_mesh(),
+            'shadow_tendril': create_shadow_tendril_mesh(),
+            'void_shard': create_void_shard_mesh(),
+            'rainbow_spiral': create_rainbow_spiral_mesh(),
         }
         
         # Instance batches: type -> FloraInstanceBatch
@@ -2174,6 +2578,9 @@ class ModernFloraRenderer:
         self.program['u_tornado_center'].value = getattr(self, 'tornado_center', (0.0, 0.0))
         self.program['u_tornado_radius'].value = getattr(self, 'tornado_radius', 0.0)
         self.program['u_tornado_strength'].value = getattr(self, 'tornado_strength', 0.0)
+        
+        # Psychedelic dance mode!
+        self.program['u_dance_mode'].value = 1.0 if getattr(self, 'dance_mode', False) else 0.0
         
         # Render each batch
         for mesh_type, batch in self.batches.items():

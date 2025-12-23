@@ -153,12 +153,80 @@ BIOME_COLORS = {
     'Tropical': (0.25, 0.55, 0.30),
     'Desert': (0.92, 0.85, 0.55),
     'Savanna': (0.78, 0.72, 0.42),
+    # === SPECIAL EXOTIC BIOMES ===
+    # Psychedelic - will be overridden with rainbow cycling, but base is magenta
+    'Psychedelic': (0.85, 0.20, 0.85),
+    'psychedelic': (0.85, 0.20, 0.85),
+    # Hellfire - deep volcanic reds and oranges
+    'Hellfire': (0.45, 0.12, 0.08),
+    'hellfire': (0.45, 0.12, 0.08),
+    # Shadow - dark purples and blacks
+    'Shadow': (0.12, 0.08, 0.18),
+    'shadow': (0.12, 0.08, 0.18),
+    # Crystal - pale cyan/white crystalline
+    'Crystal': (0.75, 0.92, 0.95),
+    'crystal': (0.75, 0.92, 0.95),
+    # Void - near black with hints of deep purple
+    'Void': (0.05, 0.02, 0.10),
+    'void': (0.05, 0.02, 0.10),
 }
 
 
 def get_terrain_color(height: float, biome: str = 'grassland', 
-                      water_level: float = 0.0) -> Tuple[float, float, float]:
+                      water_level: float = 0.0, world_x: float = 0, world_z: float = 0) -> Tuple[float, float, float]:
     """Get terrain color based on height and biome."""
+    import math
+    
+    # === SPECIAL BIOME COLORING ===
+    biome_lower = biome.lower() if biome else 'grassland'
+    
+    if biome_lower == 'psychedelic':
+        # RAINBOW CYCLING based on position! Trippy as fuck!
+        # Use position to create rainbow waves
+        phase = (world_x * 0.02 + world_z * 0.02 + height * 0.1) % (2 * math.pi * 3)
+        r = 0.5 + 0.5 * math.sin(phase)
+        g = 0.5 + 0.5 * math.sin(phase + 2.09)  # 120 degrees offset
+        b = 0.5 + 0.5 * math.sin(phase + 4.19)  # 240 degrees offset
+        # Boost saturation
+        return (min(1.0, r * 1.2), min(1.0, g * 1.2), min(1.0, b * 1.2))
+    
+    elif biome_lower == 'hellfire':
+        # VOLCANIC - reds, oranges, blacks with lava streaks
+        # Height creates lava rivers in low areas
+        if height < 5:
+            # LAVA! Bright orange-red
+            glow = 0.7 + 0.3 * math.sin(world_x * 0.1 + world_z * 0.1)
+            return (0.95 * glow, 0.35 * glow, 0.05)
+        elif height < 15:
+            # Cooling lava - dark red/black
+            t = (height - 5) / 10.0
+            return (0.45 - t * 0.25, 0.15 - t * 0.1, 0.08)
+        else:
+            # Volcanic rock - dark grays with red tint
+            return (0.22 + height * 0.001, 0.12, 0.10)
+    
+    elif biome_lower == 'shadow':
+        # DARK AND SCARY - deep purples, blacks, occasional eerie glow
+        darkness = 0.15 + 0.05 * math.sin(world_x * 0.05) * math.sin(world_z * 0.05)
+        # Rare glowing spots (like eyes in the dark)
+        if abs(math.sin(world_x * 0.3) * math.sin(world_z * 0.3)) > 0.95:
+            return (0.4, 0.1, 0.5)  # Eerie purple glow
+        return (darkness * 0.6, darkness * 0.4, darkness + 0.08)
+    
+    elif biome_lower == 'crystal':
+        # CRYSTALLINE - pale cyans, whites, with prismatic effects
+        prism = abs(math.sin(world_x * 0.15 + world_z * 0.15 + height * 0.2))
+        r = 0.7 + prism * 0.25
+        g = 0.85 + prism * 0.1
+        b = 0.95
+        return (min(1.0, r), min(1.0, g), min(1.0, b))
+    
+    elif biome_lower == 'void':
+        # THE VOID - almost entirely black with faint purple nebula
+        void_noise = 0.02 + 0.03 * abs(math.sin(world_x * 0.08) * math.cos(world_z * 0.08))
+        return (void_noise, void_noise * 0.5, void_noise + 0.05)
+    
+    # === NORMAL BIOME COLORING ===
     if height < water_level - 5:
         # Deep water
         return (0.12, 0.28, 0.45)
@@ -268,7 +336,8 @@ class ModernTerrainRenderer:
                           height_scale: float,
                           chunk_world_x: float,
                           chunk_world_z: float,
-                          biome: str = 'grassland') -> TerrainChunkMesh:
+                          biome: str = 'grassland',
+                          chaos_factor: float = 0.0) -> TerrainChunkMesh:
         """
         Create a VBO mesh from a heightmap chunk.
         OPTIMIZED: Uses numpy vectorization instead of Python loops.
@@ -298,6 +367,9 @@ class ModernTerrainRenderer:
         h10 = (heightmap[:-1, 1:] * height_scale).flatten().astype('f4')
         h01 = (heightmap[1:, :-1] * height_scale).flatten().astype('f4')
         h11 = (heightmap[1:, 1:] * height_scale).flatten().astype('f4')
+        
+        # NOTE: Chaos terrain disabled for performance
+        # Colors still change for exotic biomes, just terrain stays smooth
         
         num_cells = len(h00)
         num_verts = num_cells * 6
@@ -346,35 +418,104 @@ class ModernTerrainRenderer:
         # FULLY VECTORIZED: Colors based on height (no Python loops)
         colors = np.zeros((num_verts, 3), dtype='f4')
         
-        # Get base biome color
-        base_color = np.array(BIOME_COLORS.get(biome.capitalize(), BIOME_COLORS.get('Grassland', (0.35, 0.55, 0.28))), dtype='f4')
-        water_color = np.array([0.2, 0.25, 0.35], dtype='f4')
-        shore_color = np.array([0.76, 0.7, 0.5], dtype='f4')
-        snow_color = np.array([0.9, 0.9, 0.95], dtype='f4')
+        # Check for SPECIAL EXOTIC BIOMES
+        biome_lower = biome.lower() if biome else 'grassland'
+        is_special = biome_lower in ('psychedelic', 'hellfire', 'shadow', 'crystal', 'void')
         
-        # All 6 heights per cell stacked
-        all_heights = np.stack([h00, h10, h01, h10, h11, h01], axis=1).flatten()
-        n = len(all_heights)
-        result = np.zeros((n, 3), dtype='f4')
-        
-        # Masks for each terrain type
-        underwater = all_heights < self.water_level - 1
-        shore = (all_heights >= self.water_level - 1) & (all_heights < self.water_level + 3)
-        normal = (all_heights >= self.water_level + 3) & (all_heights < 80)
-        high = all_heights >= 80
-        
-        # Apply colors by mask
-        result[underwater] = water_color
-        result[shore] = shore_color
-        result[normal] = base_color
-        
-        # High altitude blend (vectorized)
-        if np.any(high):
-            t = np.clip((all_heights[high] - 80) / 40, 0, 1).reshape(-1, 1)
-            result[high] = base_color * (1 - t) + snow_color * t
-        
-        # Reshape to per-vertex
-        colors = result.reshape((num_cells, 6, 3)).reshape((num_verts, 3))
+        if is_special:
+            # === SPECIAL BIOME COLORING (per-vertex for effects) ===
+            import math
+            
+            # All world X and Z for each vertex
+            all_wx = np.stack([wx0, wx1, wx0, wx1, wx1, wx0], axis=1).flatten()
+            all_wz = np.stack([wz0, wz0, wz1, wz0, wz1, wz1], axis=1).flatten()
+            all_heights = np.stack([h00, h10, h01, h10, h11, h01], axis=1).flatten()
+            n = len(all_heights)
+            result = np.zeros((n, 3), dtype='f4')
+            
+            if biome_lower == 'psychedelic':
+                # RAINBOW CYCLING!
+                phase = (all_wx * 0.02 + all_wz * 0.02 + all_heights * 0.1) % (2 * np.pi * 3)
+                result[:, 0] = np.clip(0.5 + 0.5 * np.sin(phase) * 1.2, 0, 1)
+                result[:, 1] = np.clip(0.5 + 0.5 * np.sin(phase + 2.09) * 1.2, 0, 1)
+                result[:, 2] = np.clip(0.5 + 0.5 * np.sin(phase + 4.19) * 1.2, 0, 1)
+            
+            elif biome_lower == 'hellfire':
+                # VOLCANIC - lava in low areas, dark rock high
+                lava_mask = all_heights < 5
+                cooling_mask = (all_heights >= 5) & (all_heights < 15)
+                rock_mask = all_heights >= 15
+                
+                glow = 0.7 + 0.3 * np.sin(all_wx * 0.1 + all_wz * 0.1)
+                result[lava_mask, 0] = 0.95 * glow[lava_mask]
+                result[lava_mask, 1] = 0.35 * glow[lava_mask]
+                result[lava_mask, 2] = 0.05
+                
+                t = (all_heights[cooling_mask] - 5) / 10.0
+                result[cooling_mask, 0] = 0.45 - t * 0.25
+                result[cooling_mask, 1] = 0.15 - t * 0.1
+                result[cooling_mask, 2] = 0.08
+                
+                result[rock_mask, 0] = 0.22 + all_heights[rock_mask] * 0.001
+                result[rock_mask, 1] = 0.12
+                result[rock_mask, 2] = 0.10
+            
+            elif biome_lower == 'shadow':
+                # DARK AND SCARY
+                darkness = 0.15 + 0.05 * np.sin(all_wx * 0.05) * np.sin(all_wz * 0.05)
+                result[:, 0] = darkness * 0.6
+                result[:, 1] = darkness * 0.4
+                result[:, 2] = darkness + 0.08
+                # Add eerie glow spots
+                glow_mask = np.abs(np.sin(all_wx * 0.3) * np.sin(all_wz * 0.3)) > 0.95
+                result[glow_mask] = [0.4, 0.1, 0.5]
+            
+            elif biome_lower == 'crystal':
+                # CRYSTALLINE - pale with prismatic effects
+                prism = np.abs(np.sin(all_wx * 0.15 + all_wz * 0.15 + all_heights * 0.2))
+                result[:, 0] = np.clip(0.7 + prism * 0.25, 0, 1)
+                result[:, 1] = np.clip(0.85 + prism * 0.1, 0, 1)
+                result[:, 2] = 0.95
+            
+            elif biome_lower == 'void':
+                # THE VOID - almost entirely black
+                void_noise = 0.02 + 0.03 * np.abs(np.sin(all_wx * 0.08) * np.cos(all_wz * 0.08))
+                result[:, 0] = void_noise
+                result[:, 1] = void_noise * 0.5
+                result[:, 2] = void_noise + 0.05
+            
+            colors = result.reshape((num_cells, 6, 3)).reshape((num_verts, 3))
+        else:
+            # === NORMAL BIOME COLORING ===
+            # Get base biome color
+            base_color = np.array(BIOME_COLORS.get(biome.capitalize(), BIOME_COLORS.get('Grassland', (0.35, 0.55, 0.28))), dtype='f4')
+            water_color = np.array([0.2, 0.25, 0.35], dtype='f4')
+            shore_color = np.array([0.76, 0.7, 0.5], dtype='f4')
+            snow_color = np.array([0.9, 0.9, 0.95], dtype='f4')
+            
+            # All 6 heights per cell stacked
+            all_heights = np.stack([h00, h10, h01, h10, h11, h01], axis=1).flatten()
+            n = len(all_heights)
+            result = np.zeros((n, 3), dtype='f4')
+            
+            # Masks for each terrain type
+            underwater = all_heights < self.water_level - 1
+            shore = (all_heights >= self.water_level - 1) & (all_heights < self.water_level + 3)
+            normal = (all_heights >= self.water_level + 3) & (all_heights < 80)
+            high = all_heights >= 80
+            
+            # Apply colors by mask
+            result[underwater] = water_color
+            result[shore] = shore_color
+            result[normal] = base_color
+            
+            # High altitude blend (vectorized)
+            if np.any(high):
+                t = np.clip((all_heights[high] - 80) / 40, 0, 1).reshape(-1, 1)
+                result[high] = base_color * (1 - t) + snow_color * t
+            
+            # Reshape to per-vertex
+            colors = result.reshape((num_cells, 6, 3)).reshape((num_verts, 3))
         
         # Interleave data
         data = np.zeros((num_verts, 9), dtype='f4')

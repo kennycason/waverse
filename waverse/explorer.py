@@ -1126,10 +1126,20 @@ def load_position(seed: int) -> dict:
 
 def warp_to_new_universe(camera, chunk_manager, chunk_renderer, flora_manager, 
                          animal_manager, chunk_dna_manager, climate_manager,
-                         structure_manager, config, life_simulator=None):
-    """Warp to a far-away location with completely fresh DNA AND terrain - a new waverse!"""
+                         structure_manager, config, life_simulator=None,
+                         force_biome=None):
+    """
+    Warp to a far-away location with completely fresh DNA AND terrain - a new waverse!
+    
+    Args:
+        force_biome: Optional. Force warp to a specific exotic biome:
+                     'psychedelic', 'hellfire', 'shadow', 'crystal', 'void'
+    """
     print("=" * 60)
-    print("  WARPING TO NEW WAVERSE...")
+    if force_biome:
+        print(f"  WARPING TO {force_biome.upper()} REALM...")
+    else:
+        print("  WARPING TO NEW WAVERSE...")
     print("=" * 60)
     
     # Pick a random far-away location (1000-5000 chunks away)
@@ -1178,7 +1188,29 @@ def warp_to_new_universe(camera, chunk_manager, chunk_renderer, flora_manager,
     # Reset current weather to safe defaults to prevent HUD rendering bugs
     from waverse.climate import WeatherState, BiomeDNA
     climate_manager.current_weather = WeatherState()
-    climate_manager.current_biome = BiomeDNA()
+    
+    # === FORCE EXOTIC BIOME if requested ===
+    if force_biome and force_biome in ('psychedelic', 'hellfire', 'shadow', 'crystal', 'void'):
+        print(f"  Entering {force_biome.upper()} realm!")
+        climate_manager.current_biome = BiomeDNA(
+            special_biome=force_biome,
+            chaos_factor=0.6 + rnd.random() * 0.4,  # High chaos!
+            temperature=0.5,
+            humidity=0.5
+        )
+        # Pre-populate surrounding chunks with this biome
+        for dx in range(-5, 6):
+            for dz in range(-5, 6):
+                cx = int(new_x // 32) + dx
+                cz = int(new_z // 32) + dz
+                climate_manager.biomes[(cx, cz)] = BiomeDNA(
+                    special_biome=force_biome,
+                    chaos_factor=0.5 + rnd.random() * 0.5,
+                    temperature=0.5 + rnd.random() * 0.2 - 0.1,
+                    humidity=0.5 + rnd.random() * 0.2 - 0.1
+                )
+    else:
+        climate_manager.current_biome = BiomeDNA()
     climate_manager.lightning_flash = 0.0
     
     # Reset life simulator and pause it briefly to let world settle
@@ -4021,10 +4053,53 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                     camera.clear_markers()
                 elif event.key == pygame.K_n:
                     # N = New location (warp to new waverse)
+                    # Check if Shift is held for exotic biome warps!
+                    mods = pygame.key.get_mods()
+                    if mods & pygame.KMOD_SHIFT:
+                        # Shift+N = random exotic biome!
+                        exotic_biomes = ['psychedelic', 'hellfire', 'shadow', 'crystal', 'void']
+                        force_biome = random.choice(exotic_biomes)
+                        warp_to_new_universe(camera, chunk_manager, chunk_renderer, 
+                                            flora_manager, animal_manager,
+                                            chunk_dna_manager, climate_manager,
+                                            structure_manager, config, life_simulator,
+                                            force_biome=force_biome)
+                    else:
+                        warp_to_new_universe(camera, chunk_manager, chunk_renderer, 
+                                            flora_manager, animal_manager,
+                                            chunk_dna_manager, climate_manager,
+                                            structure_manager, config, life_simulator)
+                # Number keys 1-5 with Ctrl = warp to specific exotic biomes
+                elif event.key == pygame.K_1 and pygame.key.get_mods() & pygame.KMOD_CTRL:
                     warp_to_new_universe(camera, chunk_manager, chunk_renderer, 
                                         flora_manager, animal_manager,
                                         chunk_dna_manager, climate_manager,
-                                        structure_manager, config, life_simulator)
+                                        structure_manager, config, life_simulator,
+                                        force_biome='psychedelic')
+                elif event.key == pygame.K_2 and pygame.key.get_mods() & pygame.KMOD_CTRL:
+                    warp_to_new_universe(camera, chunk_manager, chunk_renderer, 
+                                        flora_manager, animal_manager,
+                                        chunk_dna_manager, climate_manager,
+                                        structure_manager, config, life_simulator,
+                                        force_biome='hellfire')
+                elif event.key == pygame.K_3 and pygame.key.get_mods() & pygame.KMOD_CTRL:
+                    warp_to_new_universe(camera, chunk_manager, chunk_renderer, 
+                                        flora_manager, animal_manager,
+                                        chunk_dna_manager, climate_manager,
+                                        structure_manager, config, life_simulator,
+                                        force_biome='shadow')
+                elif event.key == pygame.K_4 and pygame.key.get_mods() & pygame.KMOD_CTRL:
+                    warp_to_new_universe(camera, chunk_manager, chunk_renderer, 
+                                        flora_manager, animal_manager,
+                                        chunk_dna_manager, climate_manager,
+                                        structure_manager, config, life_simulator,
+                                        force_biome='crystal')
+                elif event.key == pygame.K_5 and pygame.key.get_mods() & pygame.KMOD_CTRL:
+                    warp_to_new_universe(camera, chunk_manager, chunk_renderer, 
+                                        flora_manager, animal_manager,
+                                        chunk_dna_manager, climate_manager,
+                                        structure_manager, config, life_simulator,
+                                        force_biome='void')
                 elif event.key == pygame.K_F3:
                     # F3 = dump performance stats (like Minecraft debug)
                     perf.dump_stats()

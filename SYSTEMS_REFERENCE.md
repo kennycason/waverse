@@ -136,6 +136,27 @@
 | `Ancient/Historical` | - | - | colosseum, amphitheater, aqueduct |
 | `Futuristic/SciFi` | - | - | modular_hub, reactor_core, spaceport |
 
+### 🌈 EXOTIC SPECIAL BIOMES 🔥
+
+Rare biomes with unique terrain, plants, animals, structures, and weather!
+Access via **Ctrl+1-5** or **Shift+N** for random exotic warp.
+
+| Biome | Description | Terrain | Plants | Animals | Structures | Weather |
+|-------|-------------|---------|--------|---------|------------|---------|
+| **Psychedelic** | Trippy rainbow realm | Rainbow cycling colors, chaotic spikes | Dancing/bopping motion, spirals, glowing mushrooms | Aliens, metroids, blobs, jellyfish | Rainbow towers, mushroom palaces | Rainbow sparkles |
+| **Hellfire** | Volcanic inferno | Lava rivers, dark volcanic rock | Charred trees, fire flowers, lava crystals | Fire dragons, hell spiders, demons | Volcano forges, lava temples, demon gates | Embers/ash (rise up) |
+| **Shadow** | Dark nightmare realm | Near-black with eerie glows | Dark twisted trees, creepy mushrooms | Shadow spiders, stalkers, dark blobs | Shadow castles, crypts | Dark fog |
+| **Crystal** | Crystalline wonderland | Pale cyan, prismatic | Crystal formations, ice grass | Crystal insects, jellyfish | Crystal palaces, prism towers | Shimmer sparkles |
+| **Void** | The endless nothing | Near-black | Almost nothing | Near-empty, rare creatures | Void monoliths, entropy gates | Almost nothing |
+
+**Keyboard Shortcuts:**
+- `Ctrl+1` = Warp to **Psychedelic**
+- `Ctrl+2` = Warp to **Hellfire**
+- `Ctrl+3` = Warp to **Shadow**
+- `Ctrl+4` = Warp to **Crystal**
+- `Ctrl+5` = Warp to **Void**
+- `Shift+N` = Warp to random exotic biome
+
 ---
 
 ## Weather Types

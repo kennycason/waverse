@@ -180,10 +180,15 @@ class ModernWorldRenderer:
         
         # Get biome from ClimateManager
         biome = 'grassland'  # Default
+        chaos_factor = 0.0
         if climate_manager:
             biome_dna = climate_manager.get_biome(cx, cz)
             if biome_dna:
                 biome = biome_dna.get_biome_name()
+                # Track current biome for special effects (dance mode, etc.)
+                self._current_biome = biome.lower()
+                # Get chaos factor for exotic biomes (jagged terrain)
+                chaos_factor = getattr(biome_dna, 'chaos_factor', 0.0)
         
         # Calculate world position
         chunk_world_x = cx * self.chunk_size * self.tile_scale
@@ -194,7 +199,8 @@ class ModernWorldRenderer:
             cx, cz, heightmap,
             self.tile_scale, self.height_scale,
             chunk_world_x, chunk_world_z,
-            biome
+            biome,
+            chaos_factor
         )
         
         self.loaded_terrain_chunks.add(key)
@@ -296,8 +302,18 @@ class ModernWorldRenderer:
             # Map waverse plant types and canopy shapes to our mesh types
             # Convert enum to string if needed
             type_str = str(plant_type).lower().replace('planttype.', '')
+            shape_str = str(canopy_shape).lower() if canopy_shape else 'dome'
             
-            if type_str in ('tree', 'pine', 'oak', 'willow', 'maple', 'birch', 'cedar', 'spruce', 'fir', 'elm', 'beech'):
+            # === EXOTIC MESH OVERRIDES (check first!) ===
+            # These exotic shapes override normal plant type selection
+            exotic_meshes = {
+                'twisted_spire', 'eye_flower', 'impossible_geometry',
+                'fire_plant', 'shadow_tendril', 'void_shard', 
+                'rainbow_spiral', 'blob_creature'
+            }
+            if shape_str in exotic_meshes:
+                mesh_type = shape_str
+            elif type_str in ('tree', 'pine', 'oak', 'willow', 'maple', 'birch', 'cedar', 'spruce', 'fir', 'elm', 'beech'):
                 # Use canopy_shape, leaf_shape, branch_count for maximum variety
                 shape_str = str(canopy_shape).lower() if canopy_shape else 'dome'
                 leaf_shape = str(getattr(dna, 'leaf_shape', 'round')).lower()
@@ -312,6 +328,15 @@ class ModernWorldRenderer:
                     'weeping': 'tree_weeping',
                     'cascading': 'tree_weeping',
                     'columnar': 'tree_columnar',
+                    # === EXOTIC BIOME MESHES ===
+                    'twisted_spire': 'twisted_spire',
+                    'eye_flower': 'eye_flower',
+                    'impossible_geometry': 'impossible_geometry',
+                    'fire_plant': 'fire_plant',
+                    'shadow_tendril': 'shadow_tendril',
+                    'void_shard': 'void_shard',
+                    'rainbow_spiral': 'rainbow_spiral',
+                    'blob_creature': 'blob_creature',
                 }
                 
                 # Species-specific overrides
@@ -817,6 +842,10 @@ class ModernWorldRenderer:
         # Set wind on flora
         self.flora.set_wind(wind_dir, wind_strength, wind_time,
                            has_tornado, tornado_center, tornado_radius, tornado_strength)
+        
+        # Check for psychedelic biome (dance mode!)
+        current_biome = getattr(self, '_current_biome', None)
+        self.flora.dance_mode = (current_biome == 'psychedelic')
         
         # Set wind on water
         self.water.set_wind(wind_dir, wind_strength, tide_level)

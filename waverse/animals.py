@@ -834,27 +834,44 @@ class AnimalManager:
         # BIOME-BASED animal density!
         biome = (biome_name or '').lower()
         
-        if biome in ('rainforest', 'tropical'):
+        # === SPECIAL EXOTIC BIOMES ===
+        if biome == 'psychedelic':
+            # TRIPPY! LOTS of weird creatures!
+            num_animals = rng.integers(10, 18)  # More creatures!
+        elif biome == 'hellfire':
+            # Hell creatures - moderate
+            num_animals = rng.integers(4, 8)
+        elif biome == 'shadow':
+            # Creepy crawlies - moderate
+            num_animals = rng.integers(3, 7)
+        elif biome == 'crystal':
+            # Delicate crystalline creatures - sparse
+            num_animals = rng.integers(2, 5)
+        elif biome == 'void':
+            # THE VOID - almost nothing
+            num_animals = rng.integers(0, 2)
+        # === NORMAL BIOMES ===
+        elif biome in ('rainforest', 'tropical'):
             # Jungle! Many animals - insects, birds, mammals, reptiles
-            num_animals = rng.integers(5, 10)  # Reduced ~25% total for perf
+            num_animals = rng.integers(5, 10)
         elif biome == 'savanna':
             # Lots of grazers and predators
-            num_animals = rng.integers(4, 8)  # Reduced ~25%
+            num_animals = rng.integers(4, 8)
         elif biome in ('temperate', 'taiga'):
             # Moderate wildlife
-            num_animals = rng.integers(3, 7)  # Reduced ~25%
+            num_animals = rng.integers(3, 7)
         elif biome == 'desert':
             # Sparse - reptiles, insects
-            num_animals = rng.integers(1, 3)  # Very sparse
+            num_animals = rng.integers(1, 3)
         elif biome in ('tundra', 'frozen'):
             # Sparse arctic creatures
-            num_animals = rng.integers(1, 4)  # Reduced
+            num_animals = rng.integers(1, 4)
         elif biome == 'swamp':
             # Lots of amphibians, insects, crocs
-            num_animals = rng.integers(4, 9)  # Reduced ~25%
+            num_animals = rng.integers(4, 9)
         else:
             # Default (grassland, etc.)
-            num_animals = rng.integers(3, 7)  # Reduced ~25%
+            num_animals = rng.integers(3, 7)
         
         for _ in range(num_animals):
             local_x = rng.integers(5, w - 5)
@@ -938,7 +955,65 @@ class AnimalManager:
             
             # BIOME-SPECIFIC animal type overrides!
             # This adds biome flavor on top of height-based selection
-            if biome in ('rainforest', 'tropical'):
+            
+            # === SPECIAL EXOTIC BIOMES ===
+            if biome == 'psychedelic':
+                # PSYCHEDELIC: Weird floaty creatures, aliens, blobs, metroids
+                animal_type = rng.choice([
+                    AnimalType.ALIEN, AnimalType.ALIEN, AnimalType.ALIEN,
+                    AnimalType.METROID, AnimalType.METROID,
+                    AnimalType.BLOB, AnimalType.BLOB,
+                    AnimalType.AMOEBA, AnimalType.AMOEBA,
+                    AnimalType.JELLYFISH, AnimalType.JELLYFISH,
+                    AnimalType.OCTOPUS,
+                    AnimalType.HYDRA,
+                    AnimalType.NUDIBRANCH,
+                ])
+            elif biome == 'hellfire':
+                # HELLFIRE: Fire creatures, demons, lava things
+                animal_type = rng.choice([
+                    AnimalType.DINOSAUR, AnimalType.DINOSAUR, AnimalType.DINOSAUR,  # Fire dragons!
+                    AnimalType.REPTILE, AnimalType.REPTILE, AnimalType.REPTILE,
+                    AnimalType.WORM, AnimalType.WORM,  # Fire worms
+                    AnimalType.SPIDER, AnimalType.SPIDER,  # Hell spiders
+                    AnimalType.ALIEN,  # Demons
+                    AnimalType.CENTIPEDE,  # Fire centipedes
+                    AnimalType.TRILOBITE,
+                ])
+            elif biome == 'shadow':
+                # SHADOW: Creepy crawlers, stalkers, dark things
+                animal_type = rng.choice([
+                    AnimalType.SPIDER, AnimalType.SPIDER, AnimalType.SPIDER,
+                    AnimalType.WORM, AnimalType.WORM,  # Shadow snakes
+                    AnimalType.CENTIPEDE, AnimalType.CENTIPEDE,
+                    AnimalType.ALIEN, AnimalType.ALIEN,  # Shadow demons
+                    AnimalType.METROID,  # Shadow metroids
+                    AnimalType.STALKER,  # Stalkers!
+                    AnimalType.BLOB,  # Dark blobs
+                ])
+            elif biome == 'crystal':
+                # CRYSTAL: Crystalline creatures, delicate things
+                animal_type = rng.choice([
+                    AnimalType.INSECT, AnimalType.INSECT, AnimalType.INSECT,
+                    AnimalType.JELLYFISH, AnimalType.JELLYFISH,
+                    AnimalType.SNAIL, AnimalType.SNAIL,
+                    AnimalType.AMOEBA,
+                    AnimalType.NUDIBRANCH,
+                    AnimalType.BIRD,  # Crystal birds
+                ])
+            elif biome == 'void':
+                # VOID: Almost nothing, occasional horrors
+                if rng.random() < 0.7:  # 70% chance - skip, nothing lives here
+                    continue
+                animal_type = rng.choice([
+                    AnimalType.METROID, AnimalType.METROID,
+                    AnimalType.ALIEN,
+                    AnimalType.BLOB,
+                    AnimalType.AMOEBA,
+                ])
+            
+            # === NORMAL BIOMES ===
+            elif biome in ('rainforest', 'tropical'):
                 # Jungle: more birds, insects, reptiles, exotic creatures
                 if rng.random() < 0.4:  # 40% chance to override with jungle creature
                     animal_type = rng.choice([
@@ -995,6 +1070,49 @@ class AnimalManager:
             templates = self.species_templates.get(animal_type, self.species_templates[AnimalType.MAMMAL])
             base_dna = rng.choice(templates)
             dna = base_dna.mutate(rng, strength=0.4)
+            
+            # === SPECIAL BIOME COLORING ===
+            if biome == 'psychedelic':
+                # Rainbow colors!
+                phase = rng.random() * 6.28
+                dna.primary_color = (
+                    0.5 + 0.5 * np.sin(phase),
+                    0.5 + 0.5 * np.sin(phase + 2.09),
+                    0.5 + 0.5 * np.sin(phase + 4.19)
+                )
+                dna.has_glow = rng.random() < 0.3  # Some glow!
+            elif biome == 'hellfire':
+                # Fiery reds and oranges
+                dna.primary_color = (
+                    0.7 + rng.random() * 0.3,  # Lots of red
+                    0.1 + rng.random() * 0.4,  # Some orange
+                    0.0 + rng.random() * 0.1   # Almost no blue
+                )
+                dna.has_glow = rng.random() < 0.2  # Ember glow
+            elif biome == 'shadow':
+                # Dark purples and blacks
+                dna.primary_color = (
+                    0.1 + rng.random() * 0.2,
+                    0.05 + rng.random() * 0.1,
+                    0.15 + rng.random() * 0.2
+                )
+                # Occasional glowing eyes
+                if rng.random() < 0.2:
+                    dna.has_glow = True
+                    dna.glow_color = (0.5, 0.1, 0.6)
+            elif biome == 'crystal':
+                # Pale, crystalline
+                dna.primary_color = (
+                    0.7 + rng.random() * 0.25,
+                    0.8 + rng.random() * 0.15,
+                    0.85 + rng.random() * 0.15
+                )
+            elif biome == 'void':
+                # Nearly invisible, faint glow
+                dna.primary_color = (0.05, 0.02, 0.08)
+                dna.has_glow = True
+                dna.glow_color = (0.2, 0.05, 0.25)
+                dna.glow_intensity = 0.2
             
             # World position
             world_x = chunk_world_x + local_x * tile_scale

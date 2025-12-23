@@ -75,6 +75,8 @@ def main():
                         help='Use ModernGL renderer (experimental, faster)')
     parser.add_argument('--enable-waves', action='store_true',
                         help='Enable animated water waves (experimental, may affect perf)')
+    parser.add_argument('--debug-biomes', action='store_true',
+                        help='Make exotic biomes appear much more frequently for testing')
     
     args = parser.parse_args()
     
@@ -128,7 +130,13 @@ def main():
         'max_animals': args.max_animals,
         'modern_renderer': args.modern,
         'enable_waves': args.enable_waves,
+        'debug_biomes': args.debug_biomes,
     }
+    
+    # Set environment variable for debug biomes (used by climate.py)
+    if args.debug_biomes:
+        os.environ['WAVERSE_DEBUG_BIOMES'] = '1'
+        print("DEBUG MODE: Exotic biomes will appear much more frequently!")
     
     # Run!
     run_explorer(config, precompute_chunks=args.precompute_chunks, debug_flags=debug_flags)

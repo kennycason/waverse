@@ -233,17 +233,76 @@ class ModernWeatherRenderer:
         self.view = view
         self.camera_pos = camera_pos
     
-    def set_weather(self, weather_type: str, intensity: float = 1.0):
+    def set_weather(self, weather_type: str, intensity: float = 1.0, biome: str = None):
         """
         Set weather conditions.
         
         Args:
-            weather_type: 'clear', 'rain', 'heavy_rain', 'snow', 'storm'
+            weather_type: 'clear', 'rain', 'heavy_rain', 'snow', 'storm', or special biome types
             intensity: 0-1 precipitation intensity
+            biome: Optional biome for special effects
         """
         self.weather_type = weather_type
         self.intensity = intensity
         
+        # === SPECIAL EXOTIC BIOME WEATHER ===
+        if biome == 'psychedelic' or weather_type == 'rainbow':
+            # RAINBOW SPARKLES - slow floating, all directions!
+            for i in range(0, len(self.particle_data), 8):
+                self.particle_data[i+3] = random.uniform(-2, 2)  # vx - swirl
+                self.particle_data[i+4] = random.uniform(-1, 2)  # vy - some go UP!
+                self.particle_data[i+5] = random.uniform(-2, 2)  # vz
+                self.particle_data[i+7] = random.uniform(1.5, 3.0)  # BIG sparkles
+            self.particle_vbo.write(self.particle_data.tobytes())
+            self.particle_color = (0.9, 0.5, 0.9, 0.8)  # Magenta base (shader adds rainbow)
+            return
+        
+        if biome == 'hellfire' or weather_type == 'ember':
+            # EMBER/ASH - particles rise from below with embers
+            for i in range(0, len(self.particle_data), 8):
+                self.particle_data[i+3] = random.uniform(-1, 1)  # vx
+                self.particle_data[i+4] = random.uniform(1, 4)  # vy - RISES!
+                self.particle_data[i+5] = random.uniform(-1, 1)  # vz
+                self.particle_data[i+7] = random.uniform(0.5, 2.0)
+            self.particle_vbo.write(self.particle_data.tobytes())
+            self.particle_color = (1.0, 0.4, 0.1, 0.9)  # Orange embers
+            return
+        
+        if biome == 'shadow' or weather_type == 'dark_fog':
+            # DARK FOG - slow drifting darkness
+            for i in range(0, len(self.particle_data), 8):
+                self.particle_data[i+3] = random.uniform(-0.3, 0.3)  # vx - slow
+                self.particle_data[i+4] = random.uniform(-0.2, 0.2)  # vy - barely moves
+                self.particle_data[i+5] = random.uniform(-0.3, 0.3)  # vz
+                self.particle_data[i+7] = random.uniform(3.0, 6.0)  # LARGE fog patches
+            self.particle_vbo.write(self.particle_data.tobytes())
+            self.particle_color = (0.1, 0.05, 0.15, 0.5)  # Dark purple fog
+            return
+        
+        if biome == 'crystal' or weather_type == 'shimmer':
+            # CRYSTAL SHIMMER - slow falling sparkles
+            for i in range(0, len(self.particle_data), 8):
+                self.particle_data[i+3] = random.uniform(-0.5, 0.5)
+                self.particle_data[i+4] = random.uniform(-1, -0.3)  # Gentle fall
+                self.particle_data[i+5] = random.uniform(-0.5, 0.5)
+                self.particle_data[i+7] = random.uniform(1.0, 2.5)
+            self.particle_vbo.write(self.particle_data.tobytes())
+            self.particle_color = (0.8, 0.95, 1.0, 0.7)  # Pale cyan sparkle
+            return
+        
+        if biome == 'void':
+            # VOID - barely any particles, very faint
+            self.intensity = 0.1  # Almost nothing
+            for i in range(0, len(self.particle_data), 8):
+                self.particle_data[i+3] = random.uniform(-0.1, 0.1)
+                self.particle_data[i+4] = random.uniform(-0.1, 0.1)
+                self.particle_data[i+5] = random.uniform(-0.1, 0.1)
+                self.particle_data[i+7] = random.uniform(0.5, 1.0)
+            self.particle_vbo.write(self.particle_data.tobytes())
+            self.particle_color = (0.05, 0.02, 0.08, 0.3)  # Barely visible
+            return
+        
+        # === NORMAL WEATHER ===
         # Adjust particle velocities for weather type
         if weather_type == 'snow':
             # Snow falls slower, more horizontal drift
@@ -253,6 +312,7 @@ class ModernWeatherRenderer:
                 self.particle_data[i+5] = random.uniform(-1, 1)  # vz
                 self.particle_data[i+7] = random.uniform(1.0, 2.0)  # larger
             self.particle_vbo.write(self.particle_data.tobytes())
+            self.particle_color = (1.0, 1.0, 1.0, 0.8)  # White
         elif weather_type in ('rain', 'heavy_rain', 'storm'):
             # Rain falls fast
             for i in range(0, len(self.particle_data), 8):
@@ -261,6 +321,7 @@ class ModernWeatherRenderer:
                 self.particle_data[i+5] = random.uniform(-0.5, 0.5)  # vz
                 self.particle_data[i+7] = random.uniform(0.3, 1.0)  # smaller
             self.particle_vbo.write(self.particle_data.tobytes())
+            self.particle_color = (0.6, 0.7, 0.8, 0.6)  # Blue-gray
     
     def trigger_lightning(self):
         """Trigger a lightning flash."""

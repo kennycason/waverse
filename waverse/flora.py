@@ -1412,33 +1412,55 @@ class FloraManager:
         # Savanna = moderate-sparse (25-45 plants)
         biome = (biome_name or '').lower()
         
-        if biome in ('rainforest', 'tropical'):
+        # === SPECIAL EXOTIC BIOMES ===
+        if biome == 'psychedelic':
+            # TRIPPY! SUPER dense weird plants!
+            num_plants = rng.integers(80, 120)  # More plants!
+            num_underwater = rng.integers(15, 30)
+        elif biome == 'hellfire':
+            # Volcanic - sparse but dramatic
+            num_plants = rng.integers(15, 35)
+            num_underwater = 0  # No water in hell
+        elif biome == 'shadow':
+            # Dark creepy plants - moderate
+            num_plants = rng.integers(30, 55)
+            num_underwater = rng.integers(3, 8)
+        elif biome == 'crystal':
+            # Crystalline - sparse but beautiful
+            num_plants = rng.integers(20, 40)
+            num_underwater = rng.integers(2, 6)
+        elif biome == 'void':
+            # THE VOID - almost nothing
+            num_plants = rng.integers(2, 8)
+            num_underwater = 0
+        # === NORMAL BIOMES ===
+        elif biome in ('rainforest', 'tropical'):
             # JUNGLE! Dense canopy, vines everywhere, flowers
-            num_plants = rng.integers(55, 90)  # Reduced ~25% total for perf
+            num_plants = rng.integers(55, 90)
             num_underwater = rng.integers(8, 16)
         elif biome in ('temperate', 'taiga'):
             # Moderate forest
-            num_plants = rng.integers(35, 58)  # Reduced ~25%
+            num_plants = rng.integers(35, 58)
             num_underwater = rng.integers(5, 12)
         elif biome == 'desert':
             # Sparse, mostly cacti and hardy plants
-            num_plants = rng.integers(4, 14)  # Even sparser
+            num_plants = rng.integers(4, 14)
             num_underwater = 0
         elif biome in ('tundra', 'frozen'):
             # Sparse arctic plants
-            num_plants = rng.integers(5, 16)  # Reduced ~25%
+            num_plants = rng.integers(5, 16)
             num_underwater = rng.integers(0, 3)
         elif biome == 'savanna':
             # Grassland with scattered trees
-            num_plants = rng.integers(16, 32)  # Reduced ~25%
+            num_plants = rng.integers(16, 32)
             num_underwater = rng.integers(1, 5)
         elif biome == 'swamp':
             # Dense, lots of water plants
-            num_plants = rng.integers(40, 70)  # Reduced ~25%
+            num_plants = rng.integers(40, 70)
             num_underwater = rng.integers(12, 24)
         else:
             # Default (grassland, etc.) - moderate density
-            num_plants = rng.integers(28, 50)  # Reduced ~25%
+            num_plants = rng.integers(28, 50)
             num_underwater = rng.integers(5, 14)
         
         for _ in range(num_plants + num_underwater):
@@ -1492,7 +1514,168 @@ class FloraManager:
             else:
                 # Normal terrain - biome-specific plant selection!
                 # This gives each biome a unique feel
-                if biome in ('rainforest', 'tropical'):
+                
+                # === SPECIAL EXOTIC BIOMES ===
+                if biome == 'psychedelic':
+                    # PSYCHEDELIC: Rainbow colors, weird shapes, glowing, spirals!
+                    roll = rng.random()
+                    if roll < 0.12:  # 12% spirals
+                        dna = PlantDNA.create_random(PlantType.SPIRAL, int(rng.integers(0, 2**31)))
+                    elif roll < 0.22:  # 10% glowing mushrooms
+                        dna = PlantDNA.create_random(PlantType.MUSHROOM, int(rng.integers(0, 2**31)))
+                        dna.has_glow = True
+                        dna.glow_intensity = 0.8
+                    elif roll < 0.32:  # 10% alien plants
+                        dna = PlantDNA.create_random(PlantType.ALIEN, int(rng.integers(0, 2**31)))
+                    elif roll < 0.42:  # 10% tentacles
+                        dna = PlantDNA.create_random(PlantType.TENTACLE, int(rng.integers(0, 2**31)))
+                    elif roll < 0.52:  # 10% crystals (rainbow)
+                        dna = PlantDNA.create_random(PlantType.CRYSTAL, int(rng.integers(0, 2**31)))
+                        dna.has_glow = True
+                    elif roll < 0.62:  # 10% octopus plants
+                        dna = PlantDNA.create_random(PlantType.OCTOPUS, int(rng.integers(0, 2**31)))
+                    elif roll < 0.72:  # 10% twisted spires
+                        dna = PlantDNA.create_random(PlantType.CRYSTAL, int(rng.integers(0, 2**31)))
+                        dna.canopy_shape = 'twisted_spire'  # Special mesh hint
+                    elif roll < 0.82:  # 10% eye flowers (creepy!)
+                        dna = PlantDNA.create_random(PlantType.FLOWER, int(rng.integers(0, 2**31)))
+                        dna.canopy_shape = 'eye_flower'
+                    elif roll < 0.90:  # 8% rainbow spirals
+                        dna = PlantDNA.create_random(PlantType.SPIRAL, int(rng.integers(0, 2**31)))
+                        dna.canopy_shape = 'rainbow_spiral'
+                    else:  # 10% impossible geometry
+                        dna = PlantDNA.create_random(PlantType.CRYSTAL, int(rng.integers(0, 2**31)))
+                        dna.canopy_shape = 'impossible_geometry'
+                    # Psychedelic plants have RAINBOW colors!
+                    phase = rng.random() * 6.28
+                    dna.leaf_color.r = 0.5 + 0.5 * np.sin(phase)
+                    dna.leaf_color.g = 0.5 + 0.5 * np.sin(phase + 2.09)
+                    dna.leaf_color.b = 0.5 + 0.5 * np.sin(phase + 4.19)
+                    
+                elif biome == 'hellfire':
+                    # HELLFIRE: Fiery reds, oranges, charred plants, fire flowers
+                    roll = rng.random()
+                    if roll < 0.20:  # 20% dead/charred trees
+                        dna = PlantDNA.create_random(PlantType.TREE, int(rng.integers(0, 2**31)))
+                        dna.leaf_color.r = 0.15
+                        dna.leaf_color.g = 0.08
+                        dna.leaf_color.b = 0.05
+                    elif roll < 0.40:  # 20% fire plants (actual flames!)
+                        dna = PlantDNA.create_random(PlantType.FLOWER, int(rng.integers(0, 2**31)))
+                        dna.canopy_shape = 'fire_plant'  # New fire mesh!
+                        dna.has_glow = True
+                        dna.glow_intensity = 1.0
+                        dna.flower_color.r = 0.95
+                        dna.flower_color.g = 0.4 + rng.random() * 0.3
+                        dna.flower_color.b = 0.05
+                    elif roll < 0.55:  # 15% lava crystals
+                        dna = PlantDNA.create_random(PlantType.CRYSTAL, int(rng.integers(0, 2**31)))
+                        dna.has_glow = True
+                        dna.trunk_color.r = 0.9
+                        dna.trunk_color.g = 0.3
+                        dna.trunk_color.b = 0.1
+                    elif roll < 0.70:  # 15% void shards (obsidian-like)
+                        dna = PlantDNA.create_random(PlantType.CRYSTAL, int(rng.integers(0, 2**31)))
+                        dna.canopy_shape = 'void_shard'
+                        dna.trunk_color.r = 0.1
+                        dna.trunk_color.g = 0.05
+                        dna.trunk_color.b = 0.05
+                    elif roll < 0.85:  # 15% ash grass (gray/black)
+                        dna = PlantDNA.create_random(PlantType.GRASS, int(rng.integers(0, 2**31)))
+                        dna.leaf_color.r = 0.2
+                        dna.leaf_color.g = 0.15
+                        dna.leaf_color.b = 0.12
+                    else:  # 15% volcanic rocks/lichen
+                        dna = PlantDNA.create_random(PlantType.LICHEN, int(rng.integers(0, 2**31)))
+                        dna.leaf_color.r = 0.25
+                        dna.leaf_color.g = 0.1
+                        dna.leaf_color.b = 0.08
+                    
+                elif biome == 'shadow':
+                    # SHADOW: Dark, eerie, glowing eyes, creepy plants
+                    roll = rng.random()
+                    if roll < 0.20:  # 20% dark twisted trees
+                        dna = PlantDNA.create_random(PlantType.TREE, int(rng.integers(0, 2**31)))
+                        dna.trunk_color.r = 0.08
+                        dna.trunk_color.g = 0.05
+                        dna.trunk_color.b = 0.1
+                        dna.leaf_color.r = 0.1
+                        dna.leaf_color.g = 0.05
+                        dna.leaf_color.b = 0.15
+                    elif roll < 0.35:  # 15% shadow tendrils (creeping!)
+                        dna = PlantDNA.create_random(PlantType.TENTACLE, int(rng.integers(0, 2**31)))
+                        dna.canopy_shape = 'shadow_tendril'  # New shadow mesh!
+                        dna.leaf_color.r = 0.08
+                        dna.leaf_color.g = 0.04
+                        dna.leaf_color.b = 0.12
+                    elif roll < 0.50:  # 15% eerie EYE flowers (watching you!)
+                        dna = PlantDNA.create_random(PlantType.FLOWER, int(rng.integers(0, 2**31)))
+                        dna.canopy_shape = 'eye_flower'
+                        dna.has_glow = True
+                        dna.glow_intensity = 0.4
+                        dna.flower_color.r = 0.5
+                        dna.flower_color.g = 0.1
+                        dna.flower_color.b = 0.6
+                    elif roll < 0.65:  # 15% void shards
+                        dna = PlantDNA.create_random(PlantType.CRYSTAL, int(rng.integers(0, 2**31)))
+                        dna.canopy_shape = 'void_shard'
+                        dna.trunk_color.r = 0.1
+                        dna.trunk_color.g = 0.02
+                        dna.trunk_color.b = 0.15
+                    elif roll < 0.80:  # 15% creepy mushrooms
+                        dna = PlantDNA.create_random(PlantType.MUSHROOM, int(rng.integers(0, 2**31)))
+                        dna.trunk_color.r = 0.15
+                        dna.trunk_color.g = 0.05
+                        dna.trunk_color.b = 0.2
+                    else:  # 20% dark ground cover
+                        dna = PlantDNA.create_random(PlantType.GROUNDCOVER, int(rng.integers(0, 2**31)))
+                        dna.leaf_color.r = 0.08
+                        dna.leaf_color.g = 0.05
+                        dna.leaf_color.b = 0.1
+                    
+                elif biome == 'crystal':
+                    # CRYSTAL: Pale, crystalline, prismatic colors
+                    roll = rng.random()
+                    if roll < 0.50:  # 50% crystals!
+                        dna = PlantDNA.create_random(PlantType.CRYSTAL, int(rng.integers(0, 2**31)))
+                        dna.has_glow = rng.random() < 0.3  # Some glow
+                        # Prismatic colors
+                        dna.trunk_color.r = 0.7 + rng.random() * 0.3
+                        dna.trunk_color.g = 0.8 + rng.random() * 0.2
+                        dna.trunk_color.b = 0.9 + rng.random() * 0.1
+                    elif roll < 0.70:  # 20% ice-like grass
+                        dna = PlantDNA.create_random(PlantType.GRASS, int(rng.integers(0, 2**31)))
+                        dna.leaf_color.r = 0.8
+                        dna.leaf_color.g = 0.9
+                        dna.leaf_color.b = 0.95
+                    else:  # 30% lichen/moss
+                        dna = PlantDNA.create_random(rng.choice([PlantType.LICHEN, PlantType.MOSS_PAD]), int(rng.integers(0, 2**31)))
+                        dna.leaf_color.r = 0.7
+                        dna.leaf_color.g = 0.85
+                        dna.leaf_color.b = 0.9
+                    
+                elif biome == 'void':
+                    # VOID: Almost nothing, occasional faint glowing specs
+                    roll = rng.random()
+                    if roll < 0.60:  # 60% dark nothing (skip this plant)
+                        continue  # Don't add a plant here
+                    elif roll < 0.85:  # 25% faint glowing spots
+                        dna = PlantDNA.create_random(PlantType.FLOWER, int(rng.integers(0, 2**31)))
+                        dna.has_glow = True
+                        dna.glow_intensity = 0.3
+                        dna.flower_color.r = 0.2 + rng.random() * 0.2
+                        dna.flower_color.g = 0.05
+                        dna.flower_color.b = 0.3 + rng.random() * 0.2
+                    else:  # 15% void crystals
+                        dna = PlantDNA.create_random(PlantType.CRYSTAL, int(rng.integers(0, 2**31)))
+                        dna.has_glow = True
+                        dna.glow_intensity = 0.2
+                        dna.trunk_color.r = 0.1
+                        dna.trunk_color.g = 0.02
+                        dna.trunk_color.b = 0.15
+                
+                # === NORMAL BIOMES ===
+                elif biome in ('rainforest', 'tropical'):
                     # JUNGLE: Dense trees, vines, flowers, ferns, exotic plants
                     roll = rng.random()
                     if roll < 0.15:  # 15% tall trees

@@ -130,6 +130,45 @@ class BuildingType(Enum):
     CARGO_BAY = "cargo_bay"              # Goods storage/transfer
     DOCKING_ARM = "docking_arm"          # Spacecraft connection
     REACTOR_CORE = "reactor_core"        # Power generation core
+    
+    # === PSYCHEDELIC BIOME ===
+    RAINBOW_TOWER = "rainbow_tower"          # Twisting rainbow-colored spire
+    MUSHROOM_PALACE = "mushroom_palace"      # Giant mushroom building
+    SPIRAL_HOUSE = "spiral_house"            # Spiraling organic structure
+    KALEIDOSCOPE = "kaleidoscope"            # Geometric shifting shapes
+    BUBBLE_DOME = "bubble_dome"              # Iridescent bubble buildings
+    FLOATING_ISLAND = "floating_island"      # Impossible floating structure
+    CRYSTAL_CAVE = "crystal_cave"            # Glowing crystal formation
+    
+    # === HELLFIRE BIOME ===
+    VOLCANO_FORGE = "volcano_forge"          # Industrial within volcano
+    LAVA_TEMPLE = "lava_temple"              # Obsidian temple over lava
+    DEMON_GATE = "demon_gate"                # Hellish portal structure
+    BONE_TOWER = "bone_tower"                # Tower made of bones
+    FLAME_ALTAR = "flame_altar"              # Sacrificial fire platform
+    CHARRED_RUINS = "charred_ruins"          # Burnt out structure
+    OBSIDIAN_SPIRE = "obsidian_spire"        # Black glass tower
+    
+    # === SHADOW BIOME ===
+    SHADOW_CASTLE = "shadow_castle"          # Dark gothic castle
+    NIGHTMARE_HOUSE = "nightmare_house"      # Creepy impossible geometry
+    VOID_PORTAL = "void_portal"              # Gateway to darkness
+    CRYPT = "crypt"                          # Underground tomb
+    HAUNTED_MANOR = "haunted_manor"          # Spooky mansion
+    SPIDER_NEST = "spider_nest"              # Web-covered structure
+    DARK_TOWER = "dark_tower"                # Imposing black tower
+    
+    # === CRYSTAL BIOME ===
+    CRYSTAL_PALACE = "crystal_palace"        # Palace of pure crystal
+    ICE_FORTRESS = "ice_fortress"            # Frozen crystalline fortress
+    PRISM_TOWER = "prism_tower"              # Light-refracting spire
+    GEODE_HOUSE = "geode_house"              # Building inside a geode
+    QUARTZ_TEMPLE = "quartz_temple"          # Temple of quartz crystal
+    
+    # === VOID BIOME ===
+    VOID_MONOLITH = "void_monolith"          # Featureless black obelisk
+    ENTROPY_GATE = "entropy_gate"            # Gateway to oblivion
+    NULL_ZONE = "null_zone"                  # Area of pure nothing
 
 
 class RoofType(Enum):
@@ -1681,6 +1720,66 @@ def get_building_type_for_biome(biome: str, rng: np.random.Generator) -> Buildin
             BuildingType.TEMPLE: 0.1,
             BuildingType.RUINS: 0.08,
             BuildingType.MONUMENT: 0.03,
+        }
+    # === EXOTIC SPECIAL BIOMES ===
+    elif biome == "psychedelic":
+        weights = {
+            BuildingType.RAINBOW_TOWER: 0.15,
+            BuildingType.MUSHROOM_PALACE: 0.15,
+            BuildingType.SPIRAL_HOUSE: 0.12,
+            BuildingType.KALEIDOSCOPE: 0.1,
+            BuildingType.BUBBLE_DOME: 0.12,
+            BuildingType.FLOATING_ISLAND: 0.1,
+            BuildingType.CRYSTAL_CAVE: 0.08,
+            BuildingType.GEODOME_HOME: 0.06,
+            BuildingType.PLANETARIUM: 0.04,
+            BuildingType.PARKOUR: 0.08,  # Trippy parkour!
+        }
+    elif biome == "hellfire":
+        weights = {
+            BuildingType.VOLCANO_FORGE: 0.15,
+            BuildingType.LAVA_TEMPLE: 0.15,
+            BuildingType.DEMON_GATE: 0.1,
+            BuildingType.BONE_TOWER: 0.12,
+            BuildingType.FLAME_ALTAR: 0.1,
+            BuildingType.CHARRED_RUINS: 0.12,
+            BuildingType.OBSIDIAN_SPIRE: 0.1,
+            BuildingType.FACTORY: 0.08,  # Hell factories
+            BuildingType.POWERPLANT: 0.05,
+            BuildingType.PARKOUR: 0.03,
+        }
+    elif biome == "shadow":
+        weights = {
+            BuildingType.SHADOW_CASTLE: 0.15,
+            BuildingType.NIGHTMARE_HOUSE: 0.12,
+            BuildingType.VOID_PORTAL: 0.08,
+            BuildingType.CRYPT: 0.12,
+            BuildingType.HAUNTED_MANOR: 0.15,
+            BuildingType.SPIDER_NEST: 0.1,
+            BuildingType.DARK_TOWER: 0.12,
+            BuildingType.RUINS: 0.1,
+            BuildingType.CHURCH: 0.03,  # Dark church
+            BuildingType.MAUSOLEUM: 0.03,
+        }
+    elif biome == "crystal":
+        weights = {
+            BuildingType.CRYSTAL_PALACE: 0.2,
+            BuildingType.ICE_FORTRESS: 0.15,
+            BuildingType.PRISM_TOWER: 0.15,
+            BuildingType.GEODE_HOUSE: 0.12,
+            BuildingType.QUARTZ_TEMPLE: 0.12,
+            BuildingType.OBSERVATORY: 0.08,
+            BuildingType.GEODOME_HOME: 0.08,
+            BuildingType.BUBBLE_DOME: 0.06,
+            BuildingType.MONUMENT: 0.04,
+        }
+    elif biome == "void":
+        weights = {
+            BuildingType.VOID_MONOLITH: 0.35,
+            BuildingType.ENTROPY_GATE: 0.25,
+            BuildingType.NULL_ZONE: 0.2,
+            BuildingType.VOID_PORTAL: 0.15,
+            BuildingType.MONUMENT: 0.05,
         }
     else:  # Default
         weights = {
