@@ -697,9 +697,9 @@ class ModernHUDRenderer:
         max_width = 350
         max_chars = int(max_width / char_width)
         
-        # Position: top-right, below compass
+        # Position: top-right, aligned with top HUD elements
         margin_right = 15
-        start_y = 50  # Below compass
+        start_y = 10  # Same level as coordinates/compass
         
         # Word wrap the text
         words = self.status_text.split(' ')

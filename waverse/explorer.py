@@ -611,12 +611,27 @@ def save_position(camera, seed: int):
         print(f"  Error saving: {e}")
 
 
-def take_screenshot(camera=None):
-    """Take a screenshot of the current view including HUD."""
+def request_screenshot(camera):
+    """Request a screenshot - will be captured on next frame without status text."""
+    if camera:
+        camera.screenshot_pending = True
+        # Hide status temporarily so it doesn't appear in screenshot
+        camera._saved_status = camera.status_message
+        camera._saved_timer = camera.status_timer
+        camera.status_message = ""
+        camera.status_timer = 0
+        print("  Screenshot requested (capturing next frame...)")
+
+
+def capture_pending_screenshot(camera):
+    """Actually capture the screenshot if one is pending. Call AFTER rendering."""
+    if not camera or not camera.screenshot_pending:
+        return None
+    
+    camera.screenshot_pending = False
+    
     import os
     from datetime import datetime
-    
-    print("  Taking screenshot...")
     
     # Use waverse screenshots directory
     screenshots_dir = SCREENSHOTS_DIR
@@ -645,11 +660,39 @@ def take_screenshot(camera=None):
     pygame.image.save(surface, filename)
     print(f"  [Screenshot] Saved: {filename}")
     
-    # Set status message if camera provided
-    if camera:
-        camera.set_status(f"Saved: {filename}", 3.0)
+    # Set status message
+    camera.set_status(f"SAVED: {filename}", 3.0)
     
     return filename
+
+
+def take_screenshot(camera=None):
+    """Request a screenshot - will be captured on next frame without status text."""
+    if camera:
+        request_screenshot(camera)
+    else:
+        # Fallback for no camera - immediate capture (legacy)
+        import os
+        from datetime import datetime
+        
+        screenshots_dir = SCREENSHOTS_DIR
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = os.path.join(screenshots_dir, f"screenshot_{timestamp}.png")
+        
+        display = pygame.display.get_surface()
+        width, height = display.get_size()
+        
+        glPixelStorei(GL_PACK_ALIGNMENT, 1)
+        pixels = glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE)
+        
+        surface = pygame.Surface((width, height))
+        raw = np.frombuffer(pixels, dtype=np.uint8).reshape((height, width, 3))
+        raw = np.flipud(raw)
+        pygame.surfarray.blit_array(surface, np.transpose(raw, (1, 0, 2)))
+        
+        pygame.image.save(surface, filename)
+        print(f"  [Screenshot] Saved: {filename}")
+        return filename
 
 
 def render_entity_to_png(entity, entity_type: str, filename: str, size: int = 512):
@@ -1394,6 +1437,9 @@ class Camera:
         # Status message display
         self.status_message = ""
         self.status_timer = 0.0  # Seconds remaining to show message
+        
+        # Screenshot pending flag - when True, hide status and capture on next frame
+        self.screenshot_pending = False
         
         # Tool system
         self.current_tool_index = 0  # Index into ToolType.ALL_TOOLS
@@ -5045,6 +5091,9 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
             if perf.show_overlay:
                 draw_perf_overlay(display, perf, hud_font)
         # TODO: Add modern HUD rendering for Core profile
+        
+        # Capture pending screenshot (after render, before flip)
+        capture_pending_screenshot(camera)
         
         pygame.display.flip()
         perf.end_frame()
