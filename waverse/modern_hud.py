@@ -1100,6 +1100,10 @@ class ModernHUDRenderer:
         if hasattr(camera, 'status_timer'):
             self.status_timer = camera.status_timer
         
+        # Sync selected tool from camera
+        if hasattr(camera, 'current_tool_index'):
+            self.selected_tool = camera.current_tool_index
+        
         # Sync inventory selection
         self.inventory_index = camera.inventory_index if hasattr(camera, 'inventory_index') else 0
     
