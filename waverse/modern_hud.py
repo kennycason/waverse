@@ -303,7 +303,9 @@ class ModernHUDRenderer:
         self._image_cache: Dict[str, moderngl.Texture] = {}
         self._cache_max_size = 20  # Limit cached images
         self._dna_logs_path = Path.home() / ".waverse" / "dna_logs"
-        self._pending_preview: Optional[Dict] = None  # Store pending PNG preview info
+        self._pending_preview: Optional[Dict] = None  # Store pending preview info
+        self._dna_cache: Dict[str, Dict] = {}  # Cache for loaded DNA data
+        self._preview_rotation = 0.0  # Animation rotation for preview
         
     def _load_png_texture(self, png_path: str) -> Optional[moderngl.Texture]:
         """Load a PNG image as a ModernGL texture, with caching."""
@@ -1220,8 +1222,8 @@ class ModernHUDRenderer:
             # Render
             self.vao.render(moderngl.TRIANGLES, vertices=len(vertices) // 8)
         
-        # After main HUD, draw PNG preview if pending (on Log tab)
-        if self._pending_preview and PIL_AVAILABLE:
+        # After main HUD, draw preview if pending (on Log tab)
+        if self._pending_preview:
             self._render_png_preview()
         
         # Re-enable depth test
@@ -1266,20 +1268,252 @@ class ModernHUDRenderer:
             # Draw the image
             self._draw_image(draw_x, draw_y, draw_w, draw_h, texture)
         else:
-            # No PNG available - draw placeholder text
-            # Build vertices for a small text message
-            vertices = []
-            center_x = x + w / 2
-            center_y = y + h / 2
-            self._draw_text(vertices, "NO PREVIEW", center_x - 40, center_y - 10, 1.5, 0.4, 0.4, 0.4, 1.0)
-            self._draw_text(vertices, "PNG NOT FOUND", center_x - 55, center_y + 8, 1.3, 0.3, 0.3, 0.3, 1.0)
+            # No PNG - render a 2D stylized preview from DNA
+            self._render_dna_preview(filename, x, y, w, h)
+    
+    def _load_dna_from_json(self, filename: str) -> Optional[Dict]:
+        """Load DNA data from a JSON log file."""
+        if filename in self._dna_cache:
+            return self._dna_cache[filename]
+        
+        try:
+            json_path = self._dna_logs_path / filename
+            if not json_path.exists():
+                return None
             
-            if vertices:
-                vertex_data = np.array(vertices, dtype='f4')
-                self.vbo.write(vertex_data.tobytes())
-                self.font_texture.use(0)
-                self.program['u_use_texture'].value = 1
-                self.vao.render(moderngl.TRIANGLES, vertices=len(vertices) // 8)
+            import json
+            with open(json_path, 'r') as f:
+                data = json.load(f)
+            
+            # Cache it
+            if len(self._dna_cache) >= self._cache_max_size:
+                # Remove oldest
+                oldest = next(iter(self._dna_cache))
+                del self._dna_cache[oldest]
+            
+            self._dna_cache[filename] = data
+            return data
+            
+        except Exception as e:
+            print(f"Error loading DNA: {e}")
+            return None
+    
+    def _render_dna_preview(self, filename: str, x: float, y: float, w: float, h: float):
+        """Render a stylized 2D preview of the entity from its DNA."""
+        import json
+        
+        # Update rotation for animation
+        self._preview_rotation += 0.02
+        
+        # Load DNA
+        dna_data = self._load_dna_from_json(filename)
+        if not dna_data:
+            return
+        
+        vertices = []
+        center_x = x + w / 2
+        center_y = y + h / 2
+        
+        # Determine entity type
+        is_plant = 'plant' in filename.lower()
+        
+        if is_plant:
+            # Plant preview - draw stylized tree/plant shape
+            self._draw_plant_preview(vertices, dna_data, center_x, center_y, min(w, h) * 0.4)
+        else:
+            # Animal preview - draw stylized animal shape
+            self._draw_animal_preview(vertices, dna_data, center_x, center_y, min(w, h) * 0.4)
+        
+        # Render the preview vertices
+        if vertices:
+            vertex_data = np.array(vertices, dtype='f4')
+            self.vbo.write(vertex_data.tobytes())
+            self.font_texture.use(0)
+            self.program['u_use_texture'].value = 0  # Solid colors
+            self.program['u_screen_size'].value = (self.screen_width, self.screen_height)
+            self.program['u_offset'].value = (0, 0)
+            self.vao.render(moderngl.TRIANGLES, vertices=len(vertices) // 8)
+    
+    def _draw_plant_preview(self, vertices: List, dna: Dict, cx: float, cy: float, size: float):
+        """Draw a stylized 2D plant from DNA colors."""
+        # Extract colors from DNA
+        trunk_color = self._extract_color(dna, 'trunk_segments', 0, (0.4, 0.25, 0.15))
+        leaf_color = self._extract_color(dna, 'leaf_color', None, (0.2, 0.6, 0.2))
+        flower_color = self._extract_color(dna, 'flower_color', None, (0.8, 0.4, 0.6))
+        
+        # Get plant type for shape variation
+        plant_type = dna.get('plant_type', 'tree')
+        
+        # Draw trunk (rectangle)
+        trunk_h = size * 0.6
+        trunk_w = size * 0.15
+        trunk_x = cx - trunk_w / 2
+        trunk_y = cy + size * 0.1  # Bottom half
+        self._add_quad(vertices, trunk_x, trunk_y, trunk_w, trunk_h,
+                      0, 0, 0, 0, *trunk_color, 1.0)
+        
+        # Draw canopy/leaves based on plant type
+        if plant_type in ('tree', 'conifer', 'palm'):
+            # Tree - circular canopy
+            canopy_size = size * 0.8
+            self._draw_circle_shape(vertices, cx, cy - size * 0.2, canopy_size, leaf_color, 8)
+        elif plant_type in ('bush', 'shrub'):
+            # Bush - wider, shorter
+            canopy_w = size * 1.0
+            canopy_h = size * 0.5
+            self._add_quad(vertices, cx - canopy_w/2, cy - canopy_h, canopy_w, canopy_h,
+                          0, 0, 0, 0, *leaf_color, 1.0)
+        elif plant_type in ('flower', 'succulent'):
+            # Flower - small with colored petals
+            self._draw_circle_shape(vertices, cx, cy - size * 0.1, size * 0.5, flower_color, 6)
+            self._draw_circle_shape(vertices, cx, cy - size * 0.1, size * 0.2, (0.9, 0.8, 0.2), 6)
+        elif plant_type in ('grass', 'fern'):
+            # Grass - multiple thin blades
+            for i in range(-2, 3):
+                blade_x = cx + i * size * 0.12
+                blade_w = size * 0.06
+                blade_h = size * 0.7 + abs(i) * 0.1
+                self._add_quad(vertices, blade_x - blade_w/2, cy - blade_h * 0.3, blade_w, blade_h,
+                              0, 0, 0, 0, *leaf_color, 0.9)
+        elif plant_type == 'mushroom':
+            # Mushroom - stem and cap
+            cap_color = self._extract_color(dna, 'cap_color', None, (0.7, 0.2, 0.2))
+            stem_h = size * 0.4
+            stem_w = size * 0.15
+            self._add_quad(vertices, cx - stem_w/2, cy, stem_w, stem_h,
+                          0, 0, 0, 0, 0.9, 0.85, 0.8, 1.0)
+            # Cap
+            cap_w = size * 0.6
+            cap_h = size * 0.35
+            self._add_quad(vertices, cx - cap_w/2, cy - cap_h, cap_w, cap_h,
+                          0, 0, 0, 0, *cap_color, 1.0)
+        else:
+            # Default - simple tree
+            self._draw_circle_shape(vertices, cx, cy - size * 0.2, size * 0.6, leaf_color, 6)
+    
+    def _draw_animal_preview(self, vertices: List, dna: Dict, cx: float, cy: float, size: float):
+        """Draw a stylized 2D animal from DNA colors."""
+        # Extract colors
+        primary = self._extract_color(dna, 'primary_color', None, (0.5, 0.4, 0.3))
+        secondary = self._extract_color(dna, 'secondary_color', None, (0.6, 0.5, 0.4))
+        
+        # Get animal type
+        animal_type = dna.get('animal_type', 'mammal')
+        
+        # Simple animation offset
+        anim = math.sin(self._preview_rotation * 2) * size * 0.05
+        
+        if animal_type in ('bird', 'bat', 'pterosaur', 'moth'):
+            # Flying - draw wings spread
+            body_w = size * 0.3
+            body_h = size * 0.5
+            self._add_quad(vertices, cx - body_w/2, cy - body_h/2 + anim, body_w, body_h,
+                          0, 0, 0, 0, *primary, 1.0)
+            # Wings
+            wing_w = size * 0.5
+            wing_h = size * 0.2
+            wing_offset = math.sin(self._preview_rotation * 8) * size * 0.1
+            self._add_quad(vertices, cx - body_w/2 - wing_w, cy - wing_h/2 + wing_offset, wing_w, wing_h,
+                          0, 0, 0, 0, *secondary, 0.9)
+            self._add_quad(vertices, cx + body_w/2, cy - wing_h/2 + wing_offset, wing_w, wing_h,
+                          0, 0, 0, 0, *secondary, 0.9)
+        elif animal_type in ('spider', 'scorpion', 'centipede', 'millipede', 'beetle', 'mantis'):
+            # Crawler - body with legs
+            body_w = size * 0.4
+            body_h = size * 0.25
+            self._add_quad(vertices, cx - body_w/2, cy - body_h/2, body_w, body_h,
+                          0, 0, 0, 0, *primary, 1.0)
+            # Legs (animated)
+            leg_w = size * 0.08
+            leg_h = size * 0.3
+            for i in range(-2, 3):
+                if i == 0:
+                    continue
+                leg_x = cx + i * size * 0.12
+                leg_anim = math.sin(self._preview_rotation * 6 + i) * size * 0.05
+                self._add_quad(vertices, leg_x - leg_w/2, cy + body_h/2 + leg_anim, leg_w, leg_h,
+                              0, 0, 0, 0, *secondary, 0.8)
+        elif animal_type in ('worm', 'serpent', 'snake'):
+            # Snake - wavy body
+            seg_count = 6
+            seg_w = size * 0.15
+            for i in range(seg_count):
+                wave = math.sin(self._preview_rotation * 3 + i * 0.8) * size * 0.1
+                seg_x = cx - size * 0.4 + i * size * 0.15
+                seg_y = cy + wave
+                seg_size = seg_w * (1 - i * 0.1)
+                self._add_quad(vertices, seg_x, seg_y - seg_size/2, seg_size, seg_size,
+                              0, 0, 0, 0, *primary, 1.0)
+        elif animal_type in ('fish', 'squid', 'octopus', 'jellyfish', 'cephalopod'):
+            # Aquatic - body with fins/tentacles
+            body_w = size * 0.5
+            body_h = size * 0.3
+            wave = math.sin(self._preview_rotation * 4) * size * 0.05
+            self._add_quad(vertices, cx - body_w/2 + wave, cy - body_h/2, body_w, body_h,
+                          0, 0, 0, 0, *primary, 1.0)
+            # Tail fin
+            self._add_quad(vertices, cx + body_w/2 + wave, cy - size * 0.15, size * 0.2, size * 0.3,
+                          0, 0, 0, 0, *secondary, 0.8)
+        else:
+            # Default quadruped - body, head, legs
+            body_w = size * 0.6
+            body_h = size * 0.35
+            self._add_quad(vertices, cx - body_w/2, cy - body_h/2 + anim, body_w, body_h,
+                          0, 0, 0, 0, *primary, 1.0)
+            # Head
+            head_size = size * 0.25
+            self._add_quad(vertices, cx - body_w/2 - head_size * 0.5, cy - head_size/2 + anim, 
+                          head_size, head_size, 0, 0, 0, 0, *primary, 1.0)
+            # Legs (animated walk)
+            leg_w = size * 0.1
+            leg_h = size * 0.25
+            for i, lx in enumerate([cx - size * 0.2, cx + size * 0.15]):
+                leg_anim = math.sin(self._preview_rotation * 5 + i * 3.14) * size * 0.05
+                self._add_quad(vertices, lx - leg_w/2, cy + body_h/2 + leg_anim, leg_w, leg_h,
+                              0, 0, 0, 0, *secondary, 0.9)
+        
+        # Eyes (small dots)
+        eye_size = size * 0.06
+        self._add_quad(vertices, cx - size * 0.35 - eye_size, cy - size * 0.1 + anim, eye_size, eye_size,
+                      0, 0, 0, 0, 0.1, 0.1, 0.1, 1.0)
+    
+    def _draw_circle_shape(self, vertices: List, cx: float, cy: float, size: float, 
+                          color: Tuple[float, float, float], segments: int = 8):
+        """Draw an approximate circle using triangles."""
+        for i in range(segments):
+            angle1 = (i / segments) * 2 * math.pi
+            angle2 = ((i + 1) / segments) * 2 * math.pi
+            
+            x1 = cx + math.cos(angle1) * size * 0.5
+            y1 = cy + math.sin(angle1) * size * 0.5
+            x2 = cx + math.cos(angle2) * size * 0.5
+            y2 = cy + math.sin(angle2) * size * 0.5
+            
+            # Triangle from center to edge
+            vertices.extend([cx, cy, 0, 0, *color, 1.0])
+            vertices.extend([x1, y1, 0, 0, *color, 1.0])
+            vertices.extend([x2, y2, 0, 0, *color, 1.0])
+    
+    def _extract_color(self, dna: Dict, key: str, index: Optional[int], 
+                      default: Tuple[float, float, float]) -> Tuple[float, float, float]:
+        """Extract a color from DNA data."""
+        try:
+            if key in dna:
+                val = dna[key]
+                if index is not None and isinstance(val, list) and len(val) > index:
+                    val = val[index]
+                if isinstance(val, dict):
+                    if 'color' in val:
+                        c = val['color']
+                        if isinstance(c, (list, tuple)) and len(c) >= 3:
+                            return (float(c[0]), float(c[1]), float(c[2]))
+                    elif 'r' in val:
+                        return (float(val.get('r', 0.5)), float(val.get('g', 0.5)), float(val.get('b', 0.5)))
+                elif isinstance(val, (list, tuple)) and len(val) >= 3:
+                    return (float(val[0]), float(val[1]), float(val[2]))
+        except:
+            pass
+        return default
     
     def cleanup(self):
         """Release GPU resources."""
