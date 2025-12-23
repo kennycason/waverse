@@ -802,8 +802,8 @@ class AnimalManager:
             ]
         return templates
     
-    # Animal cap - increased for more life!
-    MAX_TOTAL_ANIMALS = 800
+    # Animal cap - balanced for performance
+    MAX_TOTAL_ANIMALS = 500  # Reduced from 800
     
     def spawn_animals_for_chunk(self, cx: int, cz: int, heightmap, 
                                  chunk_world_x: float, chunk_world_z: float,
@@ -836,25 +836,25 @@ class AnimalManager:
         
         if biome in ('rainforest', 'tropical'):
             # Jungle! Many animals - insects, birds, mammals, reptiles
-            num_animals = rng.integers(8, 16)
+            num_animals = rng.integers(5, 10)  # Reduced ~25% total for perf
         elif biome == 'savanna':
             # Lots of grazers and predators
-            num_animals = rng.integers(6, 12)
+            num_animals = rng.integers(4, 8)  # Reduced ~25%
         elif biome in ('temperate', 'taiga'):
             # Moderate wildlife
-            num_animals = rng.integers(5, 10)
+            num_animals = rng.integers(3, 7)  # Reduced ~25%
         elif biome == 'desert':
             # Sparse - reptiles, insects
-            num_animals = rng.integers(2, 5)
+            num_animals = rng.integers(1, 3)  # Very sparse
         elif biome in ('tundra', 'frozen'):
             # Sparse arctic creatures
-            num_animals = rng.integers(2, 6)
+            num_animals = rng.integers(1, 4)  # Reduced
         elif biome == 'swamp':
             # Lots of amphibians, insects, crocs
-            num_animals = rng.integers(7, 14)
+            num_animals = rng.integers(4, 9)  # Reduced ~25%
         else:
             # Default (grassland, etc.)
-            num_animals = rng.integers(5, 11)
+            num_animals = rng.integers(3, 7)  # Reduced ~25%
         
         for _ in range(num_animals):
             local_x = rng.integers(5, w - 5)

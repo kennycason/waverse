@@ -1327,8 +1327,8 @@ class FloraManager:
         self.chunk_plants: Dict[Tuple[int, int], List[PlantInstance]] = {}
         self.display_lists: Dict[Tuple[int, int], Tuple[int, int, int]] = {}
     
-    # Max plants - MUCH higher cap for lush worlds
-    MAX_TOTAL_PLANTS = 50000  # Increased from 16000 for dense jungles
+    # Max plants - balanced for performance
+    MAX_TOTAL_PLANTS = 30000  # Reduced from 50000 for better perf
     
     def cleanup_distant_chunks(self, center_cx: int, center_cz: int, max_distance: int = 15):
         """Remove plants from distant chunks to prevent memory bloat."""
@@ -1414,32 +1414,32 @@ class FloraManager:
         
         if biome in ('rainforest', 'tropical'):
             # JUNGLE! Dense canopy, vines everywhere, flowers
-            num_plants = rng.integers(80, 120)
-            num_underwater = rng.integers(15, 25)
+            num_plants = rng.integers(55, 90)  # Reduced ~25% total for perf
+            num_underwater = rng.integers(8, 16)
         elif biome in ('temperate', 'taiga'):
             # Moderate forest
-            num_plants = rng.integers(50, 80)
-            num_underwater = rng.integers(10, 18)
+            num_plants = rng.integers(35, 58)  # Reduced ~25%
+            num_underwater = rng.integers(5, 12)
         elif biome == 'desert':
             # Sparse, mostly cacti and hardy plants
-            num_plants = rng.integers(8, 20)
+            num_plants = rng.integers(4, 14)  # Even sparser
             num_underwater = 0
         elif biome in ('tundra', 'frozen'):
             # Sparse arctic plants
-            num_plants = rng.integers(10, 25)
-            num_underwater = rng.integers(0, 5)
+            num_plants = rng.integers(5, 16)  # Reduced ~25%
+            num_underwater = rng.integers(0, 3)
         elif biome == 'savanna':
             # Grassland with scattered trees
-            num_plants = rng.integers(25, 45)
-            num_underwater = rng.integers(3, 8)
+            num_plants = rng.integers(16, 32)  # Reduced ~25%
+            num_underwater = rng.integers(1, 5)
         elif biome == 'swamp':
-            # Very dense, lots of water plants
-            num_plants = rng.integers(60, 100)
-            num_underwater = rng.integers(20, 35)
+            # Dense, lots of water plants
+            num_plants = rng.integers(40, 70)  # Reduced ~25%
+            num_underwater = rng.integers(12, 24)
         else:
-            # Default (grassland, etc.) - moderate-high density
-            num_plants = rng.integers(40, 70)
-            num_underwater = rng.integers(10, 20)
+            # Default (grassland, etc.) - moderate density
+            num_plants = rng.integers(28, 50)  # Reduced ~25%
+            num_underwater = rng.integers(5, 14)
         
         for _ in range(num_plants + num_underwater):
             local_x = rng.integers(2, w - 2)

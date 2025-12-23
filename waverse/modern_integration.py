@@ -505,17 +505,41 @@ class ModernWorldRenderer:
         cam_cx = int(camera.x // chunk_world_size)
         cam_cz = int(camera.z // chunk_world_size)
         
+        # Get camera forward direction for prioritization
+        # Chunks in front of camera load FIRST! (strong priority)
+        cam_yaw = getattr(camera, 'yaw', 0)
+        forward_x = -math.sin(math.radians(cam_yaw))
+        forward_z = -math.cos(math.radians(cam_yaw))
         
-        # Build list of chunks sorted by distance (radial order, not stripes)
-        chunks_by_dist = []
+        # Build list of chunks sorted by PRIORITY (distance + STRONG facing bonus)
+        chunks_by_priority = []
         for dx in range(-self.render_distance, self.render_distance + 1):
             for dz in range(-self.render_distance, self.render_distance + 1):
                 dist_sq = dx * dx + dz * dz
                 cx, cz = cam_cx + dx, cam_cz + dz
-                chunks_by_dist.append((dist_sq, cx, cz))
+                
+                # Calculate facing bonus: chunks in front get MUCH lower priority score
+                # dot product: positive = in front, negative = behind
+                if dist_sq > 0:
+                    norm = math.sqrt(dist_sq)
+                    dot = (dx * forward_x + dz * forward_z) / norm
+                    # Facing bonus: -1 (behind) to +1 (in front)
+                    # STRONG bonus: chunks behind are effectively 2x further away
+                    facing_bonus = dot * norm  # Full distance as bonus (was 0.5)
+                else:
+                    facing_bonus = 0
+                
+                # Priority: lower = load first
+                # In front: facing_bonus positive, so priority reduced (good)
+                # Behind: facing_bonus negative, so priority increased (deferred)
+                priority = dist_sq - facing_bonus * 1.5  # 1.5x multiplier for strong facing prio
+                chunks_by_priority.append((priority, dist_sq, cx, cz))
         
-        # Sort by distance so closest chunks load first
-        chunks_by_dist.sort(key=lambda x: x[0])
+        # Sort by priority (distance adjusted by facing)
+        chunks_by_priority.sort(key=lambda x: x[0])
+        
+        # Convert back to simpler format for compatibility
+        chunks_by_dist = [(dist_sq, cx, cz) for _, dist_sq, cx, cz in chunks_by_priority]
         
         # Determine which chunks should be loaded
         needed_terrain = set()
@@ -528,10 +552,15 @@ class ModernWorldRenderer:
             if dist <= self.flora_render_distance:
                 needed_flora.add((cx, cz))
         
-        # THROTTLED chunk loading - limit per frame to prevent stuttering
-        # Terrain mesh creation is now vectorized (faster)
-        MAX_TERRAIN_LOADS_PER_FRAME = 2  # 2 terrain chunks per frame
-        MAX_FLORA_LOADS_PER_FRAME = 8  # Flora is light (just adding instances)
+        # THROTTLED chunk loading - TERRAIN PRIORITY over flora!
+        # Terrain mesh creation is vectorized (faster), prioritize it
+        MAX_TERRAIN_LOADS_PER_FRAME = 4  # Increased: terrain is priority!
+        MAX_FLORA_LOADS_PER_FRAME = 4    # Reduced: flora waits for terrain
+        
+        # Track startup time - delay flora until terrain has a head start
+        if not hasattr(self, '_startup_time'):
+            self._startup_time = 0.0
+        self._startup_time += 0.016  # ~1 frame
         
         # Load new terrain chunks (in radial order, throttled)
         chunks_to_load = [(cx, cz) for _, cx, cz in chunks_by_dist 
@@ -549,7 +578,8 @@ class ModernWorldRenderer:
             self.unload_terrain_chunk(key[0], key[1])
         
         # Handle flora if manager provided (INCREMENTAL loading)
-        if flora_manager:
+        # DELAY flora until terrain has loaded for 2 seconds
+        if flora_manager and self._startup_time > 2.0:
             # Store climate_manager reference for biome-based flora
             self._climate_manager = climate_manager
             
@@ -558,10 +588,12 @@ class ModernWorldRenderer:
                              if (cx, cz) in needed_flora and (cx, cz) not in self.loaded_flora_chunks]
             
             # INCREMENTAL flora loading - spread across frames to eliminate stutters
+            # Also reduce flora loading if terrain still loading (terrain priority!)
+            effective_flora_limit = MAX_FLORA_LOADS_PER_FRAME if terrain_loaded == 0 else 2
             flora_loaded_this_frame = 0
             
             for cx, cz in flora_to_load:
-                if flora_loaded_this_frame >= MAX_FLORA_LOADS_PER_FRAME:
+                if flora_loaded_this_frame >= effective_flora_limit:
                     break  # Defer rest to next frame
                 self.load_flora_for_chunk(cx, cz, flora_manager, chunk_manager, camera.x, camera.z)
                 flora_loaded_this_frame += 1
@@ -728,6 +760,7 @@ class ModernWorldRenderer:
     
     def set_water_level(self, level: float):
         """Set water level for terrain coloring and water surface."""
+        self._water_level = level  # Store for optimization checks
         self.terrain.water_level = level
         self.water.water_level = level
     
@@ -816,7 +849,12 @@ class ModernWorldRenderer:
         self.animals.render(dt)
         
         # Render water (transparent, needs blending)
-        self.water.render(dt)
+        # OPTIMIZATION: Skip water if camera is very high above water level
+        # Water is irrelevant at high altitudes
+        cam_y = self._camera_pos[1] if hasattr(self, '_camera_pos') else 0
+        water_level = getattr(self, '_water_level', 0)
+        if cam_y < water_level + 500:  # Only render if within 500 units of water
+            self.water.render(dt)
         
         # Render wind particles (debris)
         self.wind_particles.update(dt)
