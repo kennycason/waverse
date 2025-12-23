@@ -224,24 +224,45 @@ class AnimalType:
     POLYP = "polyp"            # Branching coral-like
     NUDIBRANCH = "nudibranch"  # Colorful sea slugs with frills
     
+    # Biomech/cybernetic alien types
+    BIOMECH_SPIDER = "biomech_spider"   # Mechanical spider with organic parts
+    MECH_CRAWLER = "mech_crawler"       # Many-legged robot creature
+    DRONE = "drone"                     # Small hovering/flying mechanoid
+    HIVE_CREATURE = "hive_creature"     # Connected swarm entity
+    SYMBIOTE = "symbiote"               # Parasitic/attached creature
+    XENOMORPH = "xenomorph"             # Tall, sinister alien form
+    FACEHUGGER = "facehugger"           # Small scuttling attacker
+    HEADCRAB = "headcrab"               # Leaping parasitic creature
+    STALKER = "stalker"                 # Tall multi-limbed hunter
+    FLOATER = "floater"                 # Gas-filled floating creature
+    BRUTE = "brute"                     # Large armored alien
+    SCREAMER = "screamer"               # Winged/flying alien with mouth
+    
     ALL = [INSECT, BIRD, FISH, MAMMAL, REPTILE, AMPHIBIAN, JELLYFISH, WORM, ALIEN, 
            METROID, SPIDER, DINOSAUR, CROC, HOPPER, CRUSTACEAN, CORAL, BARNACLE, 
            SNAIL, SEASTAR, SQUID, ANEMONE, URCHIN, OCTOPUS, AMOEBA, HYDRA, NAUTILUS,
-           MANTA, TRILOBITE, CENTIPEDE, BLOB, POLYP, NUDIBRANCH]
+           MANTA, TRILOBITE, CENTIPEDE, BLOB, POLYP, NUDIBRANCH,
+           BIOMECH_SPIDER, MECH_CRAWLER, DRONE, HIVE_CREATURE, SYMBIOTE, XENOMORPH,
+           FACEHUGGER, HEADCRAB, STALKER, FLOATER, BRUTE, SCREAMER]
     
     # Categories for spawning
     AQUATIC = [FISH, JELLYFISH, SQUID, OCTOPUS, NAUTILUS, MANTA, ANEMONE, 
                CORAL, SEASTAR, URCHIN, NUDIBRANCH, HYDRA]
     LAND = [INSECT, MAMMAL, REPTILE, SPIDER, DINOSAUR, CROC, HOPPER, 
-            CENTIPEDE, TRILOBITE, SNAIL, WORM]
-    AMPHIBIOUS = [AMPHIBIAN, CRUSTACEAN, AMOEBA, BLOB]
-    FLYING = [BIRD, ALIEN, METROID]
+            CENTIPEDE, TRILOBITE, SNAIL, WORM, BIOMECH_SPIDER, MECH_CRAWLER, 
+            XENOMORPH, FACEHUGGER, HEADCRAB, STALKER, BRUTE]
+    AMPHIBIOUS = [AMPHIBIAN, CRUSTACEAN, AMOEBA, BLOB, SYMBIOTE]
+    FLYING = [BIRD, ALIEN, METROID, DRONE, FLOATER, SCREAMER]
     
     # Ground animals for weighted spawning
     GROUND = [MAMMAL, REPTILE, WORM, INSECT, SPIDER, DINOSAUR, CROC, HOPPER, SNAIL]
     
     # Underwater creatures
     UNDERWATER = [FISH, JELLYFISH, SQUID, CRUSTACEAN, CORAL, BARNACLE, SEASTAR, ANEMONE, URCHIN]
+    
+    # Alien/sci-fi creatures (for alien biome spawning)
+    ALIEN_TYPES = [ALIEN, METROID, BIOMECH_SPIDER, MECH_CRAWLER, DRONE, HIVE_CREATURE,
+                   SYMBIOTE, XENOMORPH, FACEHUGGER, HEADCRAB, STALKER, FLOATER, BRUTE, SCREAMER]
 
 
 @dataclass

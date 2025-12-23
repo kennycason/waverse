@@ -198,12 +198,26 @@ class PlantType:
     MONSTERA = "monstera"         # Split-leaf tropical
     HELICONIA = "heliconia"       # Tropical flower
     
+    # NEW: Stones and rocks (environmental decoration)
+    STONE = "stone"               # Small loose stone
+    BOULDER = "boulder"           # Large rock
+    MOSSY_ROCK = "mossy_rock"     # Rock with moss growth
+    ROCK_CLUSTER = "rock_cluster" # Group of small rocks
+    FLAT_ROCK = "flat_rock"       # Flat stepping stone
+    CRYSTAL_FORMATION = "crystal_formation"  # Cluster of crystals
+    
+    # NEW: Icosphere-style trees (rounded blob canopy)
+    BLOB_TREE = "blob_tree"       # Simple rounded canopy
+    LAYERED_TREE = "layered_tree" # Multiple blob layers
+    CLUMP_TREE = "clump_tree"     # Dense clumped foliage
+    
     ALL_TYPES = [GRASS, FLOWER, FERN, BUSH, SHRUB, TREE, TALL_TREE, PINE, PALM, WILLOW, 
                  CACTUS, MUSHROOM, CORAL, CRYSTAL, ALIEN, VINE, SPINY_VINE, OCTOPUS, 
                  TENTACLE, SPIRAL, SEAWEED, GROUNDCOVER, CREEPER, LICHEN, MOSS_PAD, LILY_PAD,
                  OAK, BIRCH, MAPLE, SPRUCE, FIR, CEDAR, CYPRESS, BAOBAB, MANGROVE,
                  BAMBOO, REED, WHEAT, DEAD_TREE, STUMP, FALLEN_LOG, SNAG,
-                 BANANA, FICUS, MONSTERA, HELICONIA]
+                 BANANA, FICUS, MONSTERA, HELICONIA, STONE, BOULDER, MOSSY_ROCK, 
+                 ROCK_CLUSTER, FLAT_ROCK, CRYSTAL_FORMATION, BLOB_TREE, LAYERED_TREE, CLUMP_TREE]
     
     # Underwater-specific types
     UNDERWATER_TYPES = [SEAWEED, CORAL]
@@ -215,7 +229,13 @@ class PlantType:
     CONIFER_TYPES = [PINE, SPRUCE, FIR, CEDAR, CYPRESS]
     
     # Deciduous types (lose leaves)
-    DECIDUOUS_TYPES = [OAK, BIRCH, MAPLE, WILLOW]
+    DECIDUOUS_TYPES = [OAK, BIRCH, MAPLE, WILLOW, BLOB_TREE, LAYERED_TREE, CLUMP_TREE]
+    
+    # Rock/stone types (environmental decoration)
+    ROCK_TYPES = [STONE, BOULDER, MOSSY_ROCK, ROCK_CLUSTER, FLAT_ROCK, CRYSTAL_FORMATION]
+    
+    # Tropical types
+    TROPICAL_TYPES = [PALM, BANANA, FICUS, MONSTERA, HELICONIA]
     
     # Dead/decay types
     DEAD_TYPES = [DEAD_TREE, STUMP, FALLEN_LOG, SNAG]

@@ -19,21 +19,61 @@ import numpy as np
 
 class BuildingType(Enum):
     """Categories of buildings."""
-    # Residential
+    # Residential - Classic
     HOUSE = "house"              # Small 1-2 floor home with pitched roof
     APARTMENT = "apartment"      # Medium 3-6 floor flat roof building
     VILLA = "villa"              # Larger upscale home with complex roof
+    CABIN = "cabin"              # Small rustic mountain/forest dwelling
+    
+    # Residential - Modern (from Low Poly Modern House Pack)
+    MODERN_HOUSE = "modern_house"         # Clean lines, flat roof, large windows
+    SPLIT_LEVEL = "split_level"           # Multi-level offset floors
+    RANCH = "ranch"                       # Single-floor spread out
+    BUNGALOW = "bungalow"                 # Small cozy single-floor
+    TOWNHOUSE = "townhouse"               # Narrow multi-floor attached
+    LOFT = "loft"                         # Industrial converted space
+    PENTHOUSE = "penthouse"               # Top-floor luxury
+    DUPLEX = "duplex"                     # Two-unit dwelling
+    MANSION = "mansion"                   # Large luxury estate
+    COTTAGE = "cottage"                   # Small rural home
+    BEACH_HOUSE = "beach_house"           # Elevated stilts, large deck
+    TREE_HOUSE = "tree_house"             # Elevated platform structure
+    TINY_HOUSE = "tiny_house"             # Very small efficient dwelling
+    A_FRAME = "a_frame"                   # Triangular cabin style
+    CONTAINER_HOUSE = "container_house"   # Industrial shipping container
+    GEODOME_HOME = "geodome_home"         # Dome-shaped residence
+    FLOATING_HOUSE = "floating_house"     # House on water/stilts
+    UNDERGROUND_HOME = "underground_home" # Earth-sheltered
+    CAPSULE = "capsule"                   # Minimalist pod dwelling
+    GREENHOUSE = "greenhouse"             # Glass-walled plant house
     
     # Commercial  
     SHOP = "shop"                # 1-2 floor with awning and large windows
     OFFICE = "office"            # Medium office building
     TOWER = "tower"              # Tall skyscraper
     HOTEL = "hotel"              # Multi-floor with balconies
+    HOSPITAL = "hospital"        # Medical building with cross/helipad
+    RESTAURANT = "restaurant"    # Dining with outdoor seating potential
     
     # Industrial
     WAREHOUSE = "warehouse"      # Large footprint, low height
     FACTORY = "factory"          # Industrial with smokestacks
     HANGAR = "hangar"            # Curved/arched roof
+    SILO = "silo"                # Tall cylindrical storage
+    POWERPLANT = "powerplant"    # Energy generation with cooling towers
+    
+    # Sci-Fi/Futuristic
+    SKYSCRAPER = "skyscraper"    # Very tall futuristic tower with antenna
+    PLANETARIUM = "planetarium"  # Dome for stargazing
+    SOLAR_STATION = "solar_station"  # Solar panel arrays on roof
+    LANDING_PAD = "landing_pad"  # Elevated platform for spacecraft
+    SPACEPORT = "spaceport"      # Multi-pad spacecraft facility
+    RESEARCH_LAB = "research_lab"  # Scientific facility with satellite dishes
+    
+    # Recreation
+    PLAYGROUND = "playground"    # Slides, climbing structures
+    STADIUM = "stadium"          # Large arena with tiered seating
+    POOL = "pool"                # Swimming facility with open center
     
     # Special
     TEMPLE = "temple"            # Religious/spiritual structure
@@ -41,6 +81,9 @@ class BuildingType(Enum):
     OBSERVATORY = "observatory"  # Dome-topped
     RUINS = "ruins"              # Partially destroyed ancient structure
     PARKOUR = "parkour"          # Playground of platforms, ramps, gaps for jumping
+    LIGHTHOUSE = "lighthouse"    # Tall beacon tower near water
+    BRIDGE = "bridge"            # Spanning structure
+    GAZEBO = "gazebo"            # Open-sided garden structure
 
 
 class RoofType(Enum):
@@ -53,6 +96,12 @@ class RoofType(Enum):
     DOME = "dome"                # Hemispherical
     BARREL = "barrel"            # Cylindrical/curved
     STEPPED = "stepped"          # Tiered/stepped like ziggurats
+    SAWTOOTH = "sawtooth"        # Industrial zigzag profile
+    CONICAL = "conical"          # Pointed cone (lighthouse, tower)
+    PAGODA = "pagoda"            # Multi-tiered Asian style
+    MANSARD = "mansard"          # Four-sided with two slopes each
+    BUTTERFLY = "butterfly"      # V-shaped modern
+    GEODESIC = "geodesic"        # Triangulated dome (futuristic)
 
 
 class WallStyle(Enum):
@@ -342,6 +391,471 @@ class BuildingDNA:
             has_balconies = False
             has_chimney = False
             
+        elif building_type == BuildingType.CABIN:
+            width = 6 + rng.random() * 6       # 6-12 (cozy)
+            depth = 6 + rng.random() * 6       # 6-12
+            floors = 1 if rng.random() < 0.7 else 2
+            floor_height = 6.5 + rng.random() * 1.5
+            roof_type = rng.choice([RoofType.GABLED, RoofType.SHED])
+            wall_style = WallStyle.WOOD
+            colors = ColorPalette.random(rng, "residential")
+            has_balconies = floors > 1 and rng.random() < 0.5
+            has_chimney = True
+            
+        # =====================================================================
+        # MODERN HOUSE TYPES (from Low Poly Modern House Pack analysis)
+        # =====================================================================
+        
+        elif building_type == BuildingType.MODERN_HOUSE:
+            width = 12 + rng.random() * 10     # 12-22
+            depth = 10 + rng.random() * 8      # 10-18
+            floors = 2 + rng.integers(0, 2)    # 2-3
+            floor_height = 7.0 + rng.random()
+            roof_type = RoofType.FLAT
+            wall_style = rng.choice([WallStyle.CONCRETE, WallStyle.GLASS])
+            colors = ColorPalette.random(rng, "modern")
+            has_balconies = rng.random() < 0.6
+            has_chimney = False
+            
+        elif building_type == BuildingType.SPLIT_LEVEL:
+            width = 14 + rng.random() * 8      # 14-22
+            depth = 10 + rng.random() * 6      # 10-16
+            floors = 3                          # Always 3 offset levels
+            floor_height = 5.5 + rng.random()  # Shorter floors
+            roof_type = rng.choice([RoofType.FLAT, RoofType.SHED])
+            wall_style = rng.choice([WallStyle.BRICK, WallStyle.SOLID])
+            colors = ColorPalette.random(rng, "residential")
+            has_balconies = False
+            has_chimney = rng.random() < 0.3
+            
+        elif building_type == BuildingType.RANCH:
+            width = 20 + rng.random() * 15     # 20-35 (wide)
+            depth = 10 + rng.random() * 6      # 10-16 (shallow)
+            floors = 1                          # Always single floor
+            floor_height = 7.0 + rng.random() * 1.5
+            roof_type = rng.choice([RoofType.GABLED, RoofType.HIPPED])
+            wall_style = rng.choice([WallStyle.BRICK, WallStyle.WOOD])
+            colors = ColorPalette.random(rng, "residential")
+            has_balconies = False
+            has_chimney = rng.random() < 0.5
+            
+        elif building_type == BuildingType.BUNGALOW:
+            width = 8 + rng.random() * 6       # 8-14
+            depth = 8 + rng.random() * 6       # 8-14
+            floors = 1
+            floor_height = 6.5 + rng.random()
+            roof_type = rng.choice([RoofType.GABLED, RoofType.HIPPED])
+            wall_style = rng.choice([WallStyle.WOOD, WallStyle.BRICK])
+            colors = ColorPalette.random(rng, "residential")
+            has_balconies = False
+            has_chimney = rng.random() < 0.4
+            
+        elif building_type == BuildingType.TOWNHOUSE:
+            width = 6 + rng.random() * 4       # 6-10 (narrow)
+            depth = 12 + rng.random() * 8      # 12-20 (deep)
+            floors = 3 + rng.integers(0, 2)    # 3-4
+            floor_height = 6.5 + rng.random()
+            roof_type = rng.choice([RoofType.FLAT, RoofType.GABLED])
+            wall_style = rng.choice([WallStyle.BRICK, WallStyle.SOLID])
+            colors = ColorPalette.random(rng, "residential")
+            has_balconies = rng.random() < 0.4
+            has_chimney = False
+            
+        elif building_type == BuildingType.LOFT:
+            width = 15 + rng.random() * 10     # 15-25
+            depth = 12 + rng.random() * 8      # 12-20
+            floors = 2
+            floor_height = 9.0 + rng.random() * 2.0  # Very tall ceilings
+            roof_type = RoofType.FLAT
+            wall_style = rng.choice([WallStyle.BRICK, WallStyle.CONCRETE])
+            colors = ColorPalette.random(rng, "industrial")
+            has_balconies = rng.random() < 0.3
+            has_chimney = False
+            
+        elif building_type == BuildingType.PENTHOUSE:
+            width = 20 + rng.random() * 15     # 20-35
+            depth = 18 + rng.random() * 12     # 18-30
+            floors = 1                          # Single floor luxury
+            floor_height = 8.0 + rng.random() * 2.0
+            roof_type = RoofType.FLAT
+            wall_style = WallStyle.GLASS
+            colors = ColorPalette.random(rng, "modern")
+            has_balconies = True
+            has_rooftop_features = True
+            has_chimney = False
+            
+        elif building_type == BuildingType.DUPLEX:
+            width = 12 + rng.random() * 8      # 12-20
+            depth = 10 + rng.random() * 6      # 10-16
+            floors = 2
+            floor_height = 7.0 + rng.random()
+            roof_type = rng.choice([RoofType.GABLED, RoofType.HIPPED])
+            wall_style = rng.choice([WallStyle.BRICK, WallStyle.SOLID])
+            colors = ColorPalette.random(rng, "residential")
+            has_balconies = rng.random() < 0.3
+            has_chimney = rng.random() < 0.3
+            
+        elif building_type == BuildingType.MANSION:
+            width = 30 + rng.random() * 20     # 30-50
+            depth = 25 + rng.random() * 15     # 25-40
+            floors = 2 + rng.integers(0, 2)    # 2-3
+            floor_height = 8.0 + rng.random() * 2.0
+            roof_type = rng.choice([RoofType.HIPPED, RoofType.MANSARD])
+            wall_style = rng.choice([WallStyle.STONE, WallStyle.BRICK])
+            colors = ColorPalette.random(rng, "residential")
+            has_balconies = True
+            has_chimney = True
+            
+        elif building_type == BuildingType.COTTAGE:
+            width = 7 + rng.random() * 5       # 7-12
+            depth = 6 + rng.random() * 5       # 6-11
+            floors = 1 if rng.random() < 0.6 else 2
+            floor_height = 6.0 + rng.random()
+            roof_type = rng.choice([RoofType.GABLED, RoofType.HIPPED])
+            wall_style = rng.choice([WallStyle.STONE, WallStyle.WOOD])
+            colors = ColorPalette.random(rng, "residential")
+            has_balconies = False
+            has_chimney = rng.random() < 0.7
+            
+        elif building_type == BuildingType.BEACH_HOUSE:
+            width = 12 + rng.random() * 8      # 12-20
+            depth = 10 + rng.random() * 6      # 10-16
+            floors = 2
+            floor_height = 8.0 + rng.random() * 2.0  # Elevated + tall
+            roof_type = rng.choice([RoofType.GABLED, RoofType.HIPPED])
+            wall_style = WallStyle.WOOD
+            colors = ColorPalette(
+                primary=(0.9, 0.92, 0.95),      # Light/white
+                secondary=(0.4, 0.6, 0.8),      # Ocean blue
+                roof=(0.5, 0.45, 0.4),
+                window=(0.5, 0.7, 0.9)
+            )
+            has_balconies = True
+            has_chimney = False
+            
+        elif building_type == BuildingType.TREE_HOUSE:
+            size = 8 + rng.random() * 6
+            width = size
+            depth = size
+            floors = 1
+            floor_height = 15.0 + rng.random() * 5.0  # Very elevated
+            roof_type = rng.choice([RoofType.GABLED, RoofType.PYRAMID])
+            wall_style = WallStyle.WOOD
+            colors = ColorPalette.random(rng, "residential")
+            has_balconies = True
+            has_chimney = False
+            
+        elif building_type == BuildingType.TINY_HOUSE:
+            width = 4 + rng.random() * 3       # 4-7
+            depth = 6 + rng.random() * 4       # 6-10
+            floors = 1
+            floor_height = 6.0 + rng.random()
+            roof_type = rng.choice([RoofType.GABLED, RoofType.SHED, RoofType.BARREL])
+            wall_style = rng.choice([WallStyle.WOOD, WallStyle.METAL])
+            colors = ColorPalette.random(rng, "modern")
+            has_balconies = False
+            has_chimney = rng.random() < 0.2
+            
+        elif building_type == BuildingType.A_FRAME:
+            width = 8 + rng.random() * 6       # 8-14
+            depth = 10 + rng.random() * 6      # 10-16
+            floors = 2
+            floor_height = 6.0 + rng.random()
+            roof_type = RoofType.GABLED        # Very steep gable
+            wall_style = WallStyle.WOOD
+            colors = ColorPalette.random(rng, "residential")
+            has_balconies = rng.random() < 0.4
+            has_chimney = rng.random() < 0.5
+            
+        elif building_type == BuildingType.CONTAINER_HOUSE:
+            width = 6 + rng.random() * 4       # 6-10 (narrow like container)
+            depth = 12 + rng.random() * 8      # 12-20 (long)
+            floors = 1 + rng.integers(0, 2)    # 1-2
+            floor_height = 6.0 + rng.random()
+            roof_type = RoofType.FLAT
+            wall_style = WallStyle.METAL
+            colors = ColorPalette.random(rng, "industrial")
+            has_balconies = rng.random() < 0.3
+            has_chimney = False
+            
+        elif building_type == BuildingType.GEODOME_HOME:
+            size = 12 + rng.random() * 8
+            width = size
+            depth = size
+            floors = 2
+            floor_height = 6.0 + rng.random()
+            roof_type = RoofType.GEODESIC
+            wall_style = rng.choice([WallStyle.GLASS, WallStyle.SOLID])
+            colors = ColorPalette.random(rng, "modern")
+            has_balconies = False
+            has_chimney = False
+            
+        elif building_type == BuildingType.FLOATING_HOUSE:
+            width = 10 + rng.random() * 6      # 10-16
+            depth = 12 + rng.random() * 8      # 12-20
+            floors = 1 if rng.random() < 0.6 else 2
+            floor_height = 7.0 + rng.random()
+            roof_type = rng.choice([RoofType.FLAT, RoofType.SHED])
+            wall_style = WallStyle.WOOD
+            colors = ColorPalette.random(rng, "modern")
+            has_balconies = True
+            has_chimney = False
+            
+        elif building_type == BuildingType.UNDERGROUND_HOME:
+            width = 15 + rng.random() * 10     # 15-25
+            depth = 12 + rng.random() * 8      # 12-20
+            floors = 1                          # Mostly underground
+            floor_height = 7.0 + rng.random()
+            roof_type = RoofType.FLAT          # Ground level
+            wall_style = WallStyle.CONCRETE
+            colors = ColorPalette.random(rng, "modern")
+            has_balconies = False
+            has_chimney = False
+            
+        elif building_type == BuildingType.CAPSULE:
+            size = 5 + rng.random() * 3
+            width = size
+            depth = size
+            floors = 1
+            floor_height = 5.0 + rng.random()
+            roof_type = RoofType.DOME
+            wall_style = WallStyle.METAL
+            colors = ColorPalette.random(rng, "alien")
+            has_balconies = False
+            has_chimney = False
+            
+        elif building_type == BuildingType.GREENHOUSE:
+            width = 10 + rng.random() * 8      # 10-18
+            depth = 15 + rng.random() * 10     # 15-25
+            floors = 1
+            floor_height = 8.0 + rng.random() * 2.0
+            roof_type = rng.choice([RoofType.GABLED, RoofType.BARREL])
+            wall_style = WallStyle.GLASS
+            colors = ColorPalette(
+                primary=(0.8, 0.85, 0.9),
+                secondary=(0.3, 0.6, 0.3),      # Green accents
+                roof=(0.75, 0.8, 0.85),
+                window=(0.6, 0.8, 0.9)
+            )
+            has_balconies = False
+            has_chimney = False
+            
+        elif building_type == BuildingType.HOSPITAL:
+            width = 30 + rng.random() * 20     # 30-50
+            depth = 25 + rng.random() * 15     # 25-40
+            floors = 3 + rng.integers(0, 5)    # 3-7
+            floor_height = 7.5 + rng.random()  # Tall ceilings (7.5-8.5)
+            roof_type = RoofType.FLAT
+            wall_style = WallStyle.CONCRETE
+            colors = ColorPalette(
+                primary=(0.92, 0.92, 0.95),  # White/pale
+                secondary=(0.8, 0.2, 0.2),   # Red cross accent
+                roof=(0.4, 0.42, 0.45),
+                window=(0.5, 0.7, 0.9)
+            )
+            has_balconies = False
+            has_rooftop_features = True  # Helipad
+            has_chimney = False
+            
+        elif building_type == BuildingType.RESTAURANT:
+            width = 12 + rng.random() * 10     # 12-22
+            depth = 10 + rng.random() * 8      # 10-18
+            floors = 1 if rng.random() < 0.6 else 2
+            floor_height = 7.0 + rng.random() * 1.5
+            roof_type = rng.choice([RoofType.FLAT, RoofType.GABLED, RoofType.SHED])
+            wall_style = rng.choice([WallStyle.BRICK, WallStyle.WOOD])
+            colors = ColorPalette.random(rng, "commercial")
+            has_balconies = False
+            has_awning = True
+            awning_depth = 3.0 + rng.random() * 2.0
+            has_chimney = rng.random() < 0.4
+            
+        elif building_type == BuildingType.SILO:
+            # Cylindrical storage (treat as square footprint)
+            size = 8 + rng.random() * 8
+            width = size
+            depth = size
+            floors = 4 + rng.integers(0, 4)    # Tall
+            floor_height = 5.0 + rng.random() * 2.0
+            roof_type = RoofType.CONICAL
+            wall_style = WallStyle.METAL
+            colors = ColorPalette.random(rng, "industrial")
+            has_balconies = False
+            has_chimney = False
+            
+        elif building_type == BuildingType.POWERPLANT:
+            width = 40 + rng.random() * 30
+            depth = 35 + rng.random() * 25
+            floors = 2 + rng.integers(0, 2)
+            floor_height = 10.0 + rng.random() * 4.0  # Very tall
+            roof_type = RoofType.FLAT
+            wall_style = WallStyle.CONCRETE
+            colors = ColorPalette.random(rng, "industrial")
+            has_balconies = False
+            has_chimney = True  # Cooling towers
+            has_rooftop_features = True
+            
+        elif building_type == BuildingType.SKYSCRAPER:
+            width = 20 + rng.random() * 15     # 20-35
+            depth = 20 + rng.random() * 15     # 20-35
+            floors = 20 + rng.integers(0, 30)  # 20-49 floors!
+            floor_height = 6.0 + rng.random() * 0.5
+            roof_type = rng.choice([RoofType.FLAT, RoofType.PYRAMID, RoofType.DOME])
+            wall_style = WallStyle.GLASS
+            colors = ColorPalette.random(rng, "modern")
+            has_balconies = False
+            has_rooftop_features = True  # Antenna, helipad
+            wall_inset = rng.random() * 0.3
+            has_chimney = False
+            
+        elif building_type == BuildingType.PLANETARIUM:
+            size = 25 + rng.random() * 15
+            width = size
+            depth = size
+            floors = 2
+            floor_height = 8.0 + rng.random() * 2.0
+            roof_type = RoofType.GEODESIC
+            wall_style = WallStyle.CONCRETE
+            colors = ColorPalette.random(rng, "modern")
+            has_balconies = False
+            has_chimney = False
+            
+        elif building_type == BuildingType.SOLAR_STATION:
+            width = 20 + rng.random() * 20
+            depth = 15 + rng.random() * 15
+            floors = 1 if rng.random() < 0.7 else 2
+            floor_height = 7.0 + rng.random() * 2.0
+            roof_type = RoofType.FLAT  # Covered with solar panels
+            wall_style = WallStyle.METAL
+            colors = ColorPalette(
+                primary=(0.3, 0.35, 0.4),
+                secondary=(0.2, 0.3, 0.5),  # Blue panels
+                roof=(0.15, 0.2, 0.35),     # Dark blue
+                window=(0.4, 0.5, 0.7)
+            )
+            has_balconies = False
+            has_rooftop_features = True
+            has_chimney = False
+            
+        elif building_type == BuildingType.LANDING_PAD:
+            size = 25 + rng.random() * 15
+            width = size
+            depth = size
+            floors = 1
+            floor_height = 8.0 + rng.random() * 4.0  # Elevated platform
+            roof_type = RoofType.FLAT
+            wall_style = WallStyle.METAL
+            colors = ColorPalette(
+                primary=(0.4, 0.42, 0.45),
+                secondary=(0.9, 0.6, 0.1),  # Orange markings
+                roof=(0.35, 0.38, 0.42),
+                window=(0.5, 0.55, 0.6)
+            )
+            has_balconies = False
+            has_chimney = False
+            
+        elif building_type == BuildingType.SPACEPORT:
+            width = 60 + rng.random() * 40
+            depth = 50 + rng.random() * 30
+            floors = 2 + rng.integers(0, 2)
+            floor_height = 10.0 + rng.random() * 4.0
+            roof_type = RoofType.BARREL
+            wall_style = WallStyle.METAL
+            colors = ColorPalette.random(rng, "modern")
+            has_balconies = False
+            has_rooftop_features = True
+            has_chimney = False
+            
+        elif building_type == BuildingType.RESEARCH_LAB:
+            width = 25 + rng.random() * 20
+            depth = 20 + rng.random() * 15
+            floors = 2 + rng.integers(0, 3)
+            floor_height = 7.5 + rng.random() * 1.5
+            roof_type = rng.choice([RoofType.FLAT, RoofType.DOME])
+            wall_style = rng.choice([WallStyle.CONCRETE, WallStyle.GLASS])
+            colors = ColorPalette.random(rng, "modern")
+            has_balconies = False
+            has_rooftop_features = True  # Satellite dishes
+            has_chimney = False
+            
+        elif building_type == BuildingType.PLAYGROUND:
+            width = 25 + rng.random() * 20
+            depth = 25 + rng.random() * 20
+            floors = 3 + rng.integers(0, 3)  # Multi-level play structure
+            floor_height = 5.0 + rng.random() * 2.0
+            roof_type = RoofType.FLAT
+            wall_style = WallStyle.METAL
+            colors = ColorPalette.random(rng, "commercial")  # Bright colors
+            has_balconies = False
+            has_chimney = False
+            
+        elif building_type == BuildingType.STADIUM:
+            width = 80 + rng.random() * 60
+            depth = 60 + rng.random() * 40
+            floors = 4 + rng.integers(0, 4)
+            floor_height = 8.0 + rng.random() * 3.0
+            roof_type = RoofType.FLAT
+            wall_style = WallStyle.CONCRETE
+            colors = ColorPalette.random(rng, "modern")
+            has_balconies = True  # Seating tiers
+            has_chimney = False
+            
+        elif building_type == BuildingType.POOL:
+            width = 30 + rng.random() * 20
+            depth = 20 + rng.random() * 15
+            floors = 1
+            floor_height = 6.0 + rng.random() * 2.0
+            roof_type = RoofType.FLAT
+            wall_style = WallStyle.CONCRETE
+            colors = ColorPalette(
+                primary=(0.85, 0.88, 0.9),
+                secondary=(0.3, 0.6, 0.9),  # Pool blue
+                roof=(0.4, 0.45, 0.5),
+                window=(0.4, 0.7, 0.9)
+            )
+            has_balconies = False
+            has_chimney = False
+            
+        elif building_type == BuildingType.LIGHTHOUSE:
+            size = 8 + rng.random() * 4
+            width = size
+            depth = size
+            floors = 6 + rng.integers(0, 4)  # Tall and narrow
+            floor_height = 5.0 + rng.random() * 1.5
+            roof_type = RoofType.CONICAL
+            wall_style = rng.choice([WallStyle.BRICK, WallStyle.STONE])
+            colors = ColorPalette(
+                primary=(0.95, 0.92, 0.88),  # White
+                secondary=(0.8, 0.2, 0.15),  # Red stripes
+                roof=(0.25, 0.28, 0.32),
+                window=(0.6, 0.7, 0.8)
+            )
+            has_balconies = True  # Observation deck at top
+            has_chimney = False
+            
+        elif building_type == BuildingType.BRIDGE:
+            width = 60 + rng.random() * 60  # Spanning distance
+            depth = 8 + rng.random() * 6    # Narrow walkway
+            floors = 1
+            floor_height = 12.0 + rng.random() * 8.0  # Elevated
+            roof_type = RoofType.FLAT
+            wall_style = WallStyle.METAL
+            colors = ColorPalette.random(rng, "industrial")
+            has_balconies = False
+            has_chimney = False
+            
+        elif building_type == BuildingType.GAZEBO:
+            size = 8 + rng.random() * 6
+            width = size
+            depth = size
+            floors = 1
+            floor_height = 6.0 + rng.random() * 2.0
+            roof_type = rng.choice([RoofType.PYRAMID, RoofType.CONICAL, RoofType.DOME])
+            wall_style = WallStyle.WOOD
+            colors = ColorPalette.random(rng, "residential")
+            has_balconies = False
+            has_chimney = False
+            
         else:  # Generic fallback
             width = 12 + rng.random() * 12
             depth = 10 + rng.random() * 10
@@ -382,15 +896,34 @@ class BuildingDNA:
     def total_height(self) -> float:
         """Total building height including roof."""
         base = self.floors * self.floor_height
-        # Add roof height
+        min_dim = min(self.width, self.depth)
+        # Add roof height based on type
         if self.roof_type == RoofType.GABLED:
-            return base + min(self.width, self.depth) * 0.4
+            return base + min_dim * 0.4
         elif self.roof_type == RoofType.PYRAMID:
-            return base + min(self.width, self.depth) * 0.5
+            return base + min_dim * 0.5
         elif self.roof_type == RoofType.DOME:
-            return base + min(self.width, self.depth) * 0.3
+            return base + min_dim * 0.3
         elif self.roof_type == RoofType.HIPPED:
-            return base + min(self.width, self.depth) * 0.35
+            return base + min_dim * 0.35
+        elif self.roof_type == RoofType.CONICAL:
+            return base + min_dim * 0.6  # Pointed cone
+        elif self.roof_type == RoofType.PAGODA:
+            return base + min_dim * 0.45
+        elif self.roof_type == RoofType.MANSARD:
+            return base + min_dim * 0.3
+        elif self.roof_type == RoofType.GEODESIC:
+            return base + min_dim * 0.4
+        elif self.roof_type == RoofType.BUTTERFLY:
+            return base + min_dim * 0.15  # Low V
+        elif self.roof_type == RoofType.SAWTOOTH:
+            return base + min_dim * 0.2
+        elif self.roof_type == RoofType.STEPPED:
+            return base + min_dim * 0.5
+        elif self.roof_type == RoofType.BARREL:
+            return base + min_dim * 0.25
+        elif self.roof_type == RoofType.SHED:
+            return base + min_dim * 0.2
         else:
             return base + 0.5  # Flat roof parapet
 
@@ -403,54 +936,117 @@ def get_building_type_for_biome(biome: str, rng: np.random.Generator) -> Buildin
     """Choose an appropriate building type based on biome."""
     if biome in ["urban", "city"]:
         weights = {
-            BuildingType.APARTMENT: 0.25,
-            BuildingType.OFFICE: 0.2,
-            BuildingType.TOWER: 0.1,
-            BuildingType.SHOP: 0.25,
-            BuildingType.WAREHOUSE: 0.1,
-            BuildingType.HOUSE: 0.1,
+            BuildingType.APARTMENT: 0.12,
+            BuildingType.OFFICE: 0.12,
+            BuildingType.TOWER: 0.06,
+            BuildingType.SKYSCRAPER: 0.08,
+            BuildingType.SHOP: 0.1,
+            BuildingType.RESTAURANT: 0.06,
+            BuildingType.WAREHOUSE: 0.04,
+            BuildingType.TOWNHOUSE: 0.08,
+            BuildingType.LOFT: 0.06,
+            BuildingType.PENTHOUSE: 0.04,
+            BuildingType.MODERN_HOUSE: 0.05,
+            BuildingType.HOSPITAL: 0.04,
+            BuildingType.HOTEL: 0.06,
+            BuildingType.STADIUM: 0.02,
+            BuildingType.PARKOUR: 0.04,
+            BuildingType.CONTAINER_HOUSE: 0.03,
         }
     elif biome in ["suburban", "plains"]:
         weights = {
-            BuildingType.HOUSE: 0.5,
-            BuildingType.SHOP: 0.15,
-            BuildingType.APARTMENT: 0.15,
-            BuildingType.WAREHOUSE: 0.1,
-            BuildingType.VILLA: 0.1,
+            BuildingType.HOUSE: 0.15,
+            BuildingType.MODERN_HOUSE: 0.1,
+            BuildingType.RANCH: 0.08,
+            BuildingType.BUNGALOW: 0.08,
+            BuildingType.SPLIT_LEVEL: 0.05,
+            BuildingType.VILLA: 0.05,
+            BuildingType.DUPLEX: 0.06,
+            BuildingType.COTTAGE: 0.05,
+            BuildingType.SHOP: 0.08,
+            BuildingType.RESTAURANT: 0.05,
+            BuildingType.APARTMENT: 0.06,
+            BuildingType.PLAYGROUND: 0.06,
+            BuildingType.POOL: 0.04,
+            BuildingType.GAZEBO: 0.05,
+            BuildingType.GREENHOUSE: 0.04,
         }
     elif biome in ["desert", "canyon"]:
         weights = {
-            BuildingType.TEMPLE: 0.2,
-            BuildingType.RUINS: 0.25,
-            BuildingType.HOUSE: 0.3,
-            BuildingType.WAREHOUSE: 0.15,
+            BuildingType.TEMPLE: 0.15,
+            BuildingType.RUINS: 0.2,
+            BuildingType.HOUSE: 0.2,
+            BuildingType.WAREHOUSE: 0.1,
             BuildingType.MONUMENT: 0.1,
+            BuildingType.SOLAR_STATION: 0.1,
+            BuildingType.OBSERVATORY: 0.08,
+            BuildingType.RESEARCH_LAB: 0.07,
         }
     elif biome in ["forest", "jungle"]:
         weights = {
-            BuildingType.HOUSE: 0.4,
-            BuildingType.TEMPLE: 0.2,
-            BuildingType.RUINS: 0.2,
-            BuildingType.OBSERVATORY: 0.1,
-            BuildingType.VILLA: 0.1,
+            BuildingType.CABIN: 0.2,
+            BuildingType.TREE_HOUSE: 0.12,
+            BuildingType.COTTAGE: 0.1,
+            BuildingType.A_FRAME: 0.08,
+            BuildingType.HOUSE: 0.1,
+            BuildingType.TEMPLE: 0.1,
+            BuildingType.RUINS: 0.1,
+            BuildingType.OBSERVATORY: 0.05,
+            BuildingType.GAZEBO: 0.08,
+            BuildingType.GREENHOUSE: 0.07,
         }
     elif biome in ["snow", "tundra"]:
         weights = {
-            BuildingType.HOUSE: 0.4,
-            BuildingType.FACTORY: 0.2,
-            BuildingType.WAREHOUSE: 0.2,
+            BuildingType.HOUSE: 0.25,
+            BuildingType.CABIN: 0.2,
+            BuildingType.FACTORY: 0.12,
+            BuildingType.WAREHOUSE: 0.1,
             BuildingType.OBSERVATORY: 0.1,
+            BuildingType.RESEARCH_LAB: 0.08,
+            BuildingType.POWERPLANT: 0.08,
             BuildingType.APARTMENT: 0.1,
         }
-    else:  # Default/alien
+    elif biome in ["coast", "beach", "ocean"]:
         weights = {
-            BuildingType.TOWER: 0.15,
-            BuildingType.TEMPLE: 0.15,
-            BuildingType.OBSERVATORY: 0.15,
+            BuildingType.BEACH_HOUSE: 0.2,
+            BuildingType.LIGHTHOUSE: 0.12,
+            BuildingType.FLOATING_HOUSE: 0.1,
+            BuildingType.VILLA: 0.1,
+            BuildingType.MODERN_HOUSE: 0.08,
+            BuildingType.RESTAURANT: 0.08,
+            BuildingType.HOTEL: 0.1,
+            BuildingType.POOL: 0.08,
+            BuildingType.GAZEBO: 0.08,
+            BuildingType.PENTHOUSE: 0.06,
+        }
+    elif biome in ["futuristic", "scifi", "alien"]:
+        weights = {
+            BuildingType.SKYSCRAPER: 0.12,
+            BuildingType.PLANETARIUM: 0.08,
+            BuildingType.SOLAR_STATION: 0.08,
+            BuildingType.LANDING_PAD: 0.08,
+            BuildingType.SPACEPORT: 0.07,
+            BuildingType.RESEARCH_LAB: 0.08,
+            BuildingType.TOWER: 0.1,
+            BuildingType.OBSERVATORY: 0.08,
+            BuildingType.GEODOME_HOME: 0.08,
+            BuildingType.CAPSULE: 0.08,
+            BuildingType.CONTAINER_HOUSE: 0.05,
+            BuildingType.MODERN_HOUSE: 0.05,
+            BuildingType.PARKOUR: 0.05,
+        }
+    else:  # Default
+        weights = {
             BuildingType.HOUSE: 0.2,
-            BuildingType.RUINS: 0.15,
-            BuildingType.MONUMENT: 0.1,
-            BuildingType.APARTMENT: 0.1,
+            BuildingType.TOWER: 0.1,
+            BuildingType.TEMPLE: 0.1,
+            BuildingType.OBSERVATORY: 0.1,
+            BuildingType.RUINS: 0.1,
+            BuildingType.MONUMENT: 0.08,
+            BuildingType.APARTMENT: 0.08,
+            BuildingType.SHOP: 0.08,
+            BuildingType.WAREHOUSE: 0.06,
+            BuildingType.PARKOUR: 0.1,
         }
     
     types = list(weights.keys())
