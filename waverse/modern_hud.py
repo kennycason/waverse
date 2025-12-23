@@ -59,6 +59,61 @@ void main() {
 }
 """
 
+# =============================================================================
+# 3D PREVIEW SHADERS (for render-to-texture preview)
+# =============================================================================
+
+PREVIEW_3D_VERTEX_SHADER = """
+#version 330 core
+
+in vec3 in_position;
+in vec3 in_normal;
+in vec3 in_color;
+
+out vec3 v_normal;
+out vec3 v_color;
+out vec3 v_world_pos;
+
+uniform mat4 u_projection;
+uniform mat4 u_view;
+uniform mat4 u_model;
+uniform float u_time;
+
+void main() {
+    vec4 world_pos = u_model * vec4(in_position, 1.0);
+    v_world_pos = world_pos.xyz;
+    v_normal = mat3(u_model) * in_normal;
+    v_color = in_color;
+    gl_Position = u_projection * u_view * world_pos;
+}
+"""
+
+PREVIEW_3D_FRAGMENT_SHADER = """
+#version 330 core
+
+in vec3 v_normal;
+in vec3 v_color;
+in vec3 v_world_pos;
+
+out vec4 fragColor;
+
+uniform vec3 u_light_dir;
+uniform vec3 u_ambient;
+uniform vec3 u_bg_color;
+
+void main() {
+    vec3 norm = normalize(v_normal);
+    float diff = max(dot(norm, normalize(u_light_dir)), 0.0);
+    
+    // Rim lighting for depth
+    float rim = 1.0 - max(dot(norm, vec3(0.0, 0.0, 1.0)), 0.0);
+    rim = pow(rim, 2.0) * 0.3;
+    
+    vec3 lit_color = v_color * (u_ambient + diff * 0.7 + rim);
+    fragColor = vec4(lit_color, 1.0);
+}
+"""
+
 HUD_FRAGMENT_SHADER = """
 #version 330 core
 
@@ -306,6 +361,183 @@ class ModernHUDRenderer:
         self._pending_preview: Optional[Dict] = None  # Store pending preview info
         self._dna_cache: Dict[str, Dict] = {}  # Cache for loaded DNA data
         self._preview_rotation = 0.0  # Animation rotation for preview
+        
+        # === 3D PREVIEW SYSTEM ===
+        self._init_3d_preview_system()
+    
+    def _init_3d_preview_system(self):
+        """Initialize framebuffer and shaders for 3D entity preview."""
+        # Preview framebuffer size
+        self._preview_size = 256
+        
+        # Create framebuffer for off-screen 3D rendering
+        self._preview_texture = self.ctx.texture(
+            (self._preview_size, self._preview_size), 4
+        )
+        self._preview_texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        self._preview_depth = self.ctx.depth_renderbuffer(
+            (self._preview_size, self._preview_size)
+        )
+        self._preview_fbo = self.ctx.framebuffer(
+            color_attachments=[self._preview_texture],
+            depth_attachment=self._preview_depth
+        )
+        
+        # Compile 3D preview shader
+        self._preview_program = self.ctx.program(
+            vertex_shader=PREVIEW_3D_VERTEX_SHADER,
+            fragment_shader=PREVIEW_3D_FRAGMENT_SHADER,
+        )
+        
+        # Create primitive meshes for body segments
+        self._preview_meshes = {}
+        self._create_preview_meshes()
+        
+        # Cache for built entity geometry
+        self._entity_geometry_cache: Dict[str, Tuple[moderngl.Buffer, int]] = {}
+        
+    def _create_preview_meshes(self):
+        """Create basic 3D primitive meshes (ellipsoid, box, cylinder, cone)."""
+        # Ellipsoid (unit sphere, will be scaled)
+        self._preview_meshes['ellipsoid'] = self._create_ellipsoid_mesh(16, 12)
+        self._preview_meshes['box'] = self._create_box_mesh()
+        self._preview_meshes['cylinder'] = self._create_cylinder_mesh(16)
+        self._preview_meshes['cone'] = self._create_cone_mesh(16)
+        
+    def _create_ellipsoid_mesh(self, slices: int, stacks: int) -> Tuple[moderngl.Buffer, int]:
+        """Create a unit sphere mesh (vertices + normals + colors)."""
+        vertices = []
+        
+        for i in range(stacks):
+            lat0 = math.pi * (-0.5 + float(i) / stacks)
+            lat1 = math.pi * (-0.5 + float(i + 1) / stacks)
+            z0 = math.sin(lat0)
+            z1 = math.sin(lat1)
+            r0 = math.cos(lat0)
+            r1 = math.cos(lat1)
+            
+            for j in range(slices):
+                lng0 = 2 * math.pi * float(j) / slices
+                lng1 = 2 * math.pi * float(j + 1) / slices
+                
+                x0 = math.cos(lng0)
+                y0 = math.sin(lng0)
+                x1 = math.cos(lng1)
+                y1 = math.sin(lng1)
+                
+                # Two triangles per quad
+                # Triangle 1
+                p1 = (x0 * r0, y0 * r0, z0)
+                p2 = (x0 * r1, y0 * r1, z1)
+                p3 = (x1 * r1, y1 * r1, z1)
+                # Triangle 2
+                p4 = (x0 * r0, y0 * r0, z0)
+                p5 = (x1 * r1, y1 * r1, z1)
+                p6 = (x1 * r0, y1 * r0, z0)
+                
+                for p in [p1, p2, p3, p4, p5, p6]:
+                    # Position, normal (same for sphere), placeholder color
+                    vertices.extend([p[0], p[1], p[2]])  # position
+                    vertices.extend([p[0], p[1], p[2]])  # normal (unit sphere)
+                    vertices.extend([1.0, 1.0, 1.0])     # color (will be overwritten)
+        
+        data = np.array(vertices, dtype='f4')
+        vbo = self.ctx.buffer(data.tobytes())
+        return (vbo, len(vertices) // 9)
+    
+    def _create_box_mesh(self) -> Tuple[moderngl.Buffer, int]:
+        """Create a unit box mesh."""
+        vertices = []
+        # 6 faces, 2 triangles each
+        faces = [
+            # Front (+Z)
+            ((-0.5, -0.5, 0.5), (0.5, -0.5, 0.5), (0.5, 0.5, 0.5), (-0.5, 0.5, 0.5), (0, 0, 1)),
+            # Back (-Z)
+            ((0.5, -0.5, -0.5), (-0.5, -0.5, -0.5), (-0.5, 0.5, -0.5), (0.5, 0.5, -0.5), (0, 0, -1)),
+            # Top (+Y)
+            ((-0.5, 0.5, 0.5), (0.5, 0.5, 0.5), (0.5, 0.5, -0.5), (-0.5, 0.5, -0.5), (0, 1, 0)),
+            # Bottom (-Y)
+            ((-0.5, -0.5, -0.5), (0.5, -0.5, -0.5), (0.5, -0.5, 0.5), (-0.5, -0.5, 0.5), (0, -1, 0)),
+            # Right (+X)
+            ((0.5, -0.5, 0.5), (0.5, -0.5, -0.5), (0.5, 0.5, -0.5), (0.5, 0.5, 0.5), (1, 0, 0)),
+            # Left (-X)
+            ((-0.5, -0.5, -0.5), (-0.5, -0.5, 0.5), (-0.5, 0.5, 0.5), (-0.5, 0.5, -0.5), (-1, 0, 0)),
+        ]
+        
+        for v0, v1, v2, v3, n in faces:
+            # Two triangles: v0-v1-v2, v0-v2-v3
+            for p in [v0, v1, v2, v0, v2, v3]:
+                vertices.extend([p[0], p[1], p[2]])
+                vertices.extend([n[0], n[1], n[2]])
+                vertices.extend([1.0, 1.0, 1.0])
+        
+        data = np.array(vertices, dtype='f4')
+        vbo = self.ctx.buffer(data.tobytes())
+        return (vbo, len(vertices) // 9)
+    
+    def _create_cylinder_mesh(self, slices: int) -> Tuple[moderngl.Buffer, int]:
+        """Create a unit cylinder mesh (height 1, radius 0.5)."""
+        vertices = []
+        
+        for i in range(slices):
+            a0 = 2 * math.pi * i / slices
+            a1 = 2 * math.pi * (i + 1) / slices
+            x0, z0 = math.cos(a0) * 0.5, math.sin(a0) * 0.5
+            x1, z1 = math.cos(a1) * 0.5, math.sin(a1) * 0.5
+            
+            # Side quad (2 triangles)
+            n0 = (math.cos(a0), 0, math.sin(a0))
+            n1 = (math.cos(a1), 0, math.sin(a1))
+            
+            # Triangle 1
+            for p, n in [((x0, -0.5, z0), n0), ((x1, -0.5, z1), n1), ((x1, 0.5, z1), n1)]:
+                vertices.extend([p[0], p[1], p[2], n[0], n[1], n[2], 1.0, 1.0, 1.0])
+            # Triangle 2
+            for p, n in [((x0, -0.5, z0), n0), ((x1, 0.5, z1), n1), ((x0, 0.5, z0), n0)]:
+                vertices.extend([p[0], p[1], p[2], n[0], n[1], n[2], 1.0, 1.0, 1.0])
+            
+            # Top cap
+            vertices.extend([0, 0.5, 0, 0, 1, 0, 1.0, 1.0, 1.0])
+            vertices.extend([x0, 0.5, z0, 0, 1, 0, 1.0, 1.0, 1.0])
+            vertices.extend([x1, 0.5, z1, 0, 1, 0, 1.0, 1.0, 1.0])
+            
+            # Bottom cap
+            vertices.extend([0, -0.5, 0, 0, -1, 0, 1.0, 1.0, 1.0])
+            vertices.extend([x1, -0.5, z1, 0, -1, 0, 1.0, 1.0, 1.0])
+            vertices.extend([x0, -0.5, z0, 0, -1, 0, 1.0, 1.0, 1.0])
+        
+        data = np.array(vertices, dtype='f4')
+        vbo = self.ctx.buffer(data.tobytes())
+        return (vbo, len(vertices) // 9)
+    
+    def _create_cone_mesh(self, slices: int) -> Tuple[moderngl.Buffer, int]:
+        """Create a unit cone mesh (height 1, base radius 0.5)."""
+        vertices = []
+        
+        for i in range(slices):
+            a0 = 2 * math.pi * i / slices
+            a1 = 2 * math.pi * (i + 1) / slices
+            x0, z0 = math.cos(a0) * 0.5, math.sin(a0) * 0.5
+            x1, z1 = math.cos(a1) * 0.5, math.sin(a1) * 0.5
+            
+            # Side (tip to base edge)
+            # Normal: average of face normal
+            n0 = (math.cos(a0) * 0.894, 0.447, math.sin(a0) * 0.894)
+            n1 = (math.cos(a1) * 0.894, 0.447, math.sin(a1) * 0.894)
+            nm = ((n0[0]+n1[0])/2, n0[1], (n0[2]+n1[2])/2)
+            
+            vertices.extend([0, 0.5, 0, nm[0], nm[1], nm[2], 1.0, 1.0, 1.0])
+            vertices.extend([x0, -0.5, z0, n0[0], n0[1], n0[2], 1.0, 1.0, 1.0])
+            vertices.extend([x1, -0.5, z1, n1[0], n1[1], n1[2], 1.0, 1.0, 1.0])
+            
+            # Base cap
+            vertices.extend([0, -0.5, 0, 0, -1, 0, 1.0, 1.0, 1.0])
+            vertices.extend([x1, -0.5, z1, 0, -1, 0, 1.0, 1.0, 1.0])
+            vertices.extend([x0, -0.5, z0, 0, -1, 0, 1.0, 1.0, 1.0])
+        
+        data = np.array(vertices, dtype='f4')
+        vbo = self.ctx.buffer(data.tobytes())
+        return (vbo, len(vertices) // 9)
         
     def _load_png_texture(self, png_path: str) -> Optional[moderngl.Texture]:
         """Load a PNG image as a ModernGL texture, with caching."""
@@ -1299,40 +1531,305 @@ class ModernHUDRenderer:
             return None
     
     def _render_dna_preview(self, filename: str, x: float, y: float, w: float, h: float):
-        """Render a stylized 2D preview of the entity from its DNA."""
-        import json
-        
+        """Render a 3D preview of the entity to framebuffer, then display it."""
         # Update rotation for animation
-        self._preview_rotation += 0.02
+        self._preview_rotation += 0.015
         
         # Load DNA
         dna_data = self._load_dna_from_json(filename)
         if not dna_data:
             return
         
-        vertices = []
-        center_x = x + w / 2
-        center_y = y + h / 2
-        
         # Determine entity type
         is_plant = 'plant' in filename.lower()
         
-        if is_plant:
-            # Plant preview - draw stylized tree/plant shape
-            self._draw_plant_preview(vertices, dna_data, center_x, center_y, min(w, h) * 0.4)
-        else:
-            # Animal preview - draw stylized animal shape
-            self._draw_animal_preview(vertices, dna_data, center_x, center_y, min(w, h) * 0.4)
+        # === RENDER 3D TO FRAMEBUFFER ===
+        self._render_3d_to_framebuffer(dna_data, is_plant)
         
-        # Render the preview vertices
-        if vertices:
-            vertex_data = np.array(vertices, dtype='f4')
-            self.vbo.write(vertex_data.tobytes())
-            self.font_texture.use(0)
-            self.program['u_use_texture'].value = 0  # Solid colors
-            self.program['u_screen_size'].value = (self.screen_width, self.screen_height)
-            self.program['u_offset'].value = (0, 0)
-            self.vao.render(moderngl.TRIANGLES, vertices=len(vertices) // 8)
+        # === DRAW FRAMEBUFFER TEXTURE TO SCREEN ===
+        self._draw_preview_texture(x, y, w, h)
+    
+    def _render_3d_to_framebuffer(self, dna_data: Dict, is_plant: bool):
+        """Render the entity's 3D geometry to the preview framebuffer."""
+        # Bind framebuffer
+        self._preview_fbo.use()
+        self._preview_fbo.clear(0.15, 0.15, 0.2, 1.0)  # Dark background
+        
+        # Enable depth testing
+        self.ctx.enable(moderngl.DEPTH_TEST)
+        
+        # Get the actual DNA dict
+        entity_dna = dna_data.get('dna', dna_data)
+        
+        # Calculate camera distance based on entity size
+        base_scale = entity_dna.get('base_scale', 1.0)
+        if is_plant:
+            height_gene = entity_dna.get('height_gene', {})
+            base_scale = height_gene.get('value', 1.0) if isinstance(height_gene, dict) else 1.0
+        
+        cam_distance = max(3.0, base_scale * 2.5)
+        
+        # Set up projection (perspective)
+        aspect = 1.0  # Square framebuffer
+        projection = glm.perspective(glm.radians(45.0), aspect, 0.1, 100.0)
+        
+        # Set up view (camera orbiting around entity)
+        eye_x = math.sin(self._preview_rotation) * cam_distance
+        eye_z = math.cos(self._preview_rotation) * cam_distance
+        eye_y = cam_distance * 0.4  # Slightly above
+        view = glm.lookAt(
+            glm.vec3(eye_x, eye_y, eye_z),
+            glm.vec3(0, 0, 0),
+            glm.vec3(0, 1, 0)
+        )
+        
+        # Set uniforms
+        self._preview_program['u_projection'].write(projection)
+        self._preview_program['u_view'].write(view)
+        self._preview_program['u_light_dir'].value = (0.5, 1.0, 0.3)
+        self._preview_program['u_ambient'].value = (0.4, 0.4, 0.5)
+        self._preview_program['u_bg_color'].value = (0.15, 0.15, 0.2)
+        self._preview_program['u_time'].value = self._preview_rotation
+        
+        if is_plant:
+            self._render_plant_3d(entity_dna)
+        else:
+            self._render_animal_3d(entity_dna)
+        
+        # Restore default framebuffer
+        self.ctx.screen.use()
+        self.ctx.disable(moderngl.DEPTH_TEST)
+    
+    def _render_animal_3d(self, dna: Dict):
+        """Render animal body segments as 3D shapes."""
+        body_segments = dna.get('body_segments', [])
+        base_scale = dna.get('base_scale', 1.0)
+        
+        if not body_segments:
+            # Fallback: single sphere
+            self._draw_3d_shape('ellipsoid', 
+                               glm.vec3(0, 0, 0), 
+                               glm.vec3(base_scale * 0.5, base_scale * 0.3, base_scale * 0.3),
+                               (0.5, 0.4, 0.3))
+            return
+        
+        # Draw each body segment
+        offset_x = 0.0
+        for i, seg in enumerate(body_segments):
+            shape = seg.get('shape', 'ellipsoid')
+            size = seg.get('size', [0.3, 0.3, 0.3])
+            color = self._extract_array_color(seg.get('color'), (0.5, 0.4, 0.3))
+            
+            if isinstance(size, (list, tuple)) and len(size) >= 3:
+                w, h, d = size[0], size[1], size[2]
+            else:
+                w = h = d = 0.3
+            
+            # Animate with slight wave for snakes/worms
+            movement_type = dna.get('movement_type', 'walk')
+            wave_y = 0
+            wave_z = 0
+            if movement_type in ('crawl', 'swim'):
+                wave_y = math.sin(self._preview_rotation * 3 + i * 0.8) * 0.1
+                wave_z = math.sin(self._preview_rotation * 3 + i * 0.6) * 0.15
+            
+            pos = glm.vec3(-offset_x, wave_y, wave_z)
+            scale = glm.vec3(w * 0.5, h * 0.5, d * 0.5)
+            
+            self._draw_3d_shape(shape, pos, scale, color)
+            offset_x += w * 0.6
+        
+        # Draw limbs if present
+        limbs = dna.get('limbs', [])
+        for limb in limbs:
+            self._render_limb_3d(limb, dna)
+        
+        # Draw features (eyes)
+        features = dna.get('features', [])
+        for feat in features:
+            if feat.get('feature_type') == 'eye':
+                eye_color = self._extract_array_color(feat.get('color'), (0.1, 0.1, 0.1))
+                eye_size = feat.get('size', 0.1)
+                # Draw eyes on first segment
+                if body_segments:
+                    seg_w = body_segments[0].get('size', [0.3, 0.3, 0.3])[0]
+                    eye_y = body_segments[0].get('size', [0.3, 0.3, 0.3])[1] * 0.3
+                    self._draw_3d_shape('ellipsoid', 
+                                       glm.vec3(seg_w * 0.1, eye_y, seg_w * 0.2),
+                                       glm.vec3(eye_size * 0.3, eye_size * 0.3, eye_size * 0.3),
+                                       (0.95, 0.95, 0.95))  # White
+                    self._draw_3d_shape('ellipsoid', 
+                                       glm.vec3(seg_w * 0.1, eye_y, -seg_w * 0.2),
+                                       glm.vec3(eye_size * 0.3, eye_size * 0.3, eye_size * 0.3),
+                                       (0.95, 0.95, 0.95))
+    
+    def _render_limb_3d(self, limb: Dict, dna: Dict):
+        """Render a limb with its segments."""
+        segments = limb.get('segments', [])
+        color = self._extract_array_color(limb.get('color'), (0.4, 0.3, 0.25))
+        attach = limb.get('attachment_point', [0, 0, 0])
+        
+        if not segments:
+            return
+        
+        # Starting position
+        pos_x = attach[0] if len(attach) > 0 else 0
+        pos_y = attach[1] if len(attach) > 1 else 0
+        pos_z = attach[2] if len(attach) > 2 else 0
+        
+        for seg in segments:
+            length = seg.get('length', 0.2)
+            thickness = seg.get('thickness', 0.05)
+            
+            # Animate limb
+            anim_offset = math.sin(self._preview_rotation * 5) * 0.1
+            
+            self._draw_3d_shape('cylinder',
+                               glm.vec3(pos_x, pos_y + anim_offset, pos_z),
+                               glm.vec3(thickness, length * 0.5, thickness),
+                               color)
+            pos_y -= length
+    
+    def _render_plant_3d(self, dna: Dict):
+        """Render plant as 3D shapes (trunk + canopy)."""
+        # Colors
+        trunk_color = self._extract_rgb_dict(dna.get('trunk_color'), (0.4, 0.25, 0.15))
+        leaf_color = self._extract_rgb_dict(dna.get('leaf_color'), (0.2, 0.6, 0.2))
+        flower_color = self._extract_rgb_dict(dna.get('flower_color'), (0.8, 0.4, 0.6))
+        
+        # Size
+        height_gene = dna.get('height_gene', {})
+        width_gene = dna.get('width_gene', {})
+        height = height_gene.get('value', 1.0) if isinstance(height_gene, dict) else 1.0
+        width = width_gene.get('value', 1.0) if isinstance(width_gene, dict) else 1.0
+        
+        plant_type = dna.get('plant_type', 'tree')
+        
+        # Draw trunk
+        trunk_h = height * 0.8
+        trunk_w = width * 0.15
+        self._draw_3d_shape('cylinder', 
+                           glm.vec3(0, trunk_h * 0.25, 0),
+                           glm.vec3(trunk_w, trunk_h * 0.5, trunk_w),
+                           trunk_color)
+        
+        # Draw canopy based on type
+        canopy_y = trunk_h * 0.6
+        
+        if plant_type in ('tree', 'palm'):
+            # Spherical canopy
+            canopy_size = width * 0.6
+            self._draw_3d_shape('ellipsoid',
+                               glm.vec3(0, canopy_y, 0),
+                               glm.vec3(canopy_size, canopy_size * 0.8, canopy_size),
+                               leaf_color)
+        elif plant_type == 'conifer':
+            # Cone canopy
+            cone_h = height * 0.8
+            cone_w = width * 0.5
+            self._draw_3d_shape('cone',
+                               glm.vec3(0, canopy_y, 0),
+                               glm.vec3(cone_w, cone_h * 0.5, cone_w),
+                               leaf_color)
+        elif plant_type in ('bush', 'shrub'):
+            # Wide low canopy
+            self._draw_3d_shape('ellipsoid',
+                               glm.vec3(0, height * 0.3, 0),
+                               glm.vec3(width * 0.5, height * 0.25, width * 0.5),
+                               leaf_color)
+        elif plant_type == 'flower':
+            # Small stem with flower on top
+            self._draw_3d_shape('ellipsoid',
+                               glm.vec3(0, canopy_y, 0),
+                               glm.vec3(width * 0.3, width * 0.15, width * 0.3),
+                               flower_color)
+        elif plant_type == 'mushroom':
+            # Cap
+            cap_color = self._extract_rgb_dict(dna.get('cap_color'), flower_color)
+            self._draw_3d_shape('ellipsoid',
+                               glm.vec3(0, trunk_h * 0.4, 0),
+                               glm.vec3(width * 0.4, height * 0.15, width * 0.4),
+                               cap_color)
+        elif plant_type == 'cactus':
+            # Tall cylinder
+            self._draw_3d_shape('cylinder',
+                               glm.vec3(0, height * 0.3, 0),
+                               glm.vec3(width * 0.15, height * 0.4, width * 0.15),
+                               trunk_color)
+        else:
+            # Default tree
+            self._draw_3d_shape('ellipsoid',
+                               glm.vec3(0, canopy_y, 0),
+                               glm.vec3(width * 0.4, width * 0.4, width * 0.4),
+                               leaf_color)
+    
+    def _draw_3d_shape(self, shape: str, position: glm.vec3, scale: glm.vec3, 
+                       color: Tuple[float, float, float]):
+        """Draw a single 3D primitive at the given position with color."""
+        # Get mesh
+        mesh_key = shape if shape in self._preview_meshes else 'ellipsoid'
+        vbo, vertex_count = self._preview_meshes[mesh_key]
+        
+        # Build model matrix
+        model = glm.mat4(1.0)
+        model = glm.translate(model, position)
+        model = glm.scale(model, scale)
+        
+        # Set model uniform
+        self._preview_program['u_model'].write(model)
+        
+        # We need to update vertex colors in the VBO
+        # For now, use a simpler approach: render with a color uniform
+        # Actually, let's modify the approach to use per-draw color
+        
+        # Read mesh data, update colors, and render
+        # This is inefficient but works for preview purposes
+        mesh_data = np.frombuffer(vbo.read(), dtype='f4').reshape(-1, 9).copy()
+        mesh_data[:, 6:9] = color  # Update color columns
+        
+        # Create temporary buffer with colored data
+        colored_vbo = self.ctx.buffer(mesh_data.astype('f4').tobytes())
+        vao = self.ctx.vertex_array(
+            self._preview_program,
+            [(colored_vbo, '3f 3f 3f', 'in_position', 'in_normal', 'in_color')]
+        )
+        
+        vao.render(moderngl.TRIANGLES)
+        
+        # Cleanup
+        vao.release()
+        colored_vbo.release()
+    
+    def _draw_preview_texture(self, x: float, y: float, w: float, h: float):
+        """Draw the preview framebuffer texture as a quad on the HUD."""
+        # Use the preview texture
+        vertices = []
+        
+        # Calculate UV coords (texture is rendered top-down, need to flip)
+        u0, v0 = 0.0, 1.0  # Bottom-left of texture
+        u1, v1 = 1.0, 0.0  # Top-right of texture
+        
+        # White color (texture will provide actual colors)
+        r, g, b, a = 1.0, 1.0, 1.0, 1.0
+        
+        # Quad (two triangles)
+        # Triangle 1
+        vertices.extend([x, y, u0, v1, r, g, b, a])
+        vertices.extend([x + w, y, u1, v1, r, g, b, a])
+        vertices.extend([x + w, y + h, u1, v0, r, g, b, a])
+        # Triangle 2
+        vertices.extend([x, y, u0, v1, r, g, b, a])
+        vertices.extend([x + w, y + h, u1, v0, r, g, b, a])
+        vertices.extend([x, y + h, u0, v0, r, g, b, a])
+        
+        # Render
+        vertex_data = np.array(vertices, dtype='f4')
+        self.vbo.write(vertex_data.tobytes())
+        self._preview_texture.use(0)
+        self.program['u_use_texture'].value = 2  # Image texture mode
+        self.program['u_screen_size'].value = (self.screen_width, self.screen_height)
+        self.program['u_offset'].value = (0, 0)
+        self.vao.render(moderngl.TRIANGLES, vertices=6)
     
     def _draw_plant_preview(self, vertices: List, dna: Dict, cx: float, cy: float, size: float):
         """Draw a high-detail 2D plant from DNA with actual parameters."""
@@ -1803,3 +2300,16 @@ class ModernHUDRenderer:
         self.vao.release()
         self.program.release()
         self.font_texture.release()
+        
+        # Release 3D preview resources
+        self._preview_fbo.release()
+        self._preview_texture.release()
+        self._preview_depth.release()
+        self._preview_program.release()
+        for vbo, _ in self._preview_meshes.values():
+            vbo.release()
+        for vbo in self._entity_geometry_cache.values():
+            if isinstance(vbo, tuple):
+                vbo[0].release()
+            else:
+                vbo.release()
