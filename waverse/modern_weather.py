@@ -68,11 +68,13 @@ void main() {
     gl_Position = u_projection * u_view * vec4(pos, 1.0);
     
     // Point size based on distance and particle size
-    float point_size = in_size * 300.0 / max(1.0, dist);
+    // Cap to prevent massive particles when very close
+    float point_size = in_size * 200.0 / max(5.0, dist);
+    point_size = clamp(point_size, 1.0, 20.0);  // Limit size
     
     // Snow is larger, rain is streaky
     if (u_particle_type > 0.5) {
-        gl_PointSize = point_size * 2.0;
+        gl_PointSize = min(point_size * 2.0, 30.0);
     } else {
         gl_PointSize = point_size;
     }
@@ -282,22 +284,26 @@ class ModernWeatherRenderer:
         self.frame_stats['particles_rendered'] = 0
         self.frame_stats['draw_calls'] = 0
         
-        # Skip rendering if clear weather
-        if self.weather_type == 'clear' or self.intensity < 0.01:
+        # Skip rendering if clear weather or no precipitation
+        if self.weather_type in ('clear', 'none', '') or self.intensity < 0.01:
             return
         
         # Determine particle count based on intensity
-        particle_count = int(self.max_particles * self.intensity)
+        # Cap particle count to prevent overdraw issues
+        max_render = min(self.max_particles, 3000)  # Cap for performance
+        particle_count = int(max_render * self.intensity)
         if self.weather_type == 'heavy_rain':
-            particle_count = min(particle_count * 2, self.max_particles)
+            particle_count = min(int(particle_count * 1.5), max_render)
         elif self.weather_type == 'storm':
-            particle_count = self.max_particles
+            particle_count = max_render
         
-        # Enable blending
+        # Enable blending and disable depth write (particles shouldn't occlude)
         self.ctx.enable(moderngl.BLEND)
         self.ctx.blend_func = (moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA)
+        self.ctx.depth_func = '<='  # Allow particles at same depth
         
-        # Enable point sprites
+        # Disable depth write to prevent particles from blocking scene
+        # Particles should be see-through
         self.ctx.enable(moderngl.PROGRAM_POINT_SIZE)
         
         # Set uniforms
@@ -309,7 +315,13 @@ class ModernWeatherRenderer:
         # Particle type: 0=rain, 1=snow
         particle_type = 1.0 if self.weather_type == 'snow' else 0.0
         self.particle_program['u_particle_type'].value = particle_type
-        self.particle_program['u_particle_color'].write(glm.vec3(0.7, 0.8, 0.9))
+        
+        # Set color based on weather type
+        if self.weather_type == 'snow':
+            color = glm.vec3(0.95, 0.97, 1.0)  # White-ish snow
+        else:
+            color = glm.vec3(0.6, 0.7, 0.85)  # Blue-ish rain
+        self.particle_program['u_particle_color'].write(color)
         
         # Render particles as points
         self.particle_vao.render(moderngl.POINTS, vertices=particle_count)

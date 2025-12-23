@@ -64,103 +64,103 @@ uniform float u_time_of_day;  // 0-1, 0.5 = noon
 uniform float u_cloud_coverage;  // 0-1, how cloudy
 uniform float u_cloud_speed;  // Wind speed
 
+// =============================================================================
+// STYLIZED LOW-POLY CLOUDS
+// Chunky, geometric shapes that match the game's aesthetic
+// =============================================================================
+
 // Cloud layer settings
-const float CLOUD_MIN_HEIGHT = 800.0;
-const float CLOUD_MAX_HEIGHT = 1500.0;
-const float CLOUD_THICKNESS = 700.0;
+const float CLOUD_MIN_HEIGHT = 600.0;
+const float CLOUD_MAX_HEIGHT = 1000.0;
+const float CLOUD_THICKNESS = 400.0;
 
-// Ray march settings
-const int MAX_STEPS = 32;
-const float STEP_SIZE = 50.0;
+// Fewer steps for chunkier look
+const int MAX_STEPS = 16;
+const float STEP_SIZE = 80.0;
 
-// Noise functions
+// Hash for randomness
 float hash(vec3 p) {
     p = fract(p * 0.3183099 + 0.1);
     p *= 17.0;
     return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
 }
 
-float noise3D(vec3 p) {
-    vec3 i = floor(p);
+// CHUNKY cell-based noise - creates blocky cloud shapes
+float chunkyNoise(vec3 p) {
+    // Quantize position to create blocky cells
+    vec3 cell = floor(p);
+    
+    // Get hash value for this cell
+    float h = hash(cell);
+    
+    // Sharp falloff from cell center (creates puffy chunks)
     vec3 f = fract(p);
-    f = f * f * (3.0 - 2.0 * f);
+    vec3 center_dist = abs(f - 0.5) * 2.0;
+    float dist_from_center = max(max(center_dist.x, center_dist.y), center_dist.z);
     
-    return mix(
-        mix(mix(hash(i + vec3(0,0,0)), hash(i + vec3(1,0,0)), f.x),
-            mix(hash(i + vec3(0,1,0)), hash(i + vec3(1,1,0)), f.x), f.y),
-        mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)), f.x),
-            mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y),
-        f.z
-    );
+    // Hard edge with slight softening
+    float edge = 1.0 - step(0.7, dist_from_center);
+    
+    return h * edge;
 }
 
-// Fractal Brownian Motion for cloud density
-float fbm(vec3 p, int octaves) {
-    float value = 0.0;
-    float amplitude = 0.5;
-    float frequency = 1.0;
+// Multi-scale chunky clouds - SPARSE version
+float cloudDensity(vec3 p) {
+    float density = 0.0;
     
-    for (int i = 0; i < octaves; i++) {
-        value += amplitude * noise3D(p * frequency);
-        amplitude *= 0.5;
-        frequency *= 2.0;
-    }
-    return value;
+    // Large chunks only (fewer, bigger cloud shapes)
+    density += chunkyNoise(p * 0.15) * 0.7;
+    
+    // Occasional medium bumps
+    density += chunkyNoise(p * 0.4 + 7.3) * 0.2;
+    
+    // Very sparse - subtract some noise to create gaps
+    density -= chunkyNoise(p * 0.25 + 23.1) * 0.3;
+    
+    return max(0.0, density);
 }
 
-// Sample cloud density at a point
+// Sample cloud at position
 float sampleCloud(vec3 pos) {
-    // Normalize height within cloud layer
+    // Height within cloud layer
     float height_factor = (pos.y - CLOUD_MIN_HEIGHT) / CLOUD_THICKNESS;
     if (height_factor < 0.0 || height_factor > 1.0) return 0.0;
     
-    // Vertical density profile (thicker in middle)
-    float height_density = 1.0 - abs(height_factor - 0.5) * 2.0;
-    height_density = smoothstep(0.0, 0.3, height_density);
-    
-    // Wind animation
-    vec3 wind_offset = vec3(u_time * u_cloud_speed * 20.0, 0.0, u_time * u_cloud_speed * 5.0);
-    vec3 sample_pos = pos * 0.001 + wind_offset * 0.001;
-    
-    // Multi-octave noise for cloud shape
-    float density = fbm(sample_pos * 2.0, 4);
-    
-    // Add detail noise
-    density += fbm(sample_pos * 8.0, 3) * 0.25;
-    
-    // Coverage threshold
-    float coverage_threshold = 1.0 - u_cloud_coverage;
-    density = smoothstep(coverage_threshold, coverage_threshold + 0.3, density);
-    
-    return density * height_density;
-}
-
-// Light scattering approximation
-float lightMarch(vec3 pos) {
-    vec3 light_dir = normalize(u_sun_dir);
-    float light_step = 30.0;
-    float total_density = 0.0;
-    
-    // March toward sun
-    for (int i = 0; i < 6; i++) {
-        pos += light_dir * light_step;
-        total_density += sampleCloud(pos) * 0.5;
+    // Vertical profile - flatter on bottom, rounded on top (cumulus style)
+    float height_shape = 1.0;
+    if (height_factor < 0.3) {
+        height_shape = step(0.1, height_factor);  // Flat bottom
+    } else {
+        height_shape = 1.0 - pow((height_factor - 0.3) / 0.7, 2.0);  // Rounded top
     }
     
-    // Beer-Lambert law for light absorption
-    return exp(-total_density * 0.5);
+    // Wind animation (slower, more chunky movement)
+    vec3 wind = vec3(u_time * u_cloud_speed * 8.0, 0.0, u_time * u_cloud_speed * 2.0);
+    vec3 sample_pos = pos * 0.003 + wind * 0.003;
+    
+    // Get chunky density
+    float density = cloudDensity(sample_pos);
+    
+    // Coverage threshold with HARD cutoff (stylized) - HIGHER threshold = sparser clouds
+    float threshold = 0.55 - u_cloud_coverage * 0.3;
+    density = step(threshold, density) * (density - threshold) / (1.0 - threshold);
+    
+    // Additional sparsity - only keep strongest clouds
+    density = pow(density, 1.5);
+    
+    return density * height_shape;
 }
 
 void main() {
     vec3 ray_dir = normalize(v_ray_dir);
     
-    // Only render clouds above horizon
-    if (ray_dir.y < 0.01) {
+    // Only render above horizon
+    if (ray_dir.y < 0.02) {
         fragColor = vec4(0.0);
         return;
     }
     
-    // Calculate ray intersection with cloud layer
+    // Ray-cloud layer intersection
     float t_min = (CLOUD_MIN_HEIGHT - u_camera_pos.y) / ray_dir.y;
     float t_max = (CLOUD_MAX_HEIGHT - u_camera_pos.y) / ray_dir.y;
     
@@ -169,74 +169,61 @@ void main() {
         t_min = t_max;
         t_max = temp;
     }
-    
     t_min = max(t_min, 0.0);
     
-    // Skip if cloud layer is behind us
     if (t_max < 0.0) {
         fragColor = vec4(0.0);
         return;
     }
     
-    // Ray march through cloud layer
+    // Ray march
     vec3 pos = u_camera_pos + ray_dir * t_min;
-    float step = min(STEP_SIZE, (t_max - t_min) / float(MAX_STEPS));
+    float step_size = min(STEP_SIZE, (t_max - t_min) / float(MAX_STEPS));
     
-    float transmittance = 1.0;
-    vec3 accumulated_color = vec3(0.0);
-    
-    // Day/night cloud colors
-    float day_factor = smoothstep(0.2, 0.35, u_time_of_day) * smoothstep(0.8, 0.65, u_time_of_day);
-    float sunset_factor = smoothstep(0.15, 0.25, u_time_of_day) * smoothstep(0.35, 0.25, u_time_of_day)
-                        + smoothstep(0.65, 0.75, u_time_of_day) * smoothstep(0.85, 0.75, u_time_of_day);
-    
-    vec3 cloud_color_day = vec3(1.0, 1.0, 1.0);
-    vec3 cloud_color_sunset = vec3(1.0, 0.7, 0.5);
-    vec3 cloud_color_night = vec3(0.15, 0.15, 0.2);
-    
-    vec3 base_cloud_color = cloud_color_day * day_factor 
-                          + cloud_color_sunset * sunset_factor 
-                          + cloud_color_night * (1.0 - day_factor - sunset_factor);
-    
-    // Sun direction for lighting
-    vec3 sun_dir = normalize(u_sun_dir);
+    float total_density = 0.0;
+    float max_density = 0.0;
     
     for (int i = 0; i < MAX_STEPS; i++) {
-        if (transmittance < 0.01) break;
-        
-        float density = sampleCloud(pos);
-        
-        if (density > 0.01) {
-            // Light contribution at this point
-            float light = lightMarch(pos);
-            
-            // Silver lining effect (bright edges toward sun)
-            float sun_dot = dot(ray_dir, sun_dir);
-            float silver_lining = pow(max(sun_dot, 0.0), 8.0) * 0.5;
-            
-            // Combine lighting
-            vec3 cloud_color = base_cloud_color * (0.3 + light * 0.7 + silver_lining);
-            
-            // Add ambient light from sky
-            cloud_color += vec3(0.1, 0.12, 0.15) * day_factor;
-            
-            // Accumulate
-            float alpha = density * step * 0.02;
-            accumulated_color += cloud_color * alpha * transmittance;
-            transmittance *= 1.0 - alpha;
-        }
-        
-        pos += ray_dir * step;
+        float d = sampleCloud(pos);
+        total_density += d * step_size * 0.005;
+        max_density = max(max_density, d);
+        pos += ray_dir * step_size;
     }
     
-    // Output with alpha for blending
-    float alpha = 1.0 - transmittance;
+    // Day/night colors (bold, saturated)
+    float day = smoothstep(0.2, 0.35, u_time_of_day) * smoothstep(0.8, 0.65, u_time_of_day);
+    float sunset = smoothstep(0.15, 0.25, u_time_of_day) * smoothstep(0.35, 0.25, u_time_of_day)
+                 + smoothstep(0.65, 0.75, u_time_of_day) * smoothstep(0.85, 0.75, u_time_of_day);
+    float night = 1.0 - day - sunset;
     
-    // Fade clouds at horizon to blend with sky
-    float horizon_fade = smoothstep(0.0, 0.15, ray_dir.y);
+    // Flat, stylized colors (no complex lighting)
+    vec3 cloud_bright = vec3(1.0, 1.0, 1.0);      // Day: pure white
+    vec3 cloud_shadow = vec3(0.7, 0.75, 0.85);    // Day shadow: slight blue-gray
+    vec3 cloud_sunset = vec3(1.0, 0.65, 0.45);    // Sunset: coral orange
+    vec3 cloud_night = vec3(0.25, 0.25, 0.35);    // Night: dark blue-gray
+    
+    // Simple flat shading based on sun direction
+    vec3 sun_dir = normalize(u_sun_dir);
+    float sun_facing = dot(ray_dir, sun_dir) * 0.5 + 0.5;
+    
+    // Mix bright/shadow based on ray direction (simple stylized lighting)
+    vec3 day_color = mix(cloud_shadow, cloud_bright, sun_facing * 0.5 + 0.5);
+    
+    vec3 cloud_color = day_color * day 
+                     + cloud_sunset * sunset 
+                     + cloud_night * night;
+    
+    // Alpha with hard edges - sparser clouds
+    float alpha = clamp(total_density * 1.5, 0.0, 0.9);
+    
+    // Even sharper alpha cutoff for fewer, distinct clouds
+    alpha = smoothstep(0.15, 0.4, alpha);
+    
+    // Horizon fade
+    float horizon_fade = smoothstep(0.02, 0.12, ray_dir.y);
     alpha *= horizon_fade;
     
-    fragColor = vec4(accumulated_color, alpha);
+    fragColor = vec4(cloud_color, alpha);
 }
 """
 

@@ -361,13 +361,10 @@ class ModernRenderer:
         self.stats = {'draw_calls': 0, 'triangles': 0, 
                       'chunks_rendered': 0, 'instances_rendered': 0}
         
-        # Set up common uniforms
-        proj_bytes = np.array(self.projection.to_list(), dtype='f4').tobytes()
-        view_bytes = np.array(self.view.to_list(), dtype='f4').tobytes()
-        
+        # Set up common uniforms - write glm matrices directly
         # Render terrain chunks
-        self.terrain_prog['u_projection'].write(proj_bytes)
-        self.terrain_prog['u_view'].write(view_bytes)
+        self.terrain_prog['u_projection'].write(self.projection)
+        self.terrain_prog['u_view'].write(self.view)
         self.terrain_prog['u_light_dir'].value = tuple(self.light_dir)
         self.terrain_prog['u_ambient'].value = tuple(self.ambient)
         self.terrain_prog['u_fog_start'].value = self.fog_start
@@ -385,8 +382,8 @@ class ModernRenderer:
                     self.stats['chunks_rendered'] += 1
         
         # Render instanced meshes
-        self.instanced_prog['u_projection'].write(proj_bytes)
-        self.instanced_prog['u_view'].write(view_bytes)
+        self.instanced_prog['u_projection'].write(self.projection)
+        self.instanced_prog['u_view'].write(self.view)
         self.instanced_prog['u_light_dir'].value = tuple(self.light_dir)
         self.instanced_prog['u_ambient'].value = tuple(self.ambient)
         self.instanced_prog['u_fog_start'].value = self.fog_start

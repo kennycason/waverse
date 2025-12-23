@@ -245,12 +245,36 @@ def structure_to_geometry(structure: Any, lod: int = 0) -> Tuple[np.ndarray, int
     else:
         # Full geometry from structure components
         
-        # Walls
+        # Walls (with rotation support)
         for wall in getattr(structure, 'walls', []):
             x, y, z = wall.x, wall.y, wall.z
             w, h = wall.width / 2, wall.height / 2
             d = wall.thickness / 2  # Wall uses 'thickness' not 'depth'
-            v, n, c = create_box(x, y + h, z, w, h, d, wall_color)
+            rotation = getattr(wall, 'rotation', 0.0)
+            # Use individual wall color if available, else fallback to DNA wall_color
+            color = getattr(wall, 'color', wall_color)
+            v, n, c = create_box(0, h, 0, w, h, d, color)
+            
+            # Apply rotation and translation if wall is rotated
+            if abs(rotation) > 0.001:
+                rad = math.radians(rotation)
+                cos_r, sin_r = math.cos(rad), math.sin(rad)
+                rotated_v = []
+                rotated_n = []
+                for vx, vy, vz in v:
+                    # Rotate around Y axis, then translate
+                    rx = vx * cos_r - vz * sin_r + x
+                    rz = vx * sin_r + vz * cos_r + z
+                    rotated_v.append((rx, vy + y, rz))
+                for nx, ny, nz in n:
+                    # Rotate normals too
+                    rotated_n.append((nx * cos_r - nz * sin_r, ny, nx * sin_r + nz * cos_r))
+                v = rotated_v
+                n = rotated_n
+            else:
+                # Just translate
+                v = [(vx + x, vy + y, vz + z) for vx, vy, vz in v]
+            
             all_vertices.extend(v)
             all_normals.extend(n)
             all_colors.extend(c)
@@ -259,8 +283,11 @@ def structure_to_geometry(structure: Any, lod: int = 0) -> Tuple[np.ndarray, int
         for floor in getattr(structure, 'floors', []):
             x, y, z = floor.x, floor.y, floor.z
             w, d = floor.width / 2, floor.depth / 2
-            h = 0.2  # Floor thickness
-            v, n, c = create_box(x, y, z, w, h, d, floor_color)
+            t = getattr(floor, 'thickness', 0.2) / 2  # Use floor's thickness
+            # Use individual floor color if available
+            color = getattr(floor, 'color', floor_color)
+            # Floor position - legacy draws from 0 to thickness, so center is at y + t
+            v, n, c = create_box(x, y + t, z, w, t, d, color)
             all_vertices.extend(v)
             all_normals.extend(n)
             all_colors.extend(c)
@@ -272,7 +299,9 @@ def structure_to_geometry(structure: Any, lod: int = 0) -> Tuple[np.ndarray, int
             w = ramp.width / 2
             d = ramp.length / 2  # Ramp uses 'length' not 'depth'
             direction = getattr(ramp, 'direction', (1, 0))
-            v, n, c = create_ramp(x, y_bot, y_top, z, w, d, direction, floor_color)
+            # Use individual ramp color if available
+            color = getattr(ramp, 'color', floor_color)
+            v, n, c = create_ramp(x, y_bot, y_top, z, w, d, direction, color)
             all_vertices.extend(v)
             all_normals.extend(n)
             all_colors.extend(c)
@@ -285,26 +314,154 @@ def structure_to_geometry(structure: Any, lod: int = 0) -> Tuple[np.ndarray, int
             w = pillar.width / 2
             h = (y_top - y_bot) / 2
             y_center = y_bot + h
+            # Use individual pillar color if available
+            color = getattr(pillar, 'color', wall_color)
             # Approximate pillar as box
-            v, n, c = create_box(x, y_center, z, w, h, w, wall_color)
+            v, n, c = create_box(x, y_center, z, w, h, w, color)
             all_vertices.extend(v)
             all_normals.extend(n)
             all_colors.extend(c)
         
-        # Staircases
+        # Staircases - draw as individual steps like legacy
         for stair in getattr(structure, 'staircases', []):
-            x, z = stair.x, stair.z
+            stair_x, stair_z = stair.x, stair.z
             y_bot = stair.y_bottom
-            y_top = stair.y_top
-            w = stair.width / 2
-            d = stair.length / 2  # length is a property
-            # direction is an angle in degrees - convert to (dx, dz) vector
+            height = stair.y_top - stair.y_bottom
+            hw = stair.width / 2
+            length = stair.length
+            stair_color = getattr(stair, 'color', floor_color)
+            
+            # Rotation
             angle_rad = math.radians(stair.direction)
-            direction = (math.cos(angle_rad), math.sin(angle_rad))
-            v, n, c = create_ramp(x, y_bot, y_top, z, w, d, direction, floor_color)
+            cos_r, sin_r = math.cos(angle_rad), math.sin(angle_rad)
+            
+            # Individual steps like legacy
+            num_steps = max(2, int(height / 0.4))
+            step_height = height / num_steps
+            step_depth = length / num_steps
+            
+            for step_i in range(num_steps):
+                # Local coords (stair goes in local +X from origin)
+                local_x = step_i * step_depth + step_depth / 2
+                local_y = y_bot + step_i * step_height + step_height / 2
+                
+                # Rotate local position to world
+                world_x = local_x * cos_r + stair_x
+                world_z = local_x * sin_r + stair_z
+                
+                # Create step as a box
+                v, n, c = create_box(0, 0, 0, step_depth/2, step_height/2, hw, stair_color)
+                
+                # Rotate and translate vertices
+                for i, (vx, vy, vz) in enumerate(v):
+                    # Rotate around Y
+                    rx = vx * cos_r - vz * sin_r + world_x
+                    rz = vx * sin_r + vz * cos_r + world_z
+                    v[i] = (rx, vy + local_y, rz)
+                for i, (nx, ny, nz) in enumerate(n):
+                    n[i] = (nx * cos_r - nz * sin_r, ny, nx * sin_r + nz * cos_r)
+                
+                all_vertices.extend(v)
+                all_normals.extend(n)
+                all_colors.extend(c)
+        
+        # Doorways (frame posts and lintel)
+        for doorway in getattr(structure, 'doorways', []):
+            x, y, z = doorway.x, doorway.y, doorway.z
+            hw = doorway.width / 2
+            h = doorway.height
+            frame_w = 0.15  # Half-width of frame post
+            rotation = getattr(doorway, 'rotation', 0.0)
+            frame_color = getattr(doorway, 'frame_color', (0.35, 0.3, 0.25))
+            
+            # Left post
+            v, n, c = create_box(0, h/2, 0, frame_w, h/2, frame_w, frame_color)
+            # Right post
+            v2, n2, c2 = create_box(0, h/2, 0, frame_w, h/2, frame_w, frame_color)
+            # Top lintel
+            v3, n3, c3 = create_box(0, h + frame_w, 0, hw + frame_w*2, frame_w, frame_w, frame_color)
+            
+            # Apply rotation and translate to positions
+            rad = math.radians(rotation)
+            cos_r, sin_r = math.cos(rad), math.sin(rad)
+            
+            # Left post at -hw-frame_w
+            left_offset = -hw - frame_w
+            for i, (vx, vy, vz) in enumerate(v):
+                rx = (vx + left_offset) * cos_r - vz * sin_r + x
+                rz = (vx + left_offset) * sin_r + vz * cos_r + z
+                v[i] = (rx, vy + y, rz)
+            for i, (nx, ny, nz) in enumerate(n):
+                n[i] = (nx * cos_r - nz * sin_r, ny, nx * sin_r + nz * cos_r)
+            
+            # Right post at +hw+frame_w
+            right_offset = hw + frame_w
+            for i, (vx, vy, vz) in enumerate(v2):
+                rx = (vx + right_offset) * cos_r - vz * sin_r + x
+                rz = (vx + right_offset) * sin_r + vz * cos_r + z
+                v2[i] = (rx, vy + y, rz)
+            for i, (nx, ny, nz) in enumerate(n2):
+                n2[i] = (nx * cos_r - nz * sin_r, ny, nx * sin_r + nz * cos_r)
+            
+            # Lintel (already centered, just translate)
+            for i, (vx, vy, vz) in enumerate(v3):
+                rx = vx * cos_r - vz * sin_r + x
+                rz = vx * sin_r + vz * cos_r + z
+                v3[i] = (rx, vy + y, rz)
+            for i, (nx, ny, nz) in enumerate(n3):
+                n3[i] = (nx * cos_r - nz * sin_r, ny, nx * sin_r + nz * cos_r)
+            
             all_vertices.extend(v)
             all_normals.extend(n)
             all_colors.extend(c)
+            all_vertices.extend(v2)
+            all_normals.extend(n2)
+            all_colors.extend(c2)
+            all_vertices.extend(v3)
+            all_normals.extend(n3)
+            all_colors.extend(c3)
+        
+        # Arches (simplified as a curved structure)
+        for arch in getattr(structure, 'arches', []):
+            x, y, z = arch.x, arch.y, arch.z
+            hw = arch.width / 2
+            h = arch.height
+            t = getattr(arch, 'thickness', 0.5) / 2
+            rotation = getattr(arch, 'rotation', 0.0)
+            arch_color = getattr(arch, 'color', (0.5, 0.45, 0.4))
+            
+            # Left pillar
+            pillar_h = h * 0.7
+            v, n, c = create_box(-hw, pillar_h/2, 0, t, pillar_h/2, t, arch_color)
+            # Right pillar
+            v2, n2, c2 = create_box(hw, pillar_h/2, 0, t, pillar_h/2, t, arch_color)
+            # Top beam (simplified - not curved)
+            beam_h = h - pillar_h
+            v3, n3, c3 = create_box(0, pillar_h + beam_h/2, 0, hw + t, beam_h/2, t, arch_color)
+            
+            # Apply rotation
+            rad = math.radians(rotation)
+            cos_r, sin_r = math.cos(rad), math.sin(rad)
+            
+            for geom in [v, v2, v3]:
+                for i, (vx, vy, vz) in enumerate(geom):
+                    rx = vx * cos_r - vz * sin_r + x
+                    rz = vx * sin_r + vz * cos_r + z
+                    geom[i] = (rx, vy + y, rz)
+            
+            for normals in [n, n2, n3]:
+                for i, (nx, ny, nz) in enumerate(normals):
+                    normals[i] = (nx * cos_r - nz * sin_r, ny, nx * sin_r + nz * cos_r)
+            
+            all_vertices.extend(v)
+            all_normals.extend(n)
+            all_colors.extend(c)
+            all_vertices.extend(v2)
+            all_normals.extend(n2)
+            all_colors.extend(c2)
+            all_vertices.extend(v3)
+            all_normals.extend(n3)
+            all_colors.extend(c3)
     
     if not all_vertices:
         return np.array([], dtype='f4'), 0
@@ -363,8 +520,8 @@ class ModernStructureRenderer:
         self.light_dir = glm.vec3(0.5, 1.0, 0.3)
         self.ambient = glm.vec3(0.4, 0.4, 0.5)
         self.fog_color = glm.vec3(0.7, 0.8, 0.9)
-        self.fog_start = 200.0
-        self.fog_end = 600.0
+        self.fog_start = 2000.0
+        self.fog_end = 6000.0
         
         # Frame stats
         self.frame_stats = {

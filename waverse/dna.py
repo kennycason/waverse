@@ -172,15 +172,56 @@ class PlantType:
     MOSS_PAD = "moss_pad"         # Thick moss cushions
     LILY_PAD = "lily_pad"         # Floating water plants
     
+    # NEW: More specific tree types (from model analysis)
+    OAK = "oak"                   # Broad spreading deciduous
+    BIRCH = "birch"               # White bark, delicate
+    MAPLE = "maple"               # Distinctive leaf shape
+    SPRUCE = "spruce"             # Dense conifer
+    FIR = "fir"                   # Classic christmas tree shape
+    CEDAR = "cedar"               # Large spreading conifer
+    CYPRESS = "cypress"           # Tall columnar
+    BAOBAB = "baobab"             # Thick trunk, sparse top
+    MANGROVE = "mangrove"         # Exposed roots, water-adapted
+    BAMBOO = "bamboo"             # Tall segmented grass
+    REED = "reed"                 # Tall water grass
+    WHEAT = "wheat"               # Grain with heads
+    
+    # NEW: Dead/decayed variants
+    DEAD_TREE = "dead_tree"       # Standing dead tree
+    STUMP = "stump"               # Tree stump
+    FALLEN_LOG = "fallen_log"     # Fallen trunk
+    SNAG = "snag"                 # Dead standing tree
+    
+    # NEW: Tropical variants
+    BANANA = "banana"             # Large leaves, tropical
+    FICUS = "ficus"               # Aerial roots
+    MONSTERA = "monstera"         # Split-leaf tropical
+    HELICONIA = "heliconia"       # Tropical flower
+    
     ALL_TYPES = [GRASS, FLOWER, FERN, BUSH, SHRUB, TREE, TALL_TREE, PINE, PALM, WILLOW, 
                  CACTUS, MUSHROOM, CORAL, CRYSTAL, ALIEN, VINE, SPINY_VINE, OCTOPUS, 
-                 TENTACLE, SPIRAL, SEAWEED, GROUNDCOVER, CREEPER, LICHEN, MOSS_PAD, LILY_PAD]
+                 TENTACLE, SPIRAL, SEAWEED, GROUNDCOVER, CREEPER, LICHEN, MOSS_PAD, LILY_PAD,
+                 OAK, BIRCH, MAPLE, SPRUCE, FIR, CEDAR, CYPRESS, BAOBAB, MANGROVE,
+                 BAMBOO, REED, WHEAT, DEAD_TREE, STUMP, FALLEN_LOG, SNAG,
+                 BANANA, FICUS, MONSTERA, HELICONIA]
     
     # Underwater-specific types
     UNDERWATER_TYPES = [SEAWEED, CORAL]
     
     # Sprawling ground types
     GROUND_TYPES = [GROUNDCOVER, CREEPER, LICHEN, MOSS_PAD]
+    
+    # Conifer types (evergreen needle-leaf)
+    CONIFER_TYPES = [PINE, SPRUCE, FIR, CEDAR, CYPRESS]
+    
+    # Deciduous types (lose leaves)
+    DECIDUOUS_TYPES = [OAK, BIRCH, MAPLE, WILLOW]
+    
+    # Dead/decay types
+    DEAD_TYPES = [DEAD_TREE, STUMP, FALLEN_LOG, SNAG]
+    
+    # Tropical types
+    TROPICAL_TYPES = [PALM, BANANA, FICUS, MONSTERA, HELICONIA]
 
 
 @dataclass
@@ -280,6 +321,27 @@ class PlantDNA:
     # EVOLVABLE GROWTH RATE - affects how fast plant grows in life simulation
     # Range: 0.5 (slow grower) to 2.0 (fast grower), default 1.0
     growth_rate: float = 1.0
+    
+    # NEW: State/lifecycle genes (for dead trees, snow-covered, etc.)
+    is_dead: bool = False          # Dead plant (no leaves, exposed branches)
+    decay_level: float = 0.0       # 0 = healthy, 1 = fully decayed/rotted
+    snow_coverage: float = 0.0     # 0 = no snow, 1 = fully snow-covered
+    age_factor: float = 0.5        # 0 = young/sapling, 1 = ancient/gnarled
+    
+    # NEW: Trunk complexity for interesting shapes
+    trunk_forking: int = 0         # Number of trunk splits (0 = single trunk)
+    trunk_knots: float = 0.0       # 0 = smooth, 1 = many knots/burls
+    hollow_trunk: bool = False     # Hollow/rotten core
+    
+    # NEW: Foliage distribution patterns
+    foliage_layers: int = 1        # Number of distinct canopy layers (1-5)
+    foliage_clumping: float = 0.5  # 0 = even, 1 = clustered on branch ends
+    bare_lower_trunk: float = 0.3  # How much of lower trunk has no branches (0-1)
+    
+    # NEW: Environmental adaptation
+    wind_shaped: bool = False      # Shaped by prevailing wind (asymmetric)
+    drought_adapted: bool = False  # Thick bark, small leaves
+    alpine: bool = False           # Low/spreading form for high altitude
     
     def mutate(self, rng: np.random.Generator = None, strength: float = 0.5) -> "PlantDNA":
         """

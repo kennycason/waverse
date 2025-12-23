@@ -57,76 +57,80 @@ uniform float u_time_of_day;  // 0.0 = midnight, 0.5 = noon, 1.0 = midnight
 uniform vec3 u_sun_dir;
 uniform vec3 u_camera_pos;
 
-// Sky colors for different times
-const vec3 NIGHT_SKY = vec3(0.02, 0.02, 0.08);
-const vec3 NIGHT_HORIZON = vec3(0.05, 0.05, 0.1);
+// =============================================================================
+// STYLIZED/PLAYFUL SKY - Bold colors, simple gradients, geometric feel
+// =============================================================================
 
-const vec3 SUNRISE_SKY = vec3(0.2, 0.3, 0.5);
-const vec3 SUNRISE_HORIZON = vec3(0.9, 0.5, 0.3);
+// Night: Deep indigo/purple with a touch of warmth
+const vec3 NIGHT_ZENITH = vec3(0.08, 0.05, 0.18);    // Deep purple-blue
+const vec3 NIGHT_HORIZON = vec3(0.12, 0.08, 0.22);   // Slightly lighter purple
 
-const vec3 DAY_SKY = vec3(0.4, 0.6, 0.9);
-const vec3 DAY_HORIZON = vec3(0.7, 0.8, 0.95);
+// Dawn/Dusk: Vibrant oranges/pinks/corals
+const vec3 SUNRISE_ZENITH = vec3(0.35, 0.25, 0.55);   // Purple-pink
+const vec3 SUNRISE_HORIZON = vec3(1.0, 0.55, 0.35);   // Warm coral-orange
 
-const vec3 SUNSET_SKY = vec3(0.3, 0.3, 0.5);
-const vec3 SUNSET_HORIZON = vec3(0.95, 0.4, 0.2);
+// Day: Bright, playful sky blue with warmth
+const vec3 DAY_ZENITH = vec3(0.35, 0.65, 0.95);       // Bright saturated sky blue
+const vec3 DAY_HORIZON = vec3(0.75, 0.88, 0.95);      // Light peachy horizon
 
-// Sun/moon
-const vec3 SUN_COLOR = vec3(1.0, 0.95, 0.8);
-const vec3 MOON_COLOR = vec3(0.9, 0.9, 1.0);
+// Sunset: Rich warm tones  
+const vec3 SUNSET_ZENITH = vec3(0.45, 0.30, 0.60);    // Purple
+const vec3 SUNSET_HORIZON = vec3(1.0, 0.45, 0.25);    // Vivid orange-red
 
-// Simple hash for stars
+// Sun/moon - stylized, slightly larger
+const vec3 SUN_COLOR = vec3(1.0, 0.95, 0.7);   // Warm yellow
+const vec3 MOON_COLOR = vec3(0.95, 0.93, 1.0);  // Cool white-blue
+
+// Star hash
 float hash(vec2 p) {
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
 }
 
-vec3 getGradientColor(float y, float time) {
-    // y is vertical component of ray (-1 to 1)
-    // time is 0-1 through the day
-    
-    // Calculate blend factors for time of day
-    float night = smoothstep(0.75, 1.0, time) + smoothstep(0.25, 0.0, time);
-    float sunrise = smoothstep(0.2, 0.25, time) * smoothstep(0.35, 0.25, time);
-    float day = smoothstep(0.25, 0.4, time) * smoothstep(0.75, 0.6, time);
-    float sunset = smoothstep(0.6, 0.75, time) * smoothstep(0.85, 0.75, time);
+vec3 getSkyColor(float y, float time) {
+    // Calculate time phases (sharper transitions for stylized look)
+    float night = smoothstep(0.8, 0.95, time) + smoothstep(0.2, 0.05, time);
+    float sunrise = smoothstep(0.18, 0.25, time) * smoothstep(0.38, 0.28, time);
+    float day = smoothstep(0.32, 0.45, time) * smoothstep(0.68, 0.55, time);
+    float sunset = smoothstep(0.62, 0.72, time) * smoothstep(0.88, 0.78, time);
     
     // Normalize
     float total = night + sunrise + day + sunset + 0.001;
-    night /= total;
-    sunrise /= total;
-    day /= total;
-    sunset /= total;
+    night /= total; sunrise /= total; day /= total; sunset /= total;
     
-    // Get horizon blend (0 at horizon, 1 at zenith)
-    float horizon = smoothstep(-0.1, 0.5, y);
+    // Horizon blend - steeper for more graphic look
+    float horizon = smoothstep(-0.05, 0.35, y);
     
-    // Blend sky colors based on time
-    vec3 sky = NIGHT_SKY * night + SUNRISE_SKY * sunrise + DAY_SKY * day + SUNSET_SKY * sunset;
-    vec3 hor = NIGHT_HORIZON * night + SUNRISE_HORIZON * sunrise + DAY_HORIZON * day + SUNSET_HORIZON * sunset;
+    // Blend zenith colors
+    vec3 zenith = NIGHT_ZENITH * night + SUNRISE_ZENITH * sunrise 
+                + DAY_ZENITH * day + SUNSET_ZENITH * sunset;
     
-    return mix(hor, sky, horizon);
+    // Blend horizon colors  
+    vec3 hor = NIGHT_HORIZON * night + SUNRISE_HORIZON * sunrise 
+             + DAY_HORIZON * day + SUNSET_HORIZON * sunset;
+    
+    // Simple two-band gradient
+    return mix(hor, zenith, horizon);
 }
 
 float starField(vec3 dir) {
-    // Only show stars at night and above horizon
     if (dir.y < 0.0) return 0.0;
     
-    // Project to sphere
-    vec2 uv = dir.xz / (dir.y + 1.0) * 100.0;
-    
-    // Grid-based stars
+    vec2 uv = dir.xz / (dir.y + 1.0) * 80.0;
     vec2 grid = floor(uv);
     float star = 0.0;
     
+    // Fewer, brighter stars for stylized look
     for (int dx = -1; dx <= 1; dx++) {
         for (int dy = -1; dy <= 1; dy++) {
             vec2 cell = grid + vec2(dx, dy);
             float h = hash(cell);
             
-            if (h > 0.97) {  // Star probability
+            if (h > 0.96) {
                 vec2 star_pos = cell + vec2(hash(cell + 0.1), hash(cell + 0.2));
                 float d = length(uv - star_pos);
-                float brightness = h * smoothstep(0.1, 0.0, d);
-                star += brightness;
+                // Sharper stars (more geometric)
+                float brightness = step(d, 0.08 + h * 0.05);
+                star += brightness * (0.5 + h * 0.5);
             }
         }
     }
@@ -138,32 +142,27 @@ void main() {
     vec3 dir = normalize(v_ray_dir);
     
     // Base sky gradient
-    vec3 color = getGradientColor(dir.y, u_time_of_day);
+    vec3 color = getSkyColor(dir.y, u_time_of_day);
     
-    // Sun
+    // Sun - larger, flatter disc for stylized look
     float sun_dot = dot(dir, normalize(u_sun_dir));
-    float sun_disk = smoothstep(0.998, 0.9995, sun_dot);  // Sharp sun disk
-    float sun_glow = pow(max(sun_dot, 0.0), 8.0) * 0.5;   // Soft glow
+    float sun_disk = smoothstep(0.995, 0.998, sun_dot);  // Larger disc
+    float sun_halo = smoothstep(0.97, 0.995, sun_dot) * 0.3;  // Soft halo
     
-    // Only show sun during day
-    float day_factor = smoothstep(0.2, 0.35, u_time_of_day) * smoothstep(0.8, 0.65, u_time_of_day);
-    color += SUN_COLOR * (sun_disk + sun_glow) * day_factor;
+    float day_factor = smoothstep(0.2, 0.32, u_time_of_day) * smoothstep(0.8, 0.68, u_time_of_day);
+    color = mix(color, SUN_COLOR, (sun_disk + sun_halo) * day_factor);
     
-    // Moon (opposite to sun)
+    // Moon - simple circle
     vec3 moon_dir = -u_sun_dir;
     float moon_dot = dot(dir, normalize(moon_dir));
-    float moon_disk = smoothstep(0.995, 0.998, moon_dot);
-    float night_factor = smoothstep(0.3, 0.2, u_time_of_day) + smoothstep(0.7, 0.8, u_time_of_day);
+    float moon_disk = smoothstep(0.993, 0.997, moon_dot);
+    float night_factor = smoothstep(0.28, 0.15, u_time_of_day) + smoothstep(0.72, 0.85, u_time_of_day);
     night_factor = clamp(night_factor, 0.0, 1.0);
-    color += MOON_COLOR * moon_disk * night_factor * 0.8;
+    color = mix(color, MOON_COLOR, moon_disk * night_factor * 0.95);
     
-    // Stars
+    // Stars - bright simple points
     float stars = starField(dir) * night_factor;
-    color += vec3(1.0, 1.0, 0.95) * stars;
-    
-    // Horizon haze
-    float haze = 1.0 - smoothstep(0.0, 0.3, abs(dir.y));
-    color = mix(color, vec3(0.7, 0.75, 0.8), haze * 0.3 * day_factor);
+    color = mix(color, vec3(1.0, 0.98, 0.9), stars);
     
     fragColor = vec4(color, 1.0);
 }

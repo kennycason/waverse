@@ -370,6 +370,249 @@ def create_insect_mesh() -> Tuple[np.ndarray, np.ndarray]:
     return np.array(vertices, dtype='f4'), np.array(normals, dtype='f4')
 
 
+def create_reptile_mesh() -> Tuple[np.ndarray, np.ndarray]:
+    """Create a reptile/lizard mesh with long body and tail."""
+    vertices = []
+    normals = []
+    
+    # Long body - 3 connected segments
+    segments = [(0.25, 0.06, 0.04), (0, 0.08, 0.06), (-0.25, 0.06, 0.04)]
+    for z, r, h in segments:
+        for i in range(6):
+            a0 = i * math.pi / 3
+            a1 = (i + 1) * math.pi / 3
+            top = [0, h + 0.02, z]
+            mid0 = [math.cos(a0) * r, h/2 + 0.02, z + math.sin(a0) * r * 0.5]
+            mid1 = [math.cos(a1) * r, h/2 + 0.02, z + math.sin(a1) * r * 0.5]
+            vertices.extend([top, mid0, mid1])
+            normals.extend([[0, 1, 0]] * 3)
+    
+    # Long tail
+    for i in range(4):
+        z = -0.35 - i * 0.12
+        r = 0.03 * (1 - i * 0.2)
+        vertices.extend([
+            [0, 0.03, z], [r, 0.02, z - 0.1], [-r, 0.02, z - 0.1]
+        ])
+        normals.extend([[0, 1, 0]] * 3)
+    
+    # 4 stubby legs
+    for side in [-1, 1]:
+        for zoff in [0.1, -0.15]:
+            vertices.extend([
+                [side * 0.08, 0.04, zoff],
+                [side * 0.15, 0.0, zoff + 0.03],
+                [side * 0.15, 0.0, zoff - 0.03],
+            ])
+            normals.extend([[side, 0, 0]] * 3)
+    
+    # Head
+    vertices.extend([
+        [0, 0.06, 0.35], [-0.04, 0.02, 0.28], [0.04, 0.02, 0.28]
+    ])
+    normals.extend([[0, 0.5, 0.866]] * 3)
+    
+    return np.array(vertices, dtype='f4'), np.array(normals, dtype='f4')
+
+
+def create_amphibian_mesh() -> Tuple[np.ndarray, np.ndarray]:
+    """Create a frog/toad mesh with big eyes and powerful hind legs."""
+    vertices = []
+    normals = []
+    
+    # Rounded body (dome)
+    for i in range(8):
+        a0 = i * math.pi / 4
+        a1 = (i + 1) * math.pi / 4
+        vertices.extend([
+            [0, 0.15, 0],
+            [math.cos(a0) * 0.12, 0.02, math.sin(a0) * 0.1],
+            [math.cos(a1) * 0.12, 0.02, math.sin(a1) * 0.1]
+        ])
+        normals.extend([[0, 1, 0]] * 3)
+    
+    # Big bulging eyes
+    for side in [-1, 1]:
+        eye_x = side * 0.06
+        for i in range(4):
+            a0 = i * math.pi / 2
+            a1 = (i + 1) * math.pi / 2
+            vertices.extend([
+                [eye_x, 0.2, 0.08],
+                [eye_x + math.cos(a0) * 0.03, 0.15, 0.08 + math.sin(a0) * 0.03],
+                [eye_x + math.cos(a1) * 0.03, 0.15, 0.08 + math.sin(a1) * 0.03]
+            ])
+            normals.extend([[0, 1, 0]] * 3)
+    
+    # Front legs (small)
+    for side in [-1, 1]:
+        vertices.extend([
+            [side * 0.1, 0.03, 0.06],
+            [side * 0.18, 0.0, 0.1],
+            [side * 0.18, 0.0, 0.02],
+        ])
+        normals.extend([[0, 0, 1]] * 3)
+    
+    # Back legs (big and powerful)
+    for side in [-1, 1]:
+        # Thigh
+        vertices.extend([
+            [side * 0.1, 0.05, -0.08],
+            [side * 0.2, 0.02, -0.12],
+            [side * 0.15, 0.0, -0.04],
+        ])
+        # Lower leg
+        vertices.extend([
+            [side * 0.2, 0.02, -0.12],
+            [side * 0.28, 0.0, -0.05],
+            [side * 0.22, 0.0, -0.15],
+        ])
+        normals.extend([[0, 1, 0]] * 6)
+    
+    return np.array(vertices, dtype='f4'), np.array(normals, dtype='f4')
+
+
+def create_crab_mesh() -> Tuple[np.ndarray, np.ndarray]:
+    """Create a crab mesh with wide body and claws."""
+    vertices = []
+    normals = []
+    
+    # Wide flat body
+    for i in range(6):
+        a0 = i * math.pi / 3
+        a1 = (i + 1) * math.pi / 3
+        vertices.extend([
+            [0, 0.08, 0],
+            [math.cos(a0) * 0.15, 0.02, math.sin(a0) * 0.1],
+            [math.cos(a1) * 0.15, 0.02, math.sin(a1) * 0.1]
+        ])
+        normals.extend([[0, 1, 0]] * 3)
+    
+    # 8 legs (4 on each side)
+    for side in [-1, 1]:
+        for i, zoff in enumerate([-0.06, -0.02, 0.02, 0.06]):
+            leg_len = 0.12 + (abs(i - 1.5)) * 0.03
+            vertices.extend([
+                [side * 0.12, 0.04, zoff],
+                [side * (0.12 + leg_len), 0.0, zoff + 0.02],
+                [side * (0.12 + leg_len), 0.0, zoff - 0.02],
+            ])
+            normals.extend([[side, 0, 0]] * 3)
+    
+    # Claws (front)
+    for side in [-1, 1]:
+        # Arm
+        vertices.extend([
+            [side * 0.1, 0.05, 0.1],
+            [side * 0.18, 0.04, 0.15],
+            [side * 0.15, 0.02, 0.08],
+        ])
+        # Claw pincer
+        vertices.extend([
+            [side * 0.18, 0.06, 0.15],
+            [side * 0.25, 0.04, 0.2],
+            [side * 0.22, 0.02, 0.13],
+        ])
+        vertices.extend([
+            [side * 0.18, 0.03, 0.15],
+            [side * 0.22, 0.02, 0.2],
+            [side * 0.25, 0.04, 0.15],
+        ])
+        normals.extend([[0, 1, 0]] * 9)
+    
+    # Eyes on stalks
+    for side in [-1, 1]:
+        vertices.extend([
+            [side * 0.04, 0.08, 0.1],
+            [side * 0.05, 0.14, 0.12],
+            [side * 0.03, 0.08, 0.1],
+        ])
+        normals.extend([[0, 1, 0]] * 3)
+    
+    return np.array(vertices, dtype='f4'), np.array(normals, dtype='f4')
+
+
+def create_jellyfish_mesh() -> Tuple[np.ndarray, np.ndarray]:
+    """Create a jellyfish mesh with dome and tentacles."""
+    vertices = []
+    normals = []
+    
+    # Bell/dome top
+    for i in range(8):
+        a0 = i * math.pi / 4
+        a1 = (i + 1) * math.pi / 4
+        r = 0.15
+        vertices.extend([
+            [0, 0.2, 0],
+            [math.cos(a0) * r, 0.05, math.sin(a0) * r],
+            [math.cos(a1) * r, 0.05, math.sin(a1) * r]
+        ])
+        normals.extend([[0, 1, 0]] * 3)
+    
+    # Inner bell (darker)
+    for i in range(8):
+        a0 = i * math.pi / 4
+        a1 = (i + 1) * math.pi / 4
+        r = 0.12
+        vertices.extend([
+            [0, 0.08, 0],
+            [math.cos(a1) * r, 0.05, math.sin(a1) * r],
+            [math.cos(a0) * r, 0.05, math.sin(a0) * r]
+        ])
+        normals.extend([[0, -1, 0]] * 3)
+    
+    # Tentacles (8 hanging down)
+    for i in range(8):
+        angle = i * math.pi / 4
+        x = math.cos(angle) * 0.1
+        z = math.sin(angle) * 0.1
+        length = 0.2 + (i % 3) * 0.1  # Varying lengths
+        
+        vertices.extend([
+            [x - 0.01, 0.05, z],
+            [x + 0.01, 0.05, z],
+            [x + (i % 2) * 0.03 - 0.015, -length, z]
+        ])
+        normals.extend([[0, 0, 1]] * 3)
+    
+    return np.array(vertices, dtype='f4'), np.array(normals, dtype='f4')
+
+
+def create_snake_mesh() -> Tuple[np.ndarray, np.ndarray]:
+    """Create a snake mesh - long sinuous body."""
+    vertices = []
+    normals = []
+    
+    # Body as series of connected segments with wave pattern
+    num_segments = 10
+    for i in range(num_segments):
+        t = i / num_segments
+        # Sinuous wave
+        x = math.sin(t * math.pi * 2) * 0.1
+        z = t * 0.6 - 0.3  # Length
+        r = 0.04 * (1 - t * 0.5)  # Tapers toward tail
+        
+        for j in range(4):
+            a0 = j * math.pi / 2
+            a1 = (j + 1) * math.pi / 2
+            vertices.extend([
+                [x, 0.06, z],
+                [x + math.cos(a0) * r, 0.04 + math.sin(a0) * r * 0.5, z],
+                [x + math.cos(a1) * r, 0.04 + math.sin(a1) * r * 0.5, z]
+            ])
+            normals.extend([[0, 1, 0]] * 3)
+    
+    # Head (triangular)
+    vertices.extend([
+        [0, 0.07, -0.35],
+        [-0.03, 0.04, -0.28],
+        [0.03, 0.04, -0.28]
+    ])
+    normals.extend([[0, 0.5, -0.866]] * 3)
+    
+    return np.array(vertices, dtype='f4'), np.array(normals, dtype='f4')
+
+
 # =============================================================================
 # RENDERER
 # =============================================================================
@@ -400,6 +643,11 @@ class ModernAnimalRenderer:
     TYPE_INSECT = 2
     TYPE_BIRD = 3
     TYPE_FISH = 4
+    TYPE_REPTILE = 5
+    TYPE_AMPHIBIAN = 6
+    TYPE_CRAB = 7
+    TYPE_JELLYFISH = 8
+    TYPE_SNAKE = 9
     
     def __init__(self, ctx: moderngl.Context):
         self.ctx = ctx
@@ -429,6 +677,11 @@ class ModernAnimalRenderer:
             self.TYPE_INSECT: [],
             self.TYPE_BIRD: [],
             self.TYPE_FISH: [],
+            self.TYPE_REPTILE: [],
+            self.TYPE_AMPHIBIAN: [],
+            self.TYPE_CRAB: [],
+            self.TYPE_JELLYFISH: [],
+            self.TYPE_SNAKE: [],
         }
         
         # Uniforms
@@ -438,8 +691,8 @@ class ModernAnimalRenderer:
         self.light_dir = glm.vec3(0.5, 1.0, 0.3)
         self.ambient = glm.vec3(0.4, 0.4, 0.5)
         self.fog_color = glm.vec3(0.7, 0.8, 0.9)
-        self.fog_start = 100.0
-        self.fog_end = 400.0
+        self.fog_start = 2000.0
+        self.fog_end = 6000.0
         self.time = 0.0
         
         # Stats
@@ -456,6 +709,11 @@ class ModernAnimalRenderer:
             self.TYPE_INSECT: create_insect_mesh,
             self.TYPE_BIRD: create_bird_mesh,
             self.TYPE_FISH: create_fish_mesh,
+            self.TYPE_REPTILE: create_reptile_mesh,
+            self.TYPE_AMPHIBIAN: create_amphibian_mesh,
+            self.TYPE_CRAB: create_crab_mesh,
+            self.TYPE_JELLYFISH: create_jellyfish_mesh,
+            self.TYPE_SNAKE: create_snake_mesh,
         }
         
         for type_id, creator in mesh_creators.items():
@@ -562,27 +820,59 @@ class ModernAnimalRenderer:
 def get_animal_type_id(animal_type: str) -> int:
     """Map waverse animal type string to renderer type ID."""
     type_map = {
-        # Worms/snakes
+        # Worms
         'worm': ModernAnimalRenderer.TYPE_WORM,
-        'snake': ModernAnimalRenderer.TYPE_WORM,
         'centipede': ModernAnimalRenderer.TYPE_WORM,
+        
+        # Snakes (now separate)
+        'snake': ModernAnimalRenderer.TYPE_SNAKE,
+        'serpent': ModernAnimalRenderer.TYPE_SNAKE,
         
         # Mammals/large creatures
         'mammal': ModernAnimalRenderer.TYPE_MAMMAL,
         'dinosaur': ModernAnimalRenderer.TYPE_MAMMAL,
-        'croc': ModernAnimalRenderer.TYPE_MAMMAL,
+        
+        # Reptiles
+        'reptile': ModernAnimalRenderer.TYPE_REPTILE,
+        'lizard': ModernAnimalRenderer.TYPE_REPTILE,
+        'croc': ModernAnimalRenderer.TYPE_REPTILE,
+        'crocodile': ModernAnimalRenderer.TYPE_REPTILE,
+        'alligator': ModernAnimalRenderer.TYPE_REPTILE,
+        'gecko': ModernAnimalRenderer.TYPE_REPTILE,
+        
+        # Amphibians
+        'amphibian': ModernAnimalRenderer.TYPE_AMPHIBIAN,
+        'frog': ModernAnimalRenderer.TYPE_AMPHIBIAN,
+        'toad': ModernAnimalRenderer.TYPE_AMPHIBIAN,
+        'salamander': ModernAnimalRenderer.TYPE_AMPHIBIAN,
+        'newt': ModernAnimalRenderer.TYPE_AMPHIBIAN,
+        
+        # Crabs/crustaceans
+        'crab': ModernAnimalRenderer.TYPE_CRAB,
+        'lobster': ModernAnimalRenderer.TYPE_CRAB,
+        'shrimp': ModernAnimalRenderer.TYPE_CRAB,
+        'crustacean': ModernAnimalRenderer.TYPE_CRAB,
+        
+        # Jellyfish/sea creatures
+        'jellyfish': ModernAnimalRenderer.TYPE_JELLYFISH,
+        'octopus': ModernAnimalRenderer.TYPE_JELLYFISH,
+        'squid': ModernAnimalRenderer.TYPE_JELLYFISH,
         
         # Insects/small creatures  
         'insect': ModernAnimalRenderer.TYPE_INSECT,
         'spider': ModernAnimalRenderer.TYPE_INSECT,
         'trilobite': ModernAnimalRenderer.TYPE_INSECT,
         'snail': ModernAnimalRenderer.TYPE_INSECT,
+        'beetle': ModernAnimalRenderer.TYPE_INSECT,
+        'ant': ModernAnimalRenderer.TYPE_INSECT,
         
         # Birds
         'bird': ModernAnimalRenderer.TYPE_BIRD,
         
         # Fish
         'fish': ModernAnimalRenderer.TYPE_FISH,
+        'eel': ModernAnimalRenderer.TYPE_FISH,
+        'shark': ModernAnimalRenderer.TYPE_FISH,
     }
     return type_map.get(animal_type, ModernAnimalRenderer.TYPE_WORM)
 

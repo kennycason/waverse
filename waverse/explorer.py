@@ -3728,6 +3728,7 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
             
             modern_renderer = ModernWorldRenderer(modern_ctx)
             modern_renderer.set_chunk_params(CHUNK_SIZE, TILE_SCALE, HEIGHT_SCALE)
+            modern_renderer.set_screen_size(display[0], display[1])
             print(f"  [RENDERER] ModernGL initialized successfully!")
             
             # Check if we're on macOS with Core profile - legacy GL won't work
@@ -3824,7 +3825,7 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
         # Modern renderer handles terrain via VBOs, not display lists
         # Just call update once - it loads chunks based on camera position
         modern_renderer.update_chunks_around_camera(
-            camera, chunk_manager, flora_manager, animal_manager, structure_manager
+            camera, chunk_manager, flora_manager, animal_manager, structure_manager, climate_manager
         )
         print(f"  Loaded chunks via modern renderer!")
     else:
@@ -4344,14 +4345,15 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
         perf.record_time('life', _life_start)
         
         # Refresh display lists for chunks where plants changed (eaten/died)
-        if not NO_FLORA_UPDATE:
+        # Skip in modern mode - no display lists used
+        if not NO_FLORA_UPDATE and not (USE_MODERN_RENDERER and modern_renderer):
             for chunk_key in life_simulator.chunks_needing_refresh:
                 if chunk_key in flora_manager.display_lists:
                     # Delete old display lists
                     for dl in flora_manager.display_lists[chunk_key]:
                         glDeleteLists(dl, 1)
                     del flora_manager.display_lists[chunk_key]
-            life_simulator.chunks_needing_refresh.clear()
+        life_simulator.chunks_needing_refresh.clear()
         
         # Process pending births - spawn animals from hatched eggs
         if not NO_ANIMAL_UPDATE:
@@ -4376,7 +4378,8 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
             # Just need to sync camera and time/weather
             modern_renderer.set_camera_from_waverse(camera, display[0]/display[1])
             modern_renderer.set_time_of_day(getattr(sky, 'time', 0.5))
-            modern_renderer.set_lighting(fog_start=200.0, fog_end=600.0)
+            modern_renderer.set_lighting(fog_start=2000.0, fog_end=6000.0)  # Extended for far render
+            modern_renderer.set_water_level(water_level * HEIGHT_SCALE)  # Convert to world units
             
             # Sync weather
             weather = climate_manager.current_weather
@@ -4386,7 +4389,7 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
             
             # Update chunk loading based on camera position
             modern_renderer.update_chunks_around_camera(
-                camera, chunk_manager, flora_manager, animal_manager, structure_manager
+                camera, chunk_manager, flora_manager, animal_manager, structure_manager, climate_manager
             )
             
             # Render everything via modern renderer

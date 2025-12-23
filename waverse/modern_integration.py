@@ -25,6 +25,7 @@ from .modern_sky import ModernSkyRenderer
 from .modern_clouds import ModernCloudRenderer
 from .modern_structures import ModernStructureRenderer
 from .modern_weather import ModernWeatherRenderer
+from .modern_hud import ModernHUDRenderer
 
 
 # =============================================================================
@@ -54,6 +55,7 @@ class ModernWorldRenderer:
         self.animals = ModernAnimalRenderer(ctx)
         self.water = ModernWaterRenderer(ctx)
         self.weather = ModernWeatherRenderer(ctx)  # Rendered last (particles)
+        self.hud = ModernHUDRenderer(ctx)  # HUD overlay
         
         # Integration state
         self.loaded_terrain_chunks: set = set()
@@ -77,10 +79,10 @@ class ModernWorldRenderer:
         self._visible_structures: List[Any] = []
         
         # Render settings
-        # Render distances (can be overridden by set_render_distances)
-        self.render_distance = 16  # Chunks (terrain)
-        self.flora_render_distance = 14  # Chunks (plants - GPU instanced)
-        self.animal_render_distance = 12  # Chunks (animals)
+        # Render distances - extended for better view (can be overridden by set_render_distances)
+        self.render_distance = 50  # Chunks (terrain) - ~6km view distance
+        self.flora_render_distance = 45  # Chunks (plants - GPU instanced, efficient)
+        self.animal_render_distance = 25  # Chunks (animals)
     
     def set_render_distances(self, terrain: int = None, flora: int = None, animals: int = None):
         """Update render distances dynamically."""
@@ -102,6 +104,10 @@ class ModernWorldRenderer:
         self.tile_scale = tile_scale
         self.height_scale = height_scale
     
+    def set_screen_size(self, width: int, height: int):
+        """Update HUD for new screen size."""
+        self.hud.resize(width, height)
+    
     def set_camera_from_waverse(self, camera: Any, aspect: float = 16/9):
         """
         Update renderer camera from waverse Camera object.
@@ -115,8 +121,11 @@ class ModernWorldRenderer:
         yaw, pitch = camera.yaw, camera.pitch
         fov = getattr(camera, 'fov', 60.0)
         
-        # Update terrain renderer
-        self.terrain.set_camera(x, y, z, yaw, pitch, fov, aspect)
+        # Store for HUD
+        self._camera_pos = (x, y, z)
+        
+        # Update terrain renderer (use same near/far as other renderers!)
+        self.terrain.set_camera(x, y, z, yaw, pitch, fov, aspect, near=0.5, far=8000.0)
         
         # Update flora renderer  
         yaw_rad = math.radians(yaw)
@@ -126,7 +135,7 @@ class ModernWorldRenderer:
         dir_y = math.sin(pitch_rad)
         dir_z = -math.cos(yaw_rad) * math.cos(pitch_rad)
         
-        projection = glm.perspective(glm.radians(fov), aspect, 0.1, 1000.0)
+        projection = glm.perspective(glm.radians(fov), aspect, 0.5, 8000.0)
         cam_pos = glm.vec3(x, y, z)
         target = cam_pos + glm.vec3(dir_x, dir_y, dir_z)
         view = glm.lookAt(cam_pos, target, glm.vec3(0, 1, 0))
@@ -140,13 +149,14 @@ class ModernWorldRenderer:
         self.weather.set_camera(projection, view, cam_pos)
     
     def load_terrain_chunk(self, cx: int, cz: int, chunk_manager: Any,
-                           biome: str = 'grassland'):
+                           climate_manager: Any = None):
         """
         Load a terrain chunk from the ChunkManager.
         
         Args:
             cx, cz: Chunk coordinates
             chunk_manager: waverse ChunkManager with get_chunk() method
+            climate_manager: waverse ClimateManager for biome data
         """
         key = (cx, cz)
         if key in self.loaded_terrain_chunks:
@@ -159,6 +169,13 @@ class ModernWorldRenderer:
         
         # Get heightmap
         heightmap = chunk.heightmap  # This is a numpy array
+        
+        # Get biome from ClimateManager
+        biome = 'grassland'  # Default
+        if climate_manager:
+            biome_dna = climate_manager.get_biome(cx, cz)
+            if biome_dna:
+                biome = biome_dna.get_biome_name()
         
         # Calculate world position
         chunk_world_x = cx * self.chunk_size * self.tile_scale
@@ -181,60 +198,262 @@ class ModernWorldRenderer:
             self.terrain.remove_chunk(cx, cz)
             self.loaded_terrain_chunks.discard(key)
     
-    def load_flora_for_chunk(self, cx: int, cz: int, flora_manager: Any):
+    def load_flora_for_chunk(self, cx: int, cz: int, flora_manager: Any, 
+                            chunk_manager: Any = None, cam_x: float = 0, cam_z: float = 0):
         """
-        Load flora instances from a chunk.
+        Load flora instances from a chunk with distance-based density falloff.
         
         Args:
             cx, cz: Chunk coordinates
             flora_manager: waverse FloraManager with chunk_plants dict
+            chunk_manager: waverse ChunkManager to get heightmap data
+            cam_x, cam_z: Camera position for distance-based density
         """
         key = (cx, cz)
         if key in self.loaded_flora_chunks:
             return
         
-        # Get plants from flora manager
-        plants = flora_manager.chunk_plants.get(key, [])
+        # Get or generate plants - need heightmap from chunk_manager
+        plants = flora_manager.chunk_plants.get(key, None)
         
-        for plant in plants:
-            # Extract plant data
-            x = plant.x
-            y = plant.y
-            z = plant.z
-            scale = getattr(plant, 'scale', 1.0)
-            rotation = getattr(plant, 'rotation', 0.0)
-            
-            # Determine mesh type from plant DNA
-            dna = getattr(plant, 'dna', None)
-            if dna:
-                plant_type = getattr(dna, 'plant_type', 'bush')
-                # Map waverse plant types to our mesh types
-                if plant_type in ('tree', 'pine', 'oak', 'palm'):
-                    mesh_type = 'tree'
-                elif plant_type in ('bush', 'shrub'):
-                    mesh_type = 'bush'
-                elif plant_type in ('grass', 'fern', 'reed'):
-                    mesh_type = 'grass'
-                elif plant_type in ('flower', 'mushroom'):
-                    mesh_type = 'flower'
-                else:
-                    mesh_type = 'bush'
-                
-                # Get color from DNA
-                color = getattr(dna, 'leaf_color', (0.3, 0.6, 0.3))
-                r, g, b = color[:3] if len(color) >= 3 else (1, 1, 1)
+        if plants is None and chunk_manager:
+            chunk = chunk_manager.get_chunk(cx, cz)
+            if chunk and hasattr(chunk, 'heightmap'):
+                # Generate plants for this chunk
+                from .world import TILE_SCALE
+                from .explorer import HEIGHT_SCALE
+                plants = flora_manager.get_plants_for_chunk(
+                    cx, cz, chunk.heightmap, 
+                    cx * self.chunk_size * self.tile_scale,  # chunk_world_x
+                    cz * self.chunk_size * self.tile_scale,  # chunk_world_z
+                    TILE_SCALE, HEIGHT_SCALE
+                )
             else:
-                mesh_type = 'bush'
-                r, g, b = 1.0, 1.0, 1.0
-            
-            self.flora.add_instance(mesh_type, x, y, z, scale, rotation, r, g, b)
+                plants = []
+        elif plants is None:
+            plants = []
+        
+        # Calculate chunk center for distance-based density
+        chunk_world_size = self.chunk_size * self.tile_scale
+        chunk_center_x = (cx + 0.5) * chunk_world_size
+        chunk_center_z = (cz + 0.5) * chunk_world_size
+        chunk_dist = math.sqrt((chunk_center_x - cam_x)**2 + (chunk_center_z - cam_z)**2)
+        
+        # Distance-based density falloff:
+        # - Close chunks (< 500 units): render all plants
+        # - Medium chunks (500-1500): render every other plant
+        # - Far chunks (1500-2500): render 1 in 4 plants
+        # - Very far (> 2500): render 1 in 8 plants
+        skip_rate = 1  # render all by default
+        if chunk_dist > 2500:
+            skip_rate = 8
+        elif chunk_dist > 1500:
+            skip_rate = 4
+        elif chunk_dist > 500:
+            skip_rate = 2
+        
+        for i, plant in enumerate(plants):
+            # Use plant index + position hash for consistent culling
+            if skip_rate > 1:
+                plant_hash = hash((int(plant.x * 100), int(plant.z * 100)))
+                if (i + plant_hash) % skip_rate != 0:
+                    continue
+            self._add_plant_instance(plant)
         
         self.loaded_flora_chunks.add(key)
+    
+    def _add_plant_instance(self, plant):
+        """Add a single plant to the flora renderer using full DNA data."""
+        x = plant.x
+        y = plant.y
+        z = plant.z
+        base_scale = getattr(plant, 'scale', 1.0)
+        rotation = getattr(plant, 'rotation', 0.0)
+        
+        # Determine mesh type and get visual properties from DNA
+        dna = getattr(plant, 'dna', None)
+        if dna:
+            plant_type = getattr(dna, 'plant_type', 'bush')
+            canopy_shape = getattr(dna, 'canopy_shape', 'dome')
+            
+            # Map waverse plant types and canopy shapes to our mesh types
+            # Convert enum to string if needed
+            type_str = str(plant_type).lower().replace('planttype.', '')
+            
+            if type_str in ('tree', 'pine', 'oak', 'willow', 'maple', 'birch', 'cedar', 'spruce', 'fir', 'elm', 'beech'):
+                # Use canopy_shape, leaf_shape, branch_count for maximum variety
+                shape_str = str(canopy_shape).lower() if canopy_shape else 'dome'
+                leaf_shape = str(getattr(dna, 'leaf_shape', 'round')).lower()
+                branch_count = getattr(dna, 'branch_count', 5)
+                height_val = getattr(dna, 'height_gene', None)
+                height = height_val.value if height_val and hasattr(height_val, 'value') else 5.0
+                droop = getattr(dna, 'droop', 0.0)
+                
+                # Special canopy shapes take priority
+                canopy_map = {
+                    'umbrella': 'tree_umbrella',
+                    'weeping': 'tree_weeping',
+                    'cascading': 'tree_weeping',
+                    'columnar': 'tree_columnar',
+                }
+                
+                # Species-specific overrides
+                if type_str in ('pine', 'spruce', 'fir', 'cedar'):
+                    mesh_type = 'tree_pine'  # Use pine mesh for conifers
+                elif type_str == 'oak':
+                    mesh_type = 'tree_oak'  # Broad spreading oak
+                elif type_str == 'willow' or droop > 0.5:
+                    mesh_type = 'tree_weeping'  # Weeping style for willows
+                elif leaf_shape == 'needle':
+                    mesh_type = 'tree_pine'  # Needle leaves = conifer
+                elif shape_str in canopy_map:
+                    mesh_type = canopy_map[shape_str]
+                elif height < 3.0:
+                    mesh_type = 'tree_small'  # Small/young trees
+                elif branch_count <= 3:
+                    mesh_type = 'tree_sparse'
+                elif branch_count >= 7:
+                    mesh_type = 'tree_dense'
+                elif shape_str in ('cone', 'explosion'):
+                    mesh_type = 'tree'
+                elif shape_str == 'sphere' or shape_str == 'layered':
+                    mesh_type = 'tree_oak'  # Round broad canopy
+                else:
+                    mesh_type = 'tree_dome'
+            elif type_str == 'tall_tree':
+                mesh_type = 'tree_tall'
+            elif type_str == 'palm':
+                mesh_type = 'tree_palm'
+            elif type_str in ('bush', 'shrub', 'hedge'):
+                # Use flowering variant if plant has flowers
+                has_flowers = getattr(dna, 'has_flowers', False)
+                if has_flowers:
+                    mesh_type = 'bush_flowering'
+                else:
+                    mesh_type = 'bush'
+            elif type_str == 'grass':
+                mesh_type = 'grass'
+            elif type_str == 'fern':
+                mesh_type = 'fern'
+            elif type_str in ('reed', 'bamboo', 'wheat'):
+                mesh_type = 'grass'
+            elif type_str == 'mushroom':
+                mesh_type = 'mushroom'
+            elif type_str == 'cactus':
+                mesh_type = 'cactus'
+            elif type_str == 'succulent':
+                mesh_type = 'cactus'
+            elif type_str == 'flower':
+                # Tall flowers vs short flowers based on height
+                height_val = getattr(dna, 'height_gene', None)
+                height = height_val.value if height_val and hasattr(height_val, 'value') else 0.5
+                if height > 1.0:
+                    mesh_type = 'flower_tall'
+                else:
+                    mesh_type = 'flower'
+            elif type_str in ('vine', 'spiny_vine', 'seaweed'):
+                mesh_type = 'vine'
+            elif type_str == 'octopus':
+                mesh_type = 'octopus'
+            elif type_str == 'tentacle':
+                mesh_type = 'tentacle'
+            elif type_str == 'spiral':
+                mesh_type = 'spiral'
+            elif type_str == 'crystal':
+                mesh_type = 'crystal'
+            elif type_str == 'alien':
+                mesh_type = 'alien'
+            elif type_str in ('groundcover', 'creeper', 'lichen', 'moss_pad'):
+                mesh_type = 'groundcover'
+            elif type_str == 'lily_pad':
+                mesh_type = 'lily_pad'
+            elif type_str == 'coral':
+                mesh_type = 'coral'
+            else:
+                mesh_type = 'bush'
+            
+            # SPECIAL DNA PROPERTIES can override mesh type for extreme mutations!
+            # Check for exotic/mutant properties
+            has_glow = getattr(dna, 'has_glow', False) or getattr(dna, 'bioluminescent', False)
+            spiral_factor = getattr(dna, 'spiral_factor', 0.0)
+            bulb_count = getattr(dna, 'bulb_count', 0)
+            has_thorns = getattr(dna, 'has_thorns', False)
+            droop_val = getattr(dna, 'droop', 0.0)
+            recursive_depth = getattr(dna, 'recursive_depth', 1)
+            tendrils = getattr(dna, 'tendrils', 0)
+            crystal_growth = getattr(dna, 'crystal_growth', False)
+            
+            # Override mesh type based on extreme mutations
+            if crystal_growth:
+                mesh_type = 'crystal'
+            elif has_glow and mesh_type not in ('flower', 'flower_tall'):
+                mesh_type = 'bioluminescent'
+            elif spiral_factor > 0.5 and 'tree' in mesh_type:
+                mesh_type = 'spiral_tree'
+            elif bulb_count >= 3:
+                mesh_type = 'bulbous'
+            elif has_thorns and mesh_type not in ('cactus',):
+                mesh_type = 'spiky'
+            elif droop_val > 0.7 and mesh_type not in ('tree_weeping', 'vine'):
+                mesh_type = 'droopy'
+            elif recursive_depth >= 3 and 'tree' in mesh_type:
+                mesh_type = 'fractal'
+            elif tendrils >= 3:
+                mesh_type = 'tube'
+            
+            # Get height from DNA for scale variation
+            # Legacy renders at height_gene.value * plant.scale (e.g. 5.0 * 1.0 = 5 units)
+            # Our meshes are ~1 unit tall, so scale should be height_gene.value * base_scale
+            height_gene = getattr(dna, 'height_gene', None)
+            if height_gene and hasattr(height_gene, 'value'):
+                # Direct height as scale - meshes are 1 unit, final height = height_gene * base_scale
+                scale = height_gene.value * base_scale
+                scale = max(0.5, min(15.0, scale))  # Reasonable bounds
+            else:
+                scale = base_scale * 3.0  # Default ~3 units tall
+            
+            # Get color from DNA based on plant type
+            # Flowers use flower_color, bioluminescent use glow_color, others use leaf_color
+            if mesh_type == 'flower' or mesh_type == 'flower_tall':
+                color = getattr(dna, 'flower_color', None)
+                if color is None:
+                    color = getattr(dna, 'leaf_color', None)
+            elif mesh_type == 'bioluminescent':
+                color = getattr(dna, 'glow_color', None)
+                if color is None:
+                    color = getattr(dna, 'leaf_color', None)
+            elif mesh_type == 'crystal':
+                # Crystals use a brighter version of leaf color
+                color = getattr(dna, 'tip_color', None)
+                if color is None:
+                    color = getattr(dna, 'leaf_color', None)
+            else:
+                color = getattr(dna, 'leaf_color', None)
+            
+            if color is None:
+                r, g, b = 0.3, 0.6, 0.3
+            elif hasattr(color, 'r'):
+                # ColorGene object - add slight variation for natural look
+                var = 0.08
+                r = max(0.1, min(1.0, color.r + (hash((int(x), int(z))) % 100 - 50) * var * 0.01))
+                g = max(0.1, min(1.0, color.g + (hash((int(z), int(x))) % 100 - 50) * var * 0.01))
+                b = max(0.1, min(1.0, color.b + (hash((int(x + z),)) % 100 - 50) * var * 0.01))
+            elif hasattr(color, '__getitem__'):
+                r, g, b = color[0], color[1], color[2]
+            else:
+                r, g, b = 0.3, 0.6, 0.3
+        else:
+            mesh_type = 'bush'
+            scale = base_scale * 3.0  # Default ~3 units tall
+            r, g, b = 0.4, 0.6, 0.35
+        
+        self.flora.add_instance(mesh_type, x, y, z, scale, rotation, r, g, b)
     
     def update_chunks_around_camera(self, camera: Any, chunk_manager: Any,
                                     flora_manager: Any = None,
                                     animal_manager: Any = None,
-                                    structure_manager: Any = None):
+                                    structure_manager: Any = None,
+                                    climate_manager: Any = None):
         """
         Load/unload chunks based on camera position.
         
@@ -248,6 +467,7 @@ class ModernWorldRenderer:
         chunk_world_size = self.chunk_size * self.tile_scale
         cam_cx = int(camera.x // chunk_world_size)
         cam_cz = int(camera.z // chunk_world_size)
+        
         
         # Build list of chunks sorted by distance (radial order, not stripes)
         chunks_by_dist = []
@@ -271,29 +491,57 @@ class ModernWorldRenderer:
             if dist <= self.flora_render_distance:
                 needed_flora.add((cx, cz))
         
-        # Load new terrain chunks (in radial order)
+        # THROTTLED chunk loading - limit per frame to prevent stuttering
+        # Terrain mesh creation is now vectorized (faster)
+        MAX_TERRAIN_LOADS_PER_FRAME = 2  # 2 terrain chunks per frame
+        MAX_FLORA_LOADS_PER_FRAME = 8  # Flora is light (just adding instances)
+        
+        # Load new terrain chunks (in radial order, throttled)
         chunks_to_load = [(cx, cz) for _, cx, cz in chunks_by_dist 
                           if (cx, cz) in needed_terrain and (cx, cz) not in self.loaded_terrain_chunks]
-        for cx, cz in chunks_to_load:
-            self.load_terrain_chunk(cx, cz, chunk_manager)
         
-        # Unload distant terrain chunks
-        for key in self.loaded_terrain_chunks - needed_terrain:
+        terrain_loaded = 0
+        for cx, cz in chunks_to_load:
+            if terrain_loaded >= MAX_TERRAIN_LOADS_PER_FRAME:
+                break  # Defer rest to next frame
+            self.load_terrain_chunk(cx, cz, chunk_manager, climate_manager)
+            terrain_loaded += 1
+        
+        # Unload distant terrain chunks (unloading is fast, do all)
+        for key in list(self.loaded_terrain_chunks - needed_terrain):
             self.unload_terrain_chunk(key[0], key[1])
         
-        # Handle flora if manager provided
+        # Handle flora if manager provided (INCREMENTAL loading)
         if flora_manager:
-            # Clear and rebuild flora (simpler than tracking deltas)
-            if needed_flora != self.loaded_flora_chunks:
-                self.flora.clear_instances()
-                self.loaded_flora_chunks.clear()
+            # Find chunks that need flora but don't have it yet
+            flora_to_load = [(cx, cz) for _, cx, cz in chunks_by_dist 
+                             if (cx, cz) in needed_flora and (cx, cz) not in self.loaded_flora_chunks]
+            
+            # INCREMENTAL flora loading - spread across frames to eliminate stutters
+            flora_loaded_this_frame = 0
+            
+            for cx, cz in flora_to_load:
+                if flora_loaded_this_frame >= MAX_FLORA_LOADS_PER_FRAME:
+                    break  # Defer rest to next frame
+                self.load_flora_for_chunk(cx, cz, flora_manager, chunk_manager, camera.x, camera.z)
+                flora_loaded_this_frame += 1
+            
+            # TIME-BASED GPU UPLOAD to avoid per-frame buffer recreation
+            # Only upload every ~0.5 seconds to batch changes together
+            if flora_loaded_this_frame > 0:
+                if not hasattr(self, '_flora_upload_timer'):
+                    self._flora_upload_timer = 0.0
+                    self._flora_needs_upload = False
                 
-                # Load flora in radial order
-                flora_to_load = [(cx, cz) for _, cx, cz in chunks_by_dist if (cx, cz) in needed_flora]
-                for cx, cz in flora_to_load:
-                    self.load_flora_for_chunk(cx, cz, flora_manager)
+                self._flora_needs_upload = True
+                self._flora_upload_timer += 0.016  # ~1 frame at 60fps
                 
-                self.flora.upload_instances()
+                # Upload only every 0.5 seconds OR if no more to load (finished)
+                remaining_to_load = len(flora_to_load) - flora_loaded_this_frame
+                if self._flora_upload_timer >= 0.5 or remaining_to_load == 0:
+                    self.flora.upload_instances()
+                    self._flora_upload_timer = 0.0
+                    self._flora_needs_upload = False
         
         # Handle animals if manager provided
         if animal_manager:
@@ -369,9 +617,36 @@ class ModernWorldRenderer:
                 animal_type = getattr(dna, 'animal_type', 'worm')
                 type_id = get_animal_type_id(animal_type)
                 
-                # Get color
-                color = getattr(dna, 'primary_color', (0.6, 0.5, 0.4))
-                r, g, b = color[:3] if len(color) >= 3 else (0.6, 0.5, 0.4)
+                # Get size from DNA for scale variation
+                size_gene = getattr(dna, 'size', None)
+                if size_gene is not None:
+                    if hasattr(size_gene, 'value'):
+                        dna_scale = size_gene.value
+                    else:
+                        dna_scale = float(size_gene)
+                    scale = scale * max(0.5, min(2.0, dna_scale))
+                
+                # Get color (may be ColorGene object or tuple)
+                color = getattr(dna, 'primary_color', None)
+                if color is None:
+                    r, g, b = 0.6, 0.5, 0.4
+                elif hasattr(color, 'r'):
+                    r, g, b = color.r, color.g, color.b
+                elif hasattr(color, '__getitem__'):
+                    r, g, b = color[0], color[1], color[2]
+                else:
+                    r, g, b = 0.6, 0.5, 0.4
+                
+                # Add secondary color pattern influence
+                secondary = getattr(dna, 'secondary_color', None)
+                if secondary and hasattr(secondary, 'r'):
+                    pattern = getattr(dna, 'pattern_type', 'solid')
+                    if pattern in ('spotted', 'striped', 'patched'):
+                        # Blend colors for patterned animals
+                        blend = 0.2
+                        r = r * (1 - blend) + secondary.r * blend
+                        g = g * (1 - blend) + secondary.g * blend
+                        b = b * (1 - blend) + secondary.b * blend
             else:
                 type_id = 0  # Default to worm
                 r, g, b = 0.6, 0.5, 0.4
@@ -443,6 +718,11 @@ class ModernWorldRenderer:
         """
         start = time.perf_counter()
         
+        # Clear the framebuffer (color and depth)
+        # Get sky color for clear color
+        sky_color = self.sky.get_sky_color()
+        self.ctx.clear(sky_color[0], sky_color[1], sky_color[2], 1.0)
+        
         # Render sky first (background)
         self.sky.render()
         
@@ -466,6 +746,16 @@ class ModernWorldRenderer:
         
         # Render weather particles last (in front of everything)
         self.weather.render(dt)
+        
+        # Render HUD overlay (after everything else)
+        self.hud.render(
+            camera_x=self._camera_pos[0] if hasattr(self, '_camera_pos') else 0,
+            camera_y=self._camera_pos[1] if hasattr(self, '_camera_pos') else 0,
+            camera_z=self._camera_pos[2] if hasattr(self, '_camera_pos') else 0,
+            fps=1000.0 / max(0.1, self.frame_stats.get('frame_time_ms', 16.67)) if self.frame_stats else 60,
+            terrain_chunks=len(self.loaded_terrain_chunks),
+            flora_instances=self.flora.frame_stats.get('instances_rendered', 0),
+        )
         
         elapsed = time.perf_counter() - start
         
@@ -509,6 +799,7 @@ class ModernWorldRenderer:
         self.animals.cleanup()
         self.water.cleanup()
         self.weather.cleanup()
+        self.hud.cleanup()
         self.loaded_terrain_chunks.clear()
         self.loaded_flora_chunks.clear()
         self._visible_structures.clear()

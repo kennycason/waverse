@@ -127,6 +127,7 @@ class TerrainChunkMesh:
 # =============================================================================
 
 BIOME_COLORS = {
+    # Lowercase keys (legacy)
     'ocean': (0.15, 0.35, 0.55),
     'beach': (0.85, 0.82, 0.65),
     'desert': (0.90, 0.85, 0.60),
@@ -141,6 +142,17 @@ BIOME_COLORS = {
     'volcanic': (0.25, 0.20, 0.20),
     'swamp': (0.35, 0.45, 0.30),
     'marsh': (0.40, 0.50, 0.35),
+    # Capitalized keys (from BiomeDNA.get_biome_name)
+    'Tundra': (0.70, 0.75, 0.72),
+    'Frozen': (0.85, 0.90, 0.95),
+    'Taiga': (0.30, 0.45, 0.35),
+    'Cold': (0.55, 0.60, 0.58),
+    'Rainforest': (0.15, 0.45, 0.18),
+    'Temperate': (0.32, 0.58, 0.28),
+    'Grassland': (0.40, 0.68, 0.32),
+    'Tropical': (0.25, 0.55, 0.30),
+    'Desert': (0.92, 0.85, 0.55),
+    'Savanna': (0.78, 0.72, 0.42),
 }
 
 
@@ -216,8 +228,8 @@ class ModernTerrainRenderer:
         
         # Fog
         self.fog_color = glm.vec3(0.65, 0.75, 0.88)
-        self.fog_start = 150.0
-        self.fog_end = 400.0
+        self.fog_start = 2000.0
+        self.fog_end = 6000.0
         
         # Water
         self.water_level = 0.0
@@ -231,7 +243,7 @@ class ModernTerrainRenderer:
     
     def set_camera(self, x: float, y: float, z: float,
                    yaw: float, pitch: float, fov: float = 60.0,
-                   aspect: float = 16/9, near: float = 0.1, far: float = 1000.0):
+                   aspect: float = 16/9, near: float = 0.5, far: float = 8000.0):
         """Update camera from waverse camera state."""
         self.camera_pos = glm.vec3(x, y, z)
         
@@ -259,14 +271,7 @@ class ModernTerrainRenderer:
                           biome: str = 'grassland') -> TerrainChunkMesh:
         """
         Create a VBO mesh from a heightmap chunk.
-        
-        Args:
-            cx, cz: Chunk coordinates
-            heightmap: 2D numpy array of heights
-            tile_scale: World units per heightmap cell
-            height_scale: Height multiplier
-            chunk_world_x, chunk_world_z: World position of chunk origin
-            biome: Biome name for coloring
+        OPTIMIZED: Uses numpy vectorization instead of Python loops.
         """
         key = (cx, cz)
         
@@ -275,80 +280,101 @@ class ModernTerrainRenderer:
             self.chunks[key].release()
         
         h, w = heightmap.shape
+        hz, hx = h - 1, w - 1  # Number of cells
         
-        # Pre-allocate arrays
-        # Each cell = 2 triangles = 6 vertices
-        # Each vertex = 9 floats (pos:3, normal:3, color:3)
-        num_cells = (h - 1) * (w - 1)
+        # VECTORIZED: Create coordinate grids
+        x_grid = np.arange(hx, dtype='f4')
+        z_grid = np.arange(hz, dtype='f4')
+        xx, zz = np.meshgrid(x_grid, z_grid)
+        
+        # World positions (flat arrays for vectorized operations)
+        wx0 = (chunk_world_x + xx * tile_scale).flatten()
+        wz0 = (chunk_world_z + zz * tile_scale).flatten()
+        wx1 = wx0 + tile_scale
+        wz1 = wz0 + tile_scale
+        
+        # Heights at all four corners (vectorized)
+        h00 = (heightmap[:-1, :-1] * height_scale).flatten().astype('f4')
+        h10 = (heightmap[:-1, 1:] * height_scale).flatten().astype('f4')
+        h01 = (heightmap[1:, :-1] * height_scale).flatten().astype('f4')
+        h11 = (heightmap[1:, 1:] * height_scale).flatten().astype('f4')
+        
+        num_cells = len(h00)
         num_verts = num_cells * 6
         
+        # VECTORIZED: Build vertices for both triangles
+        # Triangle 1: v0=(wx0,h00,wz0), v1=(wx1,h10,wz0), v2=(wx0,h01,wz1)
+        # Triangle 2: v3=(wx1,h10,wz0), v4=(wx1,h11,wz1), v5=(wx0,h01,wz1)
         vertices = np.zeros((num_verts, 3), dtype='f4')
+        
+        # Indices for each triangle vertex
+        vertices[0::6, 0] = wx0;  vertices[0::6, 1] = h00; vertices[0::6, 2] = wz0
+        vertices[1::6, 0] = wx1;  vertices[1::6, 1] = h10; vertices[1::6, 2] = wz0
+        vertices[2::6, 0] = wx0;  vertices[2::6, 1] = h01; vertices[2::6, 2] = wz1
+        vertices[3::6, 0] = wx1;  vertices[3::6, 1] = h10; vertices[3::6, 2] = wz0
+        vertices[4::6, 0] = wx1;  vertices[4::6, 1] = h11; vertices[4::6, 2] = wz1
+        vertices[5::6, 0] = wx0;  vertices[5::6, 1] = h01; vertices[5::6, 2] = wz1
+        
+        # VECTORIZED: Normals (simplified - pointing roughly up with slight variation)
+        # For speed, use approximate normals based on height differences
         normals = np.zeros((num_verts, 3), dtype='f4')
+        
+        # Triangle 1 normals (cross product of edges)
+        dx1 = h10 - h00  # Height change in X
+        dz1 = h01 - h00  # Height change in Z
+        n1_x = -dx1 / tile_scale
+        n1_z = -dz1 / tile_scale
+        n1_y = np.ones_like(n1_x)
+        n1_len = np.sqrt(n1_x**2 + n1_y**2 + n1_z**2) + 1e-8
+        
+        normals[0::6, 0] = n1_x / n1_len; normals[0::6, 1] = n1_y / n1_len; normals[0::6, 2] = n1_z / n1_len
+        normals[1::6] = normals[0::6]
+        normals[2::6] = normals[0::6]
+        
+        # Triangle 2 normals
+        dx2 = h11 - h01
+        dz2 = h11 - h10
+        n2_x = -dx2 / tile_scale
+        n2_z = -dz2 / tile_scale
+        n2_y = np.ones_like(n2_x)
+        n2_len = np.sqrt(n2_x**2 + n2_y**2 + n2_z**2) + 1e-8
+        
+        normals[3::6, 0] = n2_x / n2_len; normals[3::6, 1] = n2_y / n2_len; normals[3::6, 2] = n2_z / n2_len
+        normals[4::6] = normals[3::6]
+        normals[5::6] = normals[3::6]
+        
+        # FULLY VECTORIZED: Colors based on height (no Python loops)
         colors = np.zeros((num_verts, 3), dtype='f4')
         
-        idx = 0
-        for z in range(h - 1):
-            for x in range(w - 1):
-                # World positions of corners
-                wx0 = chunk_world_x + x * tile_scale
-                wz0 = chunk_world_z + z * tile_scale
-                wx1 = wx0 + tile_scale
-                wz1 = wz0 + tile_scale
-                
-                # Heights at corners
-                h00 = float(heightmap[z, x]) * height_scale
-                h10 = float(heightmap[z, x + 1]) * height_scale
-                h01 = float(heightmap[z + 1, x]) * height_scale
-                h11 = float(heightmap[z + 1, x + 1]) * height_scale
-                
-                # Colors at corners
-                c00 = get_terrain_color(h00, biome, self.water_level)
-                c10 = get_terrain_color(h10, biome, self.water_level)
-                c01 = get_terrain_color(h01, biome, self.water_level)
-                c11 = get_terrain_color(h11, biome, self.water_level)
-                
-                # Triangle 1: (0,0), (1,0), (0,1)
-                # Calculate normal
-                v1 = np.array([tile_scale, h10 - h00, 0])
-                v2 = np.array([0, h01 - h00, tile_scale])
-                n1 = np.cross(v1, v2)
-                n1 = n1 / (np.linalg.norm(n1) + 1e-8)
-                
-                vertices[idx] = [wx0, h00, wz0]
-                normals[idx] = n1
-                colors[idx] = c00
-                idx += 1
-                
-                vertices[idx] = [wx1, h10, wz0]
-                normals[idx] = n1
-                colors[idx] = c10
-                idx += 1
-                
-                vertices[idx] = [wx0, h01, wz1]
-                normals[idx] = n1
-                colors[idx] = c01
-                idx += 1
-                
-                # Triangle 2: (1,0), (1,1), (0,1)
-                v1 = np.array([0, h11 - h10, tile_scale])
-                v2 = np.array([-tile_scale, h01 - h10, tile_scale])
-                n2 = np.cross(v1, v2)
-                n2 = n2 / (np.linalg.norm(n2) + 1e-8)
-                
-                vertices[idx] = [wx1, h10, wz0]
-                normals[idx] = n2
-                colors[idx] = c10
-                idx += 1
-                
-                vertices[idx] = [wx1, h11, wz1]
-                normals[idx] = n2
-                colors[idx] = c11
-                idx += 1
-                
-                vertices[idx] = [wx0, h01, wz1]
-                normals[idx] = n2
-                colors[idx] = c01
-                idx += 1
+        # Get base biome color
+        base_color = np.array(BIOME_COLORS.get(biome.capitalize(), BIOME_COLORS.get('Grassland', (0.35, 0.55, 0.28))), dtype='f4')
+        water_color = np.array([0.2, 0.25, 0.35], dtype='f4')
+        shore_color = np.array([0.76, 0.7, 0.5], dtype='f4')
+        snow_color = np.array([0.9, 0.9, 0.95], dtype='f4')
+        
+        # All 6 heights per cell stacked
+        all_heights = np.stack([h00, h10, h01, h10, h11, h01], axis=1).flatten()
+        n = len(all_heights)
+        result = np.zeros((n, 3), dtype='f4')
+        
+        # Masks for each terrain type
+        underwater = all_heights < self.water_level - 1
+        shore = (all_heights >= self.water_level - 1) & (all_heights < self.water_level + 3)
+        normal = (all_heights >= self.water_level + 3) & (all_heights < 80)
+        high = all_heights >= 80
+        
+        # Apply colors by mask
+        result[underwater] = water_color
+        result[shore] = shore_color
+        result[normal] = base_color
+        
+        # High altitude blend (vectorized)
+        if np.any(high):
+            t = np.clip((all_heights[high] - 80) / 40, 0, 1).reshape(-1, 1)
+            result[high] = base_color * (1 - t) + snow_color * t
+        
+        # Reshape to per-vertex
+        colors = result.reshape((num_cells, 6, 3)).reshape((num_verts, 3))
         
         # Interleave data
         data = np.zeros((num_verts, 9), dtype='f4')
@@ -395,12 +421,9 @@ class ModernTerrainRenderer:
         """
         self.frame_stats = {'chunks_rendered': 0, 'triangles': 0, 'draw_calls': 0}
         
-        # Set uniforms
-        proj_bytes = np.array(self.projection.to_list(), dtype='f4').tobytes()
-        view_bytes = np.array(self.view.to_list(), dtype='f4').tobytes()
-        
-        self.program['u_projection'].write(proj_bytes)
-        self.program['u_view'].write(view_bytes)
+        # Set uniforms - write glm matrices directly (column-major as OpenGL expects)
+        self.program['u_projection'].write(self.projection)
+        self.program['u_view'].write(self.view)
         self.program['u_camera_pos'].value = tuple(self.camera_pos)
         self.program['u_light_dir'].value = tuple(self.light_dir)
         self.program['u_ambient'].value = tuple(self.ambient)
