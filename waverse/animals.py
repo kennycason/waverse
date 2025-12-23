@@ -887,11 +887,12 @@ class AnimalManager:
                     AnimalType.CROC, AnimalType.CROC,
                     AnimalType.HOPPER,  # Frogs
                     AnimalType.AMPHIBIAN,
-                    # Aquatic - new creatures
+                    AnimalType.TURTLE, AnimalType.TURTLE,  # Sea turtles!
+                    # Aquatic - diverse sea life
                     AnimalType.OCTOPUS, AnimalType.OCTOPUS,
-                    AnimalType.SQUID,
-                    AnimalType.JELLYFISH,
-                    AnimalType.FISH, AnimalType.FISH,
+                    AnimalType.SQUID, AnimalType.CEPHALOPOD,
+                    AnimalType.JELLYFISH, AnimalType.JELLYFISH,
+                    AnimalType.FISH, AnimalType.FISH, AnimalType.FISH,
                     AnimalType.CRUSTACEAN, AnimalType.CRUSTACEAN,
                     AnimalType.ANEMONE,
                     AnimalType.SEASTAR,
@@ -899,29 +900,43 @@ class AnimalManager:
                     AnimalType.NAUTILUS,
                     AnimalType.MANTA,
                     AnimalType.HYDRA,
+                    AnimalType.SERPENT,  # Sea serpents!
+                    AnimalType.PENGUIN,  # Penguins near water
                     # Amoebas love water
                     AnimalType.AMOEBA, AnimalType.AMOEBA,
                     AnimalType.BLOB,
                 ])
             elif ground_h < 15:
-                # Lowlands - lots of ground variety
+                # Lowlands - TONS of ground variety including new types!
                 animal_type = rng.choice([
-                    # Big animals
+                    # Big quadrupeds
                     AnimalType.MAMMAL, AnimalType.MAMMAL, AnimalType.MAMMAL,
                     AnimalType.DINOSAUR, AnimalType.DINOSAUR,
                     AnimalType.CROC, AnimalType.CROC,
+                    AnimalType.TURTLE,  # Tortoises
+                    # Bipeds!
+                    AnimalType.RAPTOR, AnimalType.RAPTOR,  # Fast predator dinosaurs!
+                    AnimalType.GORILLA, AnimalType.GORILLA,  # Apes!
                     # Medium ground animals
                     AnimalType.REPTILE, AnimalType.REPTILE, AnimalType.REPTILE,
                     AnimalType.HOPPER, AnimalType.HOPPER,  # Rabbits, frogs
-                    AnimalType.WORM, AnimalType.WORM, AnimalType.WORM, AnimalType.WORM,  # Snakes/worms - more common!
-                    # Small crawlers - new types!
+                    AnimalType.SERPENT, AnimalType.SERPENT,  # Big snakes!
+                    AnimalType.WORM, AnimalType.WORM, AnimalType.WORM,  # Snakes/worms
+                    # Crawlers - spiders, scorpions, centipedes, beetles, mantises!
                     AnimalType.SPIDER, AnimalType.SPIDER, AnimalType.SPIDER,
+                    AnimalType.SCORPION, AnimalType.SCORPION,  # Scorpions!
                     AnimalType.CENTIPEDE, AnimalType.CENTIPEDE,
+                    AnimalType.MILLIPEDE,  # Millipedes!
+                    AnimalType.BEETLE, AnimalType.BEETLE,  # Beetles!
+                    AnimalType.MANTIS,  # Praying mantis!
                     AnimalType.TRILOBITE, AnimalType.TRILOBITE,
                     AnimalType.INSECT, AnimalType.INSECT,
                     AnimalType.SNAIL, AnimalType.SNAIL,
-                    # Occasional flyers
-                    AnimalType.BIRD, AnimalType.BIRD,
+                    # Flyers - birds, bats, moths, pterosaurs!
+                    AnimalType.BIRD, AnimalType.BIRD, AnimalType.BIRD,
+                    AnimalType.BAT, AnimalType.BAT,  # Bats!
+                    AnimalType.MOTH,  # Moths!
+                    AnimalType.PTEROSAUR,  # Flying dinosaurs!
                     AnimalType.METROID,  # Rare floating horror
                     # Weird creatures
                     AnimalType.AMOEBA,
@@ -929,26 +944,43 @@ class AnimalManager:
                     AnimalType.ALIEN,
                 ])
             elif ground_h < 30:
-                # Hills - diverse ground animals
+                # Hills - diverse ground animals with more variety
                 animal_type = rng.choice([
+                    # Quadrupeds
                     AnimalType.MAMMAL, AnimalType.MAMMAL,
                     AnimalType.DINOSAUR, AnimalType.DINOSAUR,
                     AnimalType.REPTILE, AnimalType.REPTILE,
+                    AnimalType.TURTLE,  # Mountain tortoises
+                    # Bipeds
+                    AnimalType.RAPTOR, AnimalType.RAPTOR,
+                    AnimalType.GORILLA,
                     AnimalType.HOPPER, AnimalType.HOPPER,
+                    # Crawlers
                     AnimalType.SPIDER, AnimalType.SPIDER,
+                    AnimalType.SCORPION,  # Hill scorpions
                     AnimalType.CENTIPEDE, AnimalType.CENTIPEDE,
-                    AnimalType.WORM, AnimalType.WORM, AnimalType.WORM,  # More snakes in hills
-                    AnimalType.BIRD, AnimalType.BIRD,
+                    AnimalType.BEETLE,  # Mountain beetles
+                    AnimalType.SERPENT, AnimalType.SERPENT,  # Hill snakes
+                    AnimalType.WORM, AnimalType.WORM,
+                    # Flyers
+                    AnimalType.BIRD, AnimalType.BIRD, AnimalType.BIRD,
+                    AnimalType.BAT,
+                    AnimalType.PTEROSAUR,
                     AnimalType.INSECT, AnimalType.INSECT,
+                    AnimalType.MOTH,
                     AnimalType.TRILOBITE,
                     AnimalType.SNAIL,
                 ])
             else:
-                # High ground - hardy mammals, birds, some hoppers
+                # High ground - hardy mammals, birds, bats, some hoppers, mountain creatures
                 animal_type = rng.choice([
                     AnimalType.MAMMAL, AnimalType.MAMMAL, AnimalType.MAMMAL,
+                    AnimalType.GORILLA,  # Mountain gorillas!
                     AnimalType.HOPPER,  # Mountain goat-like
-                    AnimalType.BIRD, AnimalType.BIRD,
+                    AnimalType.BIRD, AnimalType.BIRD, AnimalType.BIRD,
+                    AnimalType.BAT, AnimalType.BAT,  # Mountain bats
+                    AnimalType.PTEROSAUR,  # Soaring pterosaurs
+                    AnimalType.GOLEM,  # Mountain golems!
                     AnimalType.METROID,  # They float up high
                     AnimalType.ALIEN,    # Aliens too
                 ])
@@ -965,27 +997,37 @@ class AnimalManager:
                     AnimalType.BLOB, AnimalType.BLOB,
                     AnimalType.AMOEBA, AnimalType.AMOEBA,
                     AnimalType.JELLYFISH, AnimalType.JELLYFISH,
-                    AnimalType.OCTOPUS,
+                    AnimalType.OCTOPUS, AnimalType.CEPHALOPOD,
                     AnimalType.HYDRA,
-                    AnimalType.NUDIBRANCH,
+                    AnimalType.NUDIBRANCH, AnimalType.NUDIBRANCH,
+                    AnimalType.MOTH,  # Psychedelic moths!
+                    AnimalType.GOLEM,  # Crystal golems
                 ])
             elif biome == 'hellfire':
                 # HELLFIRE: Fire creatures, demons, lava things
                 animal_type = rng.choice([
                     AnimalType.DINOSAUR, AnimalType.DINOSAUR, AnimalType.DINOSAUR,  # Fire dragons!
+                    AnimalType.RAPTOR, AnimalType.RAPTOR,  # Fire raptors!
                     AnimalType.REPTILE, AnimalType.REPTILE, AnimalType.REPTILE,
+                    AnimalType.SERPENT, AnimalType.SERPENT,  # Fire serpents!
                     AnimalType.WORM, AnimalType.WORM,  # Fire worms
-                    AnimalType.SPIDER, AnimalType.SPIDER,  # Hell spiders
+                    AnimalType.SPIDER, AnimalType.SPIDER,  # Hell spiders (giant!)
+                    AnimalType.SCORPION, AnimalType.SCORPION,  # Fire scorpions!
                     AnimalType.ALIEN,  # Demons
                     AnimalType.CENTIPEDE,  # Fire centipedes
+                    AnimalType.GOLEM,  # Lava golems!
                     AnimalType.TRILOBITE,
                 ])
             elif biome == 'shadow':
                 # SHADOW: Creepy crawlers, stalkers, dark things
                 animal_type = rng.choice([
-                    AnimalType.SPIDER, AnimalType.SPIDER, AnimalType.SPIDER,
-                    AnimalType.WORM, AnimalType.WORM,  # Shadow snakes
+                    AnimalType.SPIDER, AnimalType.SPIDER, AnimalType.SPIDER,  # Giant shadow spiders!
+                    AnimalType.SCORPION, AnimalType.SCORPION,  # Shadow scorpions
+                    AnimalType.SERPENT, AnimalType.SERPENT,  # Shadow snakes
+                    AnimalType.WORM, AnimalType.WORM,
                     AnimalType.CENTIPEDE, AnimalType.CENTIPEDE,
+                    AnimalType.MILLIPEDE,  # Dark millipedes
+                    AnimalType.BAT, AnimalType.BAT, AnimalType.BAT,  # Shadow bats!
                     AnimalType.ALIEN, AnimalType.ALIEN,  # Shadow demons
                     AnimalType.METROID,  # Shadow metroids
                     AnimalType.STALKER,  # Stalkers!
@@ -995,11 +1037,14 @@ class AnimalManager:
                 # CRYSTAL: Crystalline creatures, delicate things
                 animal_type = rng.choice([
                     AnimalType.INSECT, AnimalType.INSECT, AnimalType.INSECT,
+                    AnimalType.BEETLE, AnimalType.BEETLE,  # Crystal beetles
+                    AnimalType.MOTH, AnimalType.MOTH,  # Crystal moths
                     AnimalType.JELLYFISH, AnimalType.JELLYFISH,
                     AnimalType.SNAIL, AnimalType.SNAIL,
                     AnimalType.AMOEBA,
                     AnimalType.NUDIBRANCH,
                     AnimalType.BIRD,  # Crystal birds
+                    AnimalType.GOLEM,  # Crystal golems!
                 ])
             elif biome == 'void':
                 # VOID: Almost nothing, occasional horrors
@@ -1010,60 +1055,95 @@ class AnimalManager:
                     AnimalType.ALIEN,
                     AnimalType.BLOB,
                     AnimalType.AMOEBA,
+                    AnimalType.GOLEM,  # Void golems
                 ])
             
             # === NORMAL BIOMES ===
             elif biome in ('rainforest', 'tropical'):
-                # Jungle: more birds, insects, reptiles, exotic creatures
-                if rng.random() < 0.4:  # 40% chance to override with jungle creature
+                # Jungle: birds, insects, reptiles, exotic creatures - VERY diverse!
+                if rng.random() < 0.5:  # 50% chance to override with jungle creature
                     animal_type = rng.choice([
-                        AnimalType.BIRD, AnimalType.BIRD, AnimalType.BIRD,
+                        # Birds - lots of birds!
+                        AnimalType.BIRD, AnimalType.BIRD, AnimalType.BIRD, AnimalType.BIRD,
+                        # Insects - beetles, mantises, moths
                         AnimalType.INSECT, AnimalType.INSECT,
+                        AnimalType.BEETLE, AnimalType.BEETLE,
+                        AnimalType.MANTIS, AnimalType.MANTIS,  # Jungle mantises!
+                        AnimalType.MOTH,  # Jungle moths
+                        # Crawlers - spiders, scorpions, centipedes
                         AnimalType.SPIDER, AnimalType.SPIDER,
+                        AnimalType.SCORPION,  # Jungle scorpions
+                        AnimalType.CENTIPEDE,
+                        AnimalType.MILLIPEDE,  # Jungle millipedes
+                        # Reptiles and snakes
                         AnimalType.REPTILE, AnimalType.REPTILE,
+                        AnimalType.SERPENT, AnimalType.SERPENT,  # Big snakes!
                         AnimalType.WORM,  # Snakes!
+                        # Primates!
+                        AnimalType.GORILLA, AnimalType.GORILLA,
                         AnimalType.HOPPER,  # Tree frogs
+                        AnimalType.BAT,  # Fruit bats
                         AnimalType.ALIEN,  # Exotic creatures
                         AnimalType.OCTOPUS,  # Weird jungle things
                     ])
             elif biome == 'desert':
-                # Desert: reptiles, insects, scorpion-like
+                # Desert: reptiles, insects, scorpions, desert creatures
                 if rng.random() < 0.5:
                     animal_type = rng.choice([
                         AnimalType.REPTILE, AnimalType.REPTILE, AnimalType.REPTILE,
-                        AnimalType.INSECT, AnimalType.INSECT,
-                        AnimalType.SPIDER, AnimalType.SPIDER,
+                        AnimalType.SERPENT,  # Big desert snakes
                         AnimalType.WORM,  # Sand snakes
+                        AnimalType.INSECT, AnimalType.INSECT,
+                        AnimalType.BEETLE, AnimalType.BEETLE,  # Desert beetles
+                        AnimalType.SPIDER, AnimalType.SPIDER,
+                        AnimalType.SCORPION, AnimalType.SCORPION, AnimalType.SCORPION,  # Lots of scorpions!
                         AnimalType.CENTIPEDE,
+                        AnimalType.TURTLE,  # Desert tortoises
                     ])
             elif biome in ('tundra', 'frozen'):
-                # Arctic: hardy mammals, birds
+                # Arctic: hardy mammals, birds, penguins
                 if rng.random() < 0.5:
                     animal_type = rng.choice([
                         AnimalType.MAMMAL, AnimalType.MAMMAL, AnimalType.MAMMAL,
                         AnimalType.BIRD, AnimalType.BIRD,
+                        AnimalType.PENGUIN, AnimalType.PENGUIN, AnimalType.PENGUIN,  # Penguins!
                         AnimalType.HOPPER,  # Arctic hares
+                        AnimalType.BAT,  # Arctic bats (rare)
                     ])
             elif biome == 'savanna':
-                # Savanna: herds of mammals, birds
+                # Savanna: herds of mammals, birds, predators
                 if rng.random() < 0.5:
                     animal_type = rng.choice([
+                        # Herds
                         AnimalType.MAMMAL, AnimalType.MAMMAL, AnimalType.MAMMAL, AnimalType.MAMMAL,
+                        # Big predators
                         AnimalType.DINOSAUR, AnimalType.DINOSAUR,
-                        AnimalType.BIRD, AnimalType.BIRD,
+                        AnimalType.RAPTOR, AnimalType.RAPTOR,  # Savanna raptors!
+                        # Birds
+                        AnimalType.BIRD, AnimalType.BIRD, AnimalType.BIRD,
+                        # Others
                         AnimalType.REPTILE,
+                        AnimalType.SERPENT,  # Savanna snakes
                         AnimalType.INSECT,
+                        AnimalType.BEETLE,
+                        AnimalType.SCORPION,  # Savanna scorpions
+                        AnimalType.TURTLE,  # Tortoises
                     ])
             elif biome == 'swamp':
-                # Swamp: amphibians, crocs, insects
+                # Swamp: amphibians, crocs, insects, lots of life!
                 if rng.random() < 0.5:
                     animal_type = rng.choice([
                         AnimalType.CROC, AnimalType.CROC, AnimalType.CROC,
+                        AnimalType.TURTLE, AnimalType.TURTLE,  # Swamp turtles!
                         AnimalType.HOPPER, AnimalType.HOPPER,  # Frogs
                         AnimalType.AMPHIBIAN, AnimalType.AMPHIBIAN,
                         AnimalType.INSECT, AnimalType.INSECT,
+                        AnimalType.MOTH,  # Swamp moths
+                        AnimalType.SERPENT,  # Swamp snakes
                         AnimalType.WORM,  # Water snakes
                         AnimalType.FISH,
+                        AnimalType.SNAIL, AnimalType.SNAIL,  # Swamp snails
+                        AnimalType.MILLIPEDE,  # Swamp millipedes
                     ])
             
             # Get template and mutate

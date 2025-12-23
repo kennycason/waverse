@@ -8,17 +8,26 @@ GPU-accelerated HUD elements:
 - Minecraft-style item bar (bottom center)
 - Status text (bottom, with black border for visibility)
 - Performance stats (optional)
+- DNA log PNG previews
 """
 
 import numpy as np
 import moderngl
 from typing import Dict, Tuple, Optional, List
 import math
+import os
+from pathlib import Path
 
 try:
     from pyglm import glm
 except ImportError:
     import glm
+
+try:
+    from PIL import Image
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
 
 
 # =============================================================================
@@ -58,14 +67,18 @@ in vec4 v_color;
 out vec4 fragColor;
 
 uniform sampler2D u_texture;
-uniform int u_use_texture;
+uniform int u_use_texture;  // 0 = solid, 1 = mono font, 2 = RGBA image
 
 void main() {
     // If UV is essentially (0,0) - this is a solid color quad, not textured
     // We detect this by checking if UV is very small (non-textured quads use 0,0,0,0)
     bool is_solid = (v_uv.x < 0.001 && v_uv.y < 0.001);
     
-    if (u_use_texture == 1 && !is_solid) {
+    if (u_use_texture == 2 && !is_solid) {
+        // Full RGBA texture (PNG images)
+        vec4 texColor = texture(u_texture, v_uv);
+        fragColor = texColor * v_color;  // Multiply with vertex color for tinting
+    } else if (u_use_texture == 1 && !is_solid) {
         float alpha = texture(u_texture, v_uv).r;  // Mono font texture
         fragColor = vec4(v_color.rgb, v_color.a * alpha);
     } else {
@@ -283,6 +296,92 @@ class ModernHUDRenderer:
         self.log_filter_names = ["ALL", "PLANTS", "ANIMALS"]
         self.favorites = set()  # Set of favorited log filenames
         self.inventory_index = 0  # Selected tool in inventory tab
+        
+        # PNG image cache for DNA log previews
+        self._image_cache: Dict[str, moderngl.Texture] = {}
+        self._cache_max_size = 20  # Limit cached images
+        self._dna_logs_path = Path.home() / ".waverse" / "dna_logs"
+        self._pending_preview: Optional[Dict] = None  # Store pending PNG preview info
+        
+    def _load_png_texture(self, png_path: str) -> Optional[moderngl.Texture]:
+        """Load a PNG image as a ModernGL texture, with caching."""
+        if not PIL_AVAILABLE:
+            return None
+        
+        # Check cache first
+        if png_path in self._image_cache:
+            return self._image_cache[png_path]
+        
+        try:
+            if not os.path.exists(png_path):
+                return None
+            
+            # Load with PIL
+            img = Image.open(png_path)
+            img = img.convert('RGBA')
+            
+            # Resize if too large (for performance)
+            max_size = 256
+            if img.width > max_size or img.height > max_size:
+                img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+            
+            # Flip vertically for OpenGL
+            img = img.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
+            
+            # Create texture
+            texture = self.ctx.texture(img.size, 4, img.tobytes())
+            texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+            
+            # Cache it (with LRU-style eviction)
+            if len(self._image_cache) >= self._cache_max_size:
+                # Remove oldest entry
+                oldest = next(iter(self._image_cache))
+                self._image_cache[oldest].release()
+                del self._image_cache[oldest]
+            
+            self._image_cache[png_path] = texture
+            return texture
+            
+        except Exception as e:
+            print(f"Error loading PNG {png_path}: {e}")
+            return None
+    
+    def _draw_image(self, x: float, y: float, w: float, h: float, 
+                   texture: moderngl.Texture, alpha: float = 1.0):
+        """Draw a textured quad with the given image texture."""
+        # Build vertices for the image quad
+        vertices = []
+        
+        # Full UV coords for image
+        u0, v0, u1, v1 = 0.0, 0.0, 1.0, 1.0
+        
+        # Quad vertices (2 triangles)
+        # UV is flipped because we already flipped the image
+        v0_flipped, v1_flipped = 1.0, 0.0
+        
+        color = (1.0, 1.0, 1.0, alpha)  # White tint = original colors
+        
+        # Triangle 1
+        vertices.extend([x, y, u0, v0_flipped, *color])
+        vertices.extend([x + w, y, u1, v0_flipped, *color])
+        vertices.extend([x, y + h, u0, v1_flipped, *color])
+        # Triangle 2
+        vertices.extend([x + w, y, u1, v0_flipped, *color])
+        vertices.extend([x + w, y + h, u1, v1_flipped, *color])
+        vertices.extend([x, y + h, u0, v1_flipped, *color])
+        
+        # Update VBO
+        vertex_data = np.array(vertices, dtype='f4')
+        self.vbo.write(vertex_data.tobytes())
+        
+        # Render with image texture
+        texture.use(0)
+        self.program['u_texture'].value = 0
+        self.program['u_use_texture'].value = 2  # RGBA image mode
+        self.program['u_screen_size'].value = (self.screen_width, self.screen_height)
+        self.program['u_offset'].value = (0, 0)
+        
+        self.vao.render(moderngl.TRIANGLES, vertices=6)
         
     def _create_font_texture(self):
         """Create a texture atlas from the bitmap font and tool icons."""
@@ -795,9 +894,14 @@ class ModernHUDRenderer:
             if selected in self.favorites:
                 self._draw_text(vertices, "* FAVORITE *", preview_x + 10, content_y + 75, 1.5, 1.0, 0.85, 0.2, 1.0)
             
-            # 3D preview hint
-            self._draw_text(vertices, "3D PREVIEW", preview_x + 10, content_y + preview_h - 40, 1.5, 0.4, 0.4, 0.4, 1.0)
-            self._draw_text(vertices, "COMING SOON", preview_x + 10, content_y + preview_h - 24, 1.5, 0.3, 0.3, 0.3, 1.0)
+            # Store preview info for later PNG rendering (after main vertices are drawn)
+            self._pending_preview = {
+                'filename': selected,
+                'x': preview_x + 5,
+                'y': content_y + 95,
+                'w': preview_w - 10,
+                'h': preview_h - 110
+            }
     
     def _draw_inventory_tab(self, vertices: List, menu_x: float, content_y: float,
                              menu_w: float, content_h: float):
@@ -1029,6 +1133,9 @@ class ModernHUDRenderer:
                 self._draw_text(vertices, text, 10, y, 1.5, 0.8, 0.8, 0.8, 0.7)
                 y += 16
         
+        # Clear pending preview before menu draw (will be set if needed)
+        self._pending_preview = None
+        
         # Menu overlay (drawn last, on top of everything)
         self._draw_menu(vertices)
         
@@ -1054,12 +1161,75 @@ class ModernHUDRenderer:
             
             # Render
             self.vao.render(moderngl.TRIANGLES, vertices=len(vertices) // 8)
+        
+        # After main HUD, draw PNG preview if pending (on Log tab)
+        if self._pending_preview and PIL_AVAILABLE:
+            self._render_png_preview()
+        
+        # Re-enable depth test
+        self.ctx.enable(moderngl.DEPTH_TEST)
+    
+    def _render_png_preview(self):
+        """Render the PNG preview image for the selected log entry."""
+        if not self._pending_preview:
+            return
             
-            # Re-enable depth test
-            self.ctx.enable(moderngl.DEPTH_TEST)
+        filename = self._pending_preview['filename']
+        x = self._pending_preview['x']
+        y = self._pending_preview['y']
+        w = self._pending_preview['w']
+        h = self._pending_preview['h']
+        
+        # Get PNG path from JSON filename
+        png_filename = filename.replace('.json', '.png')
+        png_path = str(self._dna_logs_path / png_filename)
+        
+        # Try to load the texture
+        texture = self._load_png_texture(png_path)
+        
+        if texture:
+            # Calculate aspect-correct size
+            img_aspect = texture.width / texture.height
+            area_aspect = w / h
+            
+            if img_aspect > area_aspect:
+                # Image is wider - fit to width
+                draw_w = w
+                draw_h = w / img_aspect
+            else:
+                # Image is taller - fit to height
+                draw_h = h
+                draw_w = h * img_aspect
+            
+            # Center in the preview area
+            draw_x = x + (w - draw_w) / 2
+            draw_y = y + (h - draw_h) / 2
+            
+            # Draw the image
+            self._draw_image(draw_x, draw_y, draw_w, draw_h, texture)
+        else:
+            # No PNG available - draw placeholder text
+            # Build vertices for a small text message
+            vertices = []
+            center_x = x + w / 2
+            center_y = y + h / 2
+            self._draw_text(vertices, "NO PREVIEW", center_x - 40, center_y - 10, 1.5, 0.4, 0.4, 0.4, 1.0)
+            self._draw_text(vertices, "PNG NOT FOUND", center_x - 55, center_y + 8, 1.3, 0.3, 0.3, 0.3, 1.0)
+            
+            if vertices:
+                vertex_data = np.array(vertices, dtype='f4')
+                self.vbo.write(vertex_data.tobytes())
+                self.font_texture.use(0)
+                self.program['u_use_texture'].value = 1
+                self.vao.render(moderngl.TRIANGLES, vertices=len(vertices) // 8)
     
     def cleanup(self):
         """Release GPU resources."""
+        # Release cached image textures
+        for texture in self._image_cache.values():
+            texture.release()
+        self._image_cache.clear()
+        
         self.vbo.release()
         self.vao.release()
         self.program.release()
