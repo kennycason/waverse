@@ -70,11 +70,11 @@ def main():
     parser.add_argument('--max-animals', type=int, default=None, metavar='N',
                         help='Max total animals in world (default: 500)')
     
-    # Renderer selection
-    parser.add_argument('--modern', action='store_true', 
-                        help='Use ModernGL renderer (experimental, faster)')
-    parser.add_argument('--enable-waves', action='store_true',
-                        help='Enable animated water waves (experimental, may affect perf)')
+    # Renderer selection (ModernGL is now default)
+    parser.add_argument('--legacy', action='store_true', 
+                        help='Use legacy OpenGL renderer (slower, deprecated)')
+    parser.add_argument('--disable-waves', action='store_true',
+                        help='Disable animated water waves (enabled by default)')
     parser.add_argument('--debug-biomes', action='store_true',
                         help='Make exotic biomes appear much more frequently for testing')
     
@@ -128,8 +128,8 @@ def main():
         'no_animal_update': args.no_animal_update or args.no_life_sim,
         'max_flora': args.max_flora,
         'max_animals': args.max_animals,
-        'modern_renderer': args.modern,
-        'enable_waves': args.enable_waves,
+        'modern_renderer': not args.legacy,  # ModernGL ON by default
+        'enable_waves': not args.disable_waves,  # Waves ON by default
         'debug_biomes': args.debug_biomes,
     }
     

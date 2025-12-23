@@ -653,122 +653,143 @@ def take_screenshot(camera=None):
 
 
 def render_entity_to_png(entity, entity_type: str, filename: str, size: int = 512):
-    """Render a plant or animal to a PNG with transparent background."""
+    """Render a plant or animal to a PNG with transparent background.
+    
+    Note: This uses legacy OpenGL and will not work on macOS Core profile.
+    On macOS, PNG rendering is skipped.
+    """
+    import platform
     from waverse.flora import PlantRenderer, PlantInstance
     from waverse.animals import AnimalRenderer
+    
+    # Skip PNG rendering on macOS Core profile - legacy GL calls don't work
+    # On macOS, if ModernGL is available we're using Core profile which doesn't support legacy GL
+    if platform.system() == 'Darwin' and MODERNGL_AVAILABLE:
+        print(f"  [DNA Logger] PNG rendering skipped (macOS Core profile)")
+        return
     
     # Save current OpenGL state
     viewport = glGetIntegerv(GL_VIEWPORT)
     
-    # Disable fog for clean render
-    glDisable(GL_FOG)
-    
-    # Set up a square viewport for rendering
-    glViewport(0, 0, size, size)
-    
-    # Clear to transparent background
-    glClearColor(0.0, 0.0, 0.0, 0.0)
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
-    
-    # Set up orthographic projection
-    glMatrixMode(GL_PROJECTION)
-    glPushMatrix()
-    glLoadIdentity()
-    
-    # Determine entity size for proper framing
-    if entity_type == "plant":
-        entity_height = entity.dna.height_gene.value * entity.scale
-        entity_width = max(entity.dna.width_gene.value * entity.scale * 2, entity_height * 0.5)
-        # Plants grow UP from ground, so center is at height/2
-        center_y = entity_height * 0.4
-        # Bias view upward for plants
-        view_bottom_mult = 0.3
-        view_top_mult = 1.7
-    else:
-        # Animals - estimate size from body segments
-        entity_height = 3.0
-        entity_width = 3.0
-        if hasattr(entity.dna, 'body_segments') and entity.dna.body_segments:
-            # size is a tuple (width, height, depth), sum the max dimensions
-            total_size = sum(max(seg.size) if isinstance(seg.size, tuple) else seg.size 
-                           for seg in entity.dna.body_segments)
-            entity_height = total_size * 2.5  # More generous height estimate
-            entity_width = total_size * 3.0
-        # Animals body is mostly above origin, legs go down
-        center_y = entity_height * 0.3  # Look at middle of body (above legs)
-        # View needs more room below for legs/tentacles
-        view_bottom_mult = 1.8  # Much more room below
-        view_top_mult = 0.8    # Less room above (body doesn't extend much up)
-    
-    # Add padding - make view big enough
-    view_size = max(entity_height, entity_width, 5.0) * 2.0
-    half_size = view_size / 2
-    
-    # Orthographic projection - different for plants vs animals
-    glOrtho(-half_size, half_size, -half_size * view_bottom_mult, half_size * view_top_mult, -100, 100)
-    
-    glMatrixMode(GL_MODELVIEW)
-    glPushMatrix()
-    glLoadIdentity()
-    
-    # Look at entity from the front-right, slightly above
-    gluLookAt(
-        half_size * 0.7, half_size * 0.4, half_size * 0.7,  # Eye position
-        0, center_y, 0,  # Look at center of entity (different for plants vs animals)
-        0, 1, 0   # Up vector
-    )
-    
-    # Simple lighting
-    glDisable(GL_LIGHTING)  # Use simple colors for now
-    
-    # Render the entity at origin
-    if entity_type == "plant":
-        # Create a temporary plant instance at origin
-        temp_plant = PlantInstance(
-            x=0, y=0, z=0,
-            dna=entity.dna,
-            scale=entity.scale,
-            rotation=45  # Rotate a bit for better view
+    try:
+        # Disable fog for clean render (may fail in Core profile, that's ok)
+        try:
+            glDisable(GL_FOG)
+        except Exception:
+            pass  # Core profile doesn't have fog
+        
+        # Set up a square viewport for rendering
+        glViewport(0, 0, size, size)
+        
+        # Clear to transparent background
+        glClearColor(0.0, 0.0, 0.0, 0.0)
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+        
+        # Set up orthographic projection
+        glMatrixMode(GL_PROJECTION)
+        glPushMatrix()
+        glLoadIdentity()
+        
+        # Determine entity size for proper framing
+        if entity_type == "plant":
+            entity_height = entity.dna.height_gene.value * entity.scale
+            entity_width = max(entity.dna.width_gene.value * entity.scale * 2, entity_height * 0.5)
+            # Plants grow UP from ground, so center is at height/2
+            center_y = entity_height * 0.4
+            # Bias view upward for plants
+            view_bottom_mult = 0.3
+            view_top_mult = 1.7
+        else:
+            # Animals - estimate size from body segments
+            entity_height = 3.0
+            entity_width = 3.0
+            if hasattr(entity.dna, 'body_segments') and entity.dna.body_segments:
+                # size is a tuple (width, height, depth), sum the max dimensions
+                total_size = sum(max(seg.size) if isinstance(seg.size, tuple) else seg.size 
+                               for seg in entity.dna.body_segments)
+                entity_height = total_size * 2.5  # More generous height estimate
+                entity_width = total_size * 3.0
+            # Animals body is mostly above origin, legs go down
+            center_y = entity_height * 0.3  # Look at middle of body (above legs)
+            # View needs more room below for legs/tentacles
+            view_bottom_mult = 1.8  # Much more room below
+            view_top_mult = 0.8    # Less room above (body doesn't extend much up)
+        
+        # Add padding - make view big enough
+        view_size = max(entity_height, entity_width, 5.0) * 2.0
+        half_size = view_size / 2
+        
+        # Orthographic projection - different for plants vs animals
+        glOrtho(-half_size, half_size, -half_size * view_bottom_mult, half_size * view_top_mult, -100, 100)
+        
+        glMatrixMode(GL_MODELVIEW)
+        glPushMatrix()
+        glLoadIdentity()
+        
+        # Look at entity from the front-right, slightly above
+        gluLookAt(
+            half_size * 0.7, half_size * 0.4, half_size * 0.7,  # Eye position
+            0, center_y, 0,  # Look at center of entity (different for plants vs animals)
+            0, 1, 0   # Up vector
         )
-        PlantRenderer.draw_full(temp_plant)
-    else:
-        # Render animal
-        AnimalRenderer.draw_full(entity, at_origin=True)
-    
-    glFlush()  # Make sure rendering is complete
-    
-    # Read pixels with alpha
-    glPixelStorei(GL_PACK_ALIGNMENT, 1)
-    pixels = glReadPixels(0, 0, size, size, GL_RGBA, GL_UNSIGNED_BYTE)
-    
-    # Convert to numpy array and flip vertically
-    raw = np.frombuffer(pixels, dtype=np.uint8).reshape((size, size, 4))
-    raw = np.flipud(raw)
-    
-    # Create pygame surface with alpha and copy pixels
-    surface = pygame.Surface((size, size), pygame.SRCALPHA)
-    for y in range(size):
-        for x in range(size):
-            r, g, b, a = raw[y, x]
-            # Make black pixels transparent
-            if r == 0 and g == 0 and b == 0:
-                a = 0
-            surface.set_at((x, y), (r, g, b, a))
-    
-    # Save as PNG (preserves transparency)
-    pygame.image.save(surface, filename)
-    
-    # Restore state
-    glMatrixMode(GL_MODELVIEW)
-    glPopMatrix()
-    glMatrixMode(GL_PROJECTION)
-    glPopMatrix()
-    glMatrixMode(GL_MODELVIEW)
-    glViewport(viewport[0], viewport[1], viewport[2], viewport[3])
-    
-    # Restore fog and clear color
-    glEnable(GL_FOG)
-    glClearColor(0.5, 0.7, 1.0, 1.0)
+        
+        # Simple lighting
+        glDisable(GL_LIGHTING)  # Use simple colors for now
+        
+        # Render the entity at origin
+        if entity_type == "plant":
+            # Create a temporary plant instance at origin
+            temp_plant = PlantInstance(
+                x=0, y=0, z=0,
+                dna=entity.dna,
+                scale=entity.scale,
+                rotation=45  # Rotate a bit for better view
+            )
+            PlantRenderer.draw_full(temp_plant)
+        else:
+            # Render animal
+            AnimalRenderer.draw_full(entity, at_origin=True)
+        
+        glFlush()  # Make sure rendering is complete
+        
+        # Read pixels with alpha
+        glPixelStorei(GL_PACK_ALIGNMENT, 1)
+        pixels = glReadPixels(0, 0, size, size, GL_RGBA, GL_UNSIGNED_BYTE)
+        
+        # Convert to numpy array and flip vertically
+        raw = np.frombuffer(pixels, dtype=np.uint8).reshape((size, size, 4))
+        raw = np.flipud(raw)
+        
+        # Create pygame surface with alpha and copy pixels
+        surface = pygame.Surface((size, size), pygame.SRCALPHA)
+        for y in range(size):
+            for x in range(size):
+                r, g, b, a = raw[y, x]
+                # Make black pixels transparent
+                if r == 0 and g == 0 and b == 0:
+                    a = 0
+                surface.set_at((x, y), (r, g, b, a))
+        
+        # Save as PNG (preserves transparency)
+        pygame.image.save(surface, filename)
+        
+        # Restore matrix state
+        glMatrixMode(GL_MODELVIEW)
+        glPopMatrix()
+        glMatrixMode(GL_PROJECTION)
+        glPopMatrix()
+        glMatrixMode(GL_MODELVIEW)
+        
+    finally:
+        # ALWAYS restore viewport to prevent rendering issues
+        glViewport(viewport[0], viewport[1], viewport[2], viewport[3])
+        
+        # Restore fog and clear color (may fail in Core profile, that's ok)
+        try:
+            glEnable(GL_FOG)
+        except Exception:
+            pass  # Core profile doesn't have fog
+        glClearColor(0.5, 0.7, 1.0, 1.0)
 
 
 def log_dna_at_cursor(camera, flora_manager, animal_manager):
@@ -1394,6 +1415,9 @@ class Camera:
         self.log_items = []  # List of logged DNA files
         self.log_filter = 0  # 0 = ALL, 1 = PLANTS, 2 = ANIMALS
         self.log_filter_names = ["ALL", "PLANTS", "ANIMALS"]
+        self.inventory_index = 0  # Selected item in inventory grid
+        self.inventory_cols = 2   # Columns in inventory grid
+        self.inventory_count = 6  # Total inventory items
         
         # Scroll acceleration state
         self.scroll_hold_time = 0.0  # How long scroll direction held
@@ -1430,10 +1454,10 @@ class Camera:
             print(f"  [Menu] Closed (was: {was_open})")
     
     def refresh_log_items(self):
-        """Refresh list of logged DNA items, filtered and sorted by favorites."""
+        """Refresh list of logged DNA items, filtered and sorted by time (newest first)."""
         all_items = []
         if os.path.exists(DNA_LOGS_DIR):
-            for f in sorted(os.listdir(DNA_LOGS_DIR), reverse=True):
+            for f in os.listdir(DNA_LOGS_DIR):
                 if f.endswith('.json'):
                     # Apply filter
                     if self.log_filter == 0:  # ALL
@@ -1443,16 +1467,54 @@ class Camera:
                     elif self.log_filter == 2 and f.startswith('animal_'):  # ANIMALS
                         all_items.append(f)
         
-        # Sort: favorites first (with star), then by date descending
+        # Sort by timestamp (newest first) - filename format: type_dna_YYYYMMDD_HHMMSS.json
+        def get_timestamp(filename):
+            # Extract timestamp from filename like "plant_dna_20251223_033251.json"
+            parts = filename.replace('.json', '').split('_')
+            if len(parts) >= 4:
+                return parts[2] + parts[3]  # "20251223033251"
+            return "0"  # Fallback for malformed names
+        
+        all_items.sort(key=get_timestamp, reverse=True)  # Newest first
+        
+        # Put favorites at top (but still sorted by time within favorites)
         favorites = [f for f in all_items if f in self.favorites]
         non_favorites = [f for f in all_items if f not in self.favorites]
         self.log_items = favorites + non_favorites
         self.log_index = min(self.log_index, max(0, len(self.log_items) - 1))
     
-    def menu_navigate(self, direction: int):
-        """Navigate in menu (direction: -1 = left/up, 1 = right/down)."""
-        if self.menu_tab == 1:  # Log tab
+    def menu_navigate_vertical(self, direction: int):
+        """Navigate vertically in menu (direction: -1 = up, 1 = down)."""
+        if self.menu_tab == 0:  # Inventory tab - 2D grid navigation
+            # Move up/down by number of columns
+            new_idx = self.inventory_index + (direction * self.inventory_cols)
+            if 0 <= new_idx < self.inventory_count:
+                self.inventory_index = new_idx
+        elif self.menu_tab == 1:  # Log tab
             self.log_index = max(0, min(len(self.log_items) - 1, self.log_index + direction))
+    
+    def menu_navigate_horizontal(self, direction: int):
+        """Navigate horizontally in menu (direction: -1 = left, 1 = right)."""
+        if self.menu_tab == 0:  # Inventory tab - 2D grid navigation
+            # Calculate current row/col
+            row = self.inventory_index // self.inventory_cols
+            col = self.inventory_index % self.inventory_cols
+            
+            # Move left/right within row
+            new_col = col + direction
+            if 0 <= new_col < self.inventory_cols:
+                new_idx = row * self.inventory_cols + new_col
+                if new_idx < self.inventory_count:
+                    self.inventory_index = new_idx
+        elif self.menu_tab == 1:  # Log tab - filter change
+            if direction < 0:
+                self.log_filter_prev()
+            else:
+                self.log_filter_next()
+    
+    def menu_navigate(self, direction: int):
+        """Navigate in menu (direction: -1 = up, 1 = down). Kept for compatibility."""
+        self.menu_navigate_vertical(direction)
     
     def update_scroll(self, dt: float, is_scrolling_up: bool, is_scrolling_down: bool):
         """Update accelerated scrolling. Returns number of items to scroll.
@@ -2704,75 +2766,338 @@ def draw_crosshair(display: tuple):
 # Text rendering cache for OpenGL
 _text_textures = {}
 
-# Image texture cache for log preview
-_log_image_textures = {}
+# Entity cache for log preview (caches reconstructed DNA and entities)
+_log_entity_cache = {}
+_preview_rotation = 0.0  # Animation rotation angle
 
-def _draw_log_image(png_path: str, x: float, y: float, size: float, camera: Camera):
-    """Load and draw a PNG image from the log directory."""
-    global _log_image_textures
+
+def _reconstruct_gene(d: dict):
+    """Reconstruct a Gene from a dict."""
+    from waverse.dna import Gene
+    return Gene(
+        value=d['value'],
+        min_val=d['min_val'],
+        max_val=d['max_val'],
+        mutation_rate=d['mutation_rate']
+    )
+
+
+def _reconstruct_color_gene(d: dict):
+    """Reconstruct a ColorGene from a dict."""
+    from waverse.dna import ColorGene
+    return ColorGene(
+        r=d['r'],
+        g=d['g'],
+        b=d['b'],
+        mutation_rate=d.get('mutation_rate', 0.15)
+    )
+
+
+def _reconstruct_segment_gene(d: dict):
+    """Reconstruct a SegmentGene from a dict."""
+    from waverse.dna import SegmentGene
+    return SegmentGene(
+        length=d['length'],
+        width=d['width'],
+        taper=d['taper'],
+        curve=d['curve'],
+        twist=d['twist']
+    )
+
+
+def _reconstruct_plant_dna(d: dict):
+    """Reconstruct PlantDNA from a dict (loaded from JSON)."""
+    from waverse.dna import PlantDNA
     
-    # Use path as cache key
-    cache_key = png_path
+    return PlantDNA(
+        plant_type=d.get('plant_type', 'tree'),
+        species_id=d.get('species_id', 0),
+        generation=d.get('generation', 0),
+        height_gene=_reconstruct_gene(d['height_gene']),
+        width_gene=_reconstruct_gene(d['width_gene']),
+        trunk_segments=[_reconstruct_segment_gene(s) for s in d.get('trunk_segments', [])],
+        branch_count=int(d.get('branch_count', 4)),
+        branch_angle=d.get('branch_angle', 0.4),
+        branch_spread=d.get('branch_spread', 1.0),
+        branch_height=d.get('branch_height', 0.6),
+        branch_segments=[_reconstruct_segment_gene(s) for s in d.get('branch_segments', [])],
+        sub_branch_chance=d.get('sub_branch_chance', 0.3),
+        leaf_density=d.get('leaf_density', 0.7),
+        leaf_size=d.get('leaf_size', 0.5),
+        leaf_shape=d.get('leaf_shape', 'round'),
+        canopy_shape=d.get('canopy_shape', 'dome'),
+        canopy_spread=d.get('canopy_spread', 0.5),
+        has_flowers=d.get('has_flowers', False),
+        flower_size=d.get('flower_size', 0.0),
+        has_fruit=d.get('has_fruit', False),
+        fruit_size=d.get('fruit_size', 0.0),
+        has_glow=d.get('has_glow', False),
+        glow_intensity=d.get('glow_intensity', 0.0),
+        has_thorns=d.get('has_thorns', False),
+        trunk_color=_reconstruct_color_gene(d['trunk_color']),
+        leaf_color=_reconstruct_color_gene(d['leaf_color']),
+        flower_color=_reconstruct_color_gene(d['flower_color']),
+        glow_color=_reconstruct_color_gene(d['glow_color']),
+        asymmetry=d.get('asymmetry', 0.1),
+        droop=d.get('droop', 0.0),
+        wind_sway=d.get('wind_sway', 0.3),
+        recursive_depth=d.get('recursive_depth', 1),
+        growth_direction=d.get('growth_direction', 0.0),
+        spiral_factor=d.get('spiral_factor', 0.0),
+        bulb_count=d.get('bulb_count', 0),
+        bulb_size=d.get('bulb_size', 0.0),
+        bark_texture=d.get('bark_texture', 'smooth'),
+        surface_bumps=d.get('surface_bumps', 0.0),
+        has_moss=d.get('has_moss', False),
+        moss_density=d.get('moss_density', 0.0),
+        secondary_trunk_color=_reconstruct_color_gene(d.get('secondary_trunk_color', {'r': 0.3, 'g': 0.22, 'b': 0.12})),
+        tip_color=_reconstruct_color_gene(d.get('tip_color', {'r': 0.4, 'g': 0.6, 'b': 0.3})),
+        fruit_color=_reconstruct_color_gene(d.get('fruit_color', {'r': 0.8, 'g': 0.2, 'b': 0.2})),
+        moss_color=_reconstruct_color_gene(d.get('moss_color', {'r': 0.2, 'g': 0.4, 'b': 0.15})),
+        bioluminescent=d.get('bioluminescent', False),
+        crystal_growth=d.get('crystal_growth', False),
+        spore_pods=d.get('spore_pods', False),
+        tendrils=d.get('tendrils', 0),
+        root_exposure=d.get('root_exposure', 0.0),
+        upside_down=d.get('upside_down', False),
+        lean_angle=d.get('lean_angle', 0.0),
+    )
+
+
+def _reconstruct_body_segment(d: dict):
+    """Reconstruct a BodySegment from a dict."""
+    from waverse.animal_dna import BodySegment
+    size = d.get('size', (1, 1, 1))
+    if isinstance(size, list):
+        size = tuple(size)
+    return BodySegment(
+        size=size,
+        shape=d.get('shape', 'sphere'),
+        offset=tuple(d.get('offset', (0, 0, 0))) if isinstance(d.get('offset'), list) else d.get('offset', (0, 0, 0)),
+        color_index=d.get('color_index', 0),
+    )
+
+
+def _reconstruct_limb(d: dict):
+    """Reconstruct a Limb from a dict."""
+    from waverse.animal_dna import Limb
+    return Limb(
+        limb_type=d.get('limb_type', 'leg'),
+        segments=d.get('segments', 2),
+        segment_length=d.get('segment_length', 1.0),
+        segment_width=d.get('segment_width', 0.2),
+        attachment_point=tuple(d.get('attachment_point', (0, 0, 0))) if isinstance(d.get('attachment_point'), list) else d.get('attachment_point', (0, 0, 0)),
+        attachment_angle=d.get('attachment_angle', 0.0),
+        spread_angle=d.get('spread_angle', 0.0),
+        mirror=d.get('mirror', True),
+        animation_phase_offset=d.get('animation_phase_offset', 0.0),
+    )
+
+
+def _reconstruct_feature(d: dict):
+    """Reconstruct a Feature from a dict."""
+    from waverse.animal_dna import Feature
+    return Feature(
+        feature_type=d.get('feature_type', 'eye'),
+        size=d.get('size', 0.3),
+        position=tuple(d.get('position', (0, 0, 0))) if isinstance(d.get('position'), list) else d.get('position', (0, 0, 0)),
+        color_index=d.get('color_index', 0),
+        count=d.get('count', 2),
+        spread=d.get('spread', 0.3),
+    )
+
+
+def _reconstruct_animal_dna(d: dict):
+    """Reconstruct AnimalDNA from a dict (loaded from JSON)."""
+    from waverse.animal_dna import AnimalDNA
     
-    # Check if we need to load/reload (also check if file is newer than cache)
-    if cache_key not in _log_image_textures:
-        try:
-            # Load image with pygame
-            image_surface = pygame.image.load(png_path)
-            
-            # Convert to RGBA
-            image_surface = image_surface.convert_alpha()
-            width, height = image_surface.get_size()
-            
-            # Flip vertically for correct display
-            image_surface = pygame.transform.flip(image_surface, False, True)
-            image_data = pygame.image.tostring(image_surface, "RGBA", True)
-            
-            # Create OpenGL texture
-            texture_id = glGenTextures(1)
-            glBindTexture(GL_TEXTURE_2D, texture_id)
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, image_data)
-            
-            _log_image_textures[cache_key] = (texture_id, width, height)
-        except Exception as e:
-            print(f"Error loading log image: {e}")
-            return
+    return AnimalDNA(
+        animal_type=d.get('animal_type', 'mammal'),
+        species_id=d.get('species_id', 0),
+        generation=d.get('generation', 0),
+        body_segments=[_reconstruct_body_segment(s) for s in d.get('body_segments', [])],
+        limbs=[_reconstruct_limb(l) for l in d.get('limbs', [])],
+        features=[_reconstruct_feature(f) for f in d.get('features', [])],
+        movement_style=d.get('movement_style', 'walk'),
+        movement_speed=d.get('movement_speed', 1.0),
+        animation_speed=d.get('animation_speed', 1.0),
+        primary_color=_reconstruct_color_gene(d.get('primary_color', {'r': 0.5, 'g': 0.4, 'b': 0.3})),
+        secondary_color=_reconstruct_color_gene(d.get('secondary_color', {'r': 0.6, 'g': 0.5, 'b': 0.4})),
+        accent_color=_reconstruct_color_gene(d.get('accent_color', {'r': 0.2, 'g': 0.2, 'b': 0.2})),
+        eye_color=_reconstruct_color_gene(d.get('eye_color', {'r': 0.1, 'g': 0.1, 'b': 0.1})),
+        pattern_type=d.get('pattern_type', 'solid'),
+        pattern_scale=d.get('pattern_scale', 1.0),
+        has_tail=d.get('has_tail', False),
+        tail_length=d.get('tail_length', 0.0),
+        tail_segments=d.get('tail_segments', 3),
+        has_shell=d.get('has_shell', False),
+        shell_coverage=d.get('shell_coverage', 0.0),
+        has_spikes=d.get('has_spikes', False),
+        spike_density=d.get('spike_density', 0.0),
+        has_glow=d.get('has_glow', False),
+        glow_intensity=d.get('glow_intensity', 0.0),
+        glow_color=_reconstruct_color_gene(d.get('glow_color', {'r': 0.5, 'g': 0.8, 'b': 0.5})),
+        overall_scale=d.get('overall_scale', 1.0),
+    )
+
+
+def _load_log_entity(json_path: str):
+    """Load and reconstruct an entity from a DNA log JSON file.
     
-    texture_id, img_width, img_height = _log_image_textures[cache_key]
+    Returns: (entity_type, entity) or (None, None) on error.
+    entity is a PlantInstance or AnimalInstance.
+    """
+    global _log_entity_cache
     
-    # Calculate display dimensions (maintain aspect ratio)
-    aspect = img_width / max(img_height, 1)
-    if aspect > 1:
-        draw_w = size
-        draw_h = size / aspect
+    if json_path in _log_entity_cache:
+        return _log_entity_cache[json_path]
+    
+    try:
+        with open(json_path, 'r') as f:
+            log_entry = json.load(f)
+        
+        entity_type = log_entry.get('entity_type', 'plant')
+        dna_dict = log_entry.get('dna', log_entry)  # Support both wrapped and raw DNA
+        
+        if entity_type == 'plant':
+            dna = _reconstruct_plant_dna(dna_dict)
+            from waverse.flora import PlantInstance
+            entity = PlantInstance(
+                x=0, y=0, z=0,
+                dna=dna,
+                scale=1.0,
+                rotation=0
+            )
+        else:
+            dna = _reconstruct_animal_dna(dna_dict)
+            from waverse.animals import AnimalInstance
+            entity = AnimalInstance(
+                x=0, y=0, z=0,
+                dna=dna,
+                rotation=0,
+                anim_time=0.0,
+                anim_phase=0.0
+            )
+        
+        _log_entity_cache[json_path] = (entity_type, entity)
+        return entity_type, entity
+        
+    except Exception as e:
+        print(f"  Error loading DNA log: {e}")
+        import traceback
+        traceback.print_exc()
+        return None, None
+
+
+def draw_entity_preview(json_path: str, x: float, y: float, size: float, dt: float = 0.016):
+    """Render an entity preview in a small 3D viewport.
+    
+    The entity slowly rotates for a more natural, animated look.
+    Can be called standalone (doesn't require being inside 2D ortho mode).
+    
+    Note: Uses legacy OpenGL - won't work on macOS Core profile.
+    """
+    import platform
+    
+    # Skip on macOS Core profile - legacy GL calls don't work
+    if platform.system() == 'Darwin' and MODERNGL_AVAILABLE:
+        # Can't render preview with legacy GL on Core profile
+        return
+    
+    global _preview_rotation
+    from waverse.flora import PlantRenderer, PlantInstance
+    from waverse.animals import AnimalRenderer
+    
+    # Update rotation animation (slow spin)
+    _preview_rotation += dt * 15.0  # 15 degrees per second
+    if _preview_rotation > 360:
+        _preview_rotation -= 360
+    
+    # Load entity from cache or file
+    entity_type, entity = _load_log_entity(json_path)
+    if entity is None:
+        return
+    
+    # Save viewport and set up preview viewport
+    viewport = glGetIntegerv(GL_VIEWPORT)
+    preview_size = int(size)
+    preview_x = int(x)
+    preview_y = int(viewport[3] - y - size)  # Flip Y for OpenGL
+    glViewport(preview_x, preview_y, preview_size, preview_size)
+    
+    # Set up 3D projection for preview
+    glMatrixMode(GL_PROJECTION)
+    glPushMatrix()
+    glLoadIdentity()
+    
+    # Determine entity dimensions for framing
+    if entity_type == "plant":
+        entity_height = entity.dna.height_gene.value * entity.scale
+        entity_width = max(entity.dna.width_gene.value * entity.scale * 2, entity_height * 0.5)
+        center_y = entity_height * 0.4
+        view_bottom_mult = 0.3
+        view_top_mult = 1.7
     else:
-        draw_h = size
-        draw_w = size * aspect
+        entity_height = 3.0
+        entity_width = 3.0
+        if hasattr(entity.dna, 'body_segments') and entity.dna.body_segments:
+            total_size = sum(max(seg.size) if isinstance(seg.size, tuple) else seg.size 
+                           for seg in entity.dna.body_segments)
+            entity_height = total_size * 2.5
+            entity_width = total_size * 3.0
+        center_y = entity_height * 0.3
+        view_bottom_mult = 1.8
+        view_top_mult = 0.8
     
-    # Draw border/background
-    glColor4f(0.1, 0.1, 0.15, 1.0)
-    glBegin(GL_QUADS)
-    glVertex2f(x - 5, y - 5)
-    glVertex2f(x + draw_w + 5, y - 5)
-    glVertex2f(x + draw_w + 5, y + draw_h + 5)
-    glVertex2f(x - 5, y + draw_h + 5)
-    glEnd()
+    view_size = max(entity_height, entity_width, 5.0) * 2.0
+    half_size = view_size / 2
     
-    # Draw textured quad
-    glEnable(GL_TEXTURE_2D)
-    glBindTexture(GL_TEXTURE_2D, texture_id)
-    glColor4f(1, 1, 1, 1)
+    glOrtho(-half_size, half_size, -half_size * view_bottom_mult, half_size * view_top_mult, -100, 100)
     
-    glBegin(GL_QUADS)
-    glTexCoord2f(0, 1); glVertex2f(x, y + draw_h)
-    glTexCoord2f(1, 1); glVertex2f(x + draw_w, y + draw_h)
-    glTexCoord2f(1, 0); glVertex2f(x + draw_w, y)
-    glTexCoord2f(0, 0); glVertex2f(x, y)
-    glEnd()
+    glMatrixMode(GL_MODELVIEW)
+    glPushMatrix()
+    glLoadIdentity()
     
-    glDisable(GL_TEXTURE_2D)
+    # Camera position - orbits around the entity
+    cam_dist = half_size * 1.0
+    cam_angle = math.radians(_preview_rotation)
+    cam_x = math.sin(cam_angle) * cam_dist
+    cam_z = math.cos(cam_angle) * cam_dist
+    cam_y = half_size * 0.3
+    
+    gluLookAt(
+        cam_x, cam_y, cam_z,  # Eye position (orbiting)
+        0, center_y, 0,       # Look at center of entity
+        0, 1, 0               # Up vector
+    )
+    
+    # Clear just the preview viewport area (depth only, keep color from background)
+    glClear(GL_DEPTH_BUFFER_BIT)
+    glEnable(GL_DEPTH_TEST)
+    glDisable(GL_LIGHTING)
+    
+    # Render the entity at origin
+    if entity_type == "plant":
+        # Update animation phase for plants
+        entity.rotation = 0  # Let camera do the rotating
+        PlantRenderer.draw_full(entity)
+    else:
+        # Update animation for animals
+        entity.anim_time += dt
+        entity.anim_phase = math.sin(entity.anim_time * 2.0) * 0.5 + 0.5
+        AnimalRenderer.draw_full(entity, at_origin=True)
+    
+    glFlush()
+    
+    # Restore viewport
+    glViewport(viewport[0], viewport[1], viewport[2], viewport[3])
+    
+    # Restore matrices
+    glMatrixMode(GL_MODELVIEW)
+    glPopMatrix()
+    glMatrixMode(GL_PROJECTION)
+    glPopMatrix()
+    glMatrixMode(GL_MODELVIEW)
 
 def _draw_text(font, text: str, x: float, y: float, color: tuple):
     """Draw text at position using pygame font and OpenGL texture."""
@@ -2996,14 +3321,14 @@ def draw_menu(display: tuple, camera: Camera, hud_font=None):
                     color = (255, 215, 0) if is_favorite else (100, 200, 255) if start_idx + i == camera.log_index else (180, 180, 180)
                     _draw_text(hud_font, display_text, menu_x + 20, iy, color)
             
-            # Draw image preview on right side
+            # Draw live 3D entity preview on right side
             if 0 <= camera.log_index < len(camera.log_items):
                 selected_item = camera.log_items[camera.log_index]
-                png_file = selected_item.replace('.json', '.png')
-                png_path = os.path.join(DNA_LOGS_DIR, png_file)
+                json_path = os.path.join(DNA_LOGS_DIR, selected_item)
                 
-                if os.path.exists(png_path):
-                    _draw_log_image(png_path, image_x, content_y, image_size, camera)
+                if os.path.exists(json_path):
+                    # Use dt from frame time (approximate at 60fps)
+                    draw_entity_preview(json_path, image_x, content_y, image_size, dt=0.016)
     
     elif camera.menu_tab == 2:  # Controls
         if hud_font:
@@ -3206,9 +3531,9 @@ def draw_hud(display: tuple, camera: Camera, sky: SkySystem = None, climate: Cli
         vz = camera.velocity_z * 60
         
         # Position column
-        x_text = f"X: {camera.x:7.1f}"
-        y_text = f"Y: {camera.z:7.1f}"  # Z is the "Y" in top-down view
-        z_text = f"Z: {camera.y:7.1f}"  # Y is height, shown as Z
+        x_text = f"{camera.x:7.1f}"
+        y_text = f"{camera.z:7.1f}"  # Z is the "Y" in top-down view
+        z_text = f"{camera.y:7.1f}"  # Y is height, shown as Z
         
         # Velocity column
         dx_text = f"∂X: {vx:+5.1f}"
@@ -4040,8 +4365,12 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                         camera.cycle_tool_radius()
                 elif event.key == pygame.K_COMMA:  # , = previous tool
                     camera.prev_tool()
+                    if USE_MODERN_RENDERER and modern_renderer:
+                        modern_renderer.hud_prev_tool()
                 elif event.key == pygame.K_PERIOD:  # . = next tool
                     camera.next_tool()
+                    if USE_MODERN_RENDERER and modern_renderer:
+                        modern_renderer.hud_next_tool()
                 elif event.key == pygame.K_g:
                     gamepad.debug_mode = not gamepad.debug_mode
                     print(f"  Gamepad debug: {'ON' if gamepad.debug_mode else 'OFF'}")
@@ -4184,12 +4513,12 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                 
                 # Other menu controls use cooldown
                 if gamepad_speed_cooldown <= 0:
-                    # DPAD LEFT/RIGHT = filter between PLANTS and ANIMALS (in LOG tab)
+                    # DPAD LEFT/RIGHT = navigate horizontally (grid in inventory, filter in log)
                     if gamepad.get_dpad(GamepadConfig.DPAD_LEFT):
-                        camera.log_filter_prev()
+                        camera.menu_navigate_horizontal(-1)
                         gamepad_speed_cooldown = 15
                     elif gamepad.get_dpad(GamepadConfig.DPAD_RIGHT):
-                        camera.log_filter_next()
+                        camera.menu_navigate_horizontal(1)
                         gamepad_speed_cooldown = 15
                     
                     # L1/R1 = switch tabs
@@ -4200,10 +4529,22 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                         camera.menu_switch_tab(1)
                         gamepad_speed_cooldown = 15
                     
-                    # A = favorite selected log item
-                    if gamepad.get_button(GamepadConfig.A) and camera.menu_tab == 1:
-                        camera.toggle_log_favorite()
-                        gamepad_speed_cooldown = 20
+                    # A = equip tool (inventory) or favorite log item (log)
+                    if gamepad.get_button(GamepadConfig.A):
+                        if camera.menu_tab == 0:  # Inventory - equip selected tool
+                            # Only equip if it's an implemented tool (first 3)
+                            if camera.inventory_index < len(ToolType.ALL_TOOLS):
+                                camera.current_tool_index = camera.inventory_index
+                                camera.current_tool = ToolType.ALL_TOOLS[camera.inventory_index]
+                                camera.set_status(f"EQUIPPED: {camera.current_tool}", 2.0)
+                                if USE_MODERN_RENDERER and modern_renderer:
+                                    modern_renderer.hud_set_tool(camera.current_tool)
+                            else:
+                                camera.set_status("TOOL NOT YET AVAILABLE", 2.0)
+                            gamepad_speed_cooldown = 20
+                        elif camera.menu_tab == 1:  # Log - favorite
+                            camera.toggle_log_favorite()
+                            gamepad_speed_cooldown = 20
                     
                     # SELECT = delete favorite (in LOG tab)
                     if gamepad.get_button(GamepadConfig.SELECT) and camera.menu_tab == 1:
@@ -4318,9 +4659,13 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
             if not camera.menu_open and gamepad_speed_cooldown <= 0:
                 if gamepad.get_dpad(GamepadConfig.DPAD_LEFT):
                     camera.prev_tool()
+                    if USE_MODERN_RENDERER and modern_renderer:
+                        modern_renderer.hud_prev_tool()
                     gamepad_speed_cooldown = 15
                 elif gamepad.get_dpad(GamepadConfig.DPAD_RIGHT):
                     camera.next_tool()
+                    if USE_MODERN_RENDERER and modern_renderer:
+                        modern_renderer.hud_next_tool()
                     gamepad_speed_cooldown = 15
                 elif gamepad.get_dpad(GamepadConfig.DPAD_UP) or gamepad.get_dpad(GamepadConfig.DPAD_DOWN):
                     if camera.current_tool in (ToolType.MINE, ToolType.FILL):
@@ -4479,12 +4824,16 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
             modern_renderer.set_time_of_day(getattr(sky, 'time', 0.5))
             modern_renderer.set_lighting(fog_start=2000.0, fog_end=6000.0)  # Extended for far render
             modern_renderer.set_water_level(water_level * HEIGHT_SCALE)  # Convert to world units
+            modern_renderer.set_hud_yaw(camera.yaw)  # Update compass
+            modern_renderer.hud_set_tool(camera.current_tool)  # Sync tool selection
+            modern_renderer.sync_camera_menu(camera)  # Sync menu state
             
-            # Sync weather
+            # Sync weather with biome
             weather = climate_manager.current_weather
             weather_type = weather.precipitation_type if hasattr(weather, 'precipitation_type') else 'none'
             intensity = weather.precipitation if hasattr(weather, 'precipitation') else 0.0
-            modern_renderer.set_weather(weather_type, intensity)
+            current_biome = climate_manager.current_biome.get_biome_name() if climate_manager.current_biome else None
+            modern_renderer.set_weather(weather_type, intensity, biome=current_biome)
             
             # Update chunk loading based on camera position
             modern_renderer.update_chunks_around_camera(
@@ -4493,6 +4842,14 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
             
             # Render everything via modern renderer
             modern_renderer.render()
+            
+            # Render entity preview in menu (uses legacy GL after modern render)
+            preview_info = modern_renderer.get_menu_preview_info()
+            if preview_info[0]:  # should_render
+                _, px, py, psize, json_filename = preview_info
+                json_path = os.path.join(DNA_LOGS_DIR, json_filename)
+                if os.path.exists(json_path):
+                    draw_entity_preview(json_path, px, py, psize, dt=dt)
         else:
             # Set sky color and fog based on time of day (now with DNA tint)
             sky_color = sky.get_sky_color()

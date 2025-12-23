@@ -470,7 +470,7 @@ class ModernWorldRenderer:
             if height_gene and hasattr(height_gene, 'value'):
                 # Direct height as scale - meshes are 1 unit, final height = height_gene * base_scale
                 scale = height_gene.value * base_scale
-                scale = max(0.5, min(15.0, scale))  # Reasonable bounds
+                scale = max(0.5, min(50.0, scale))  # Allow giant trees up to 50 units!
             else:
                 scale = base_scale * 3.0  # Default ~3 units tall
             
@@ -716,12 +716,16 @@ class ModernWorldRenderer:
                 
                 # Get size from DNA for scale variation
                 size_gene = getattr(dna, 'size', None)
-                if size_gene is not None:
+                base_scale_gene = getattr(dna, 'base_scale', None)
+                if base_scale_gene is not None:
+                    # base_scale can be 0.5 to 4.0+ for mammals
+                    scale = scale * max(0.3, min(5.0, float(base_scale_gene)))
+                elif size_gene is not None:
                     if hasattr(size_gene, 'value'):
                         dna_scale = size_gene.value
                     else:
                         dna_scale = float(size_gene)
-                    scale = scale * max(0.5, min(2.0, dna_scale))
+                    scale = scale * max(0.3, min(5.0, dna_scale))
                 
                 # Get color (may be ColorGene object or tuple)
                 color = getattr(dna, 'primary_color', None)
@@ -789,9 +793,38 @@ class ModernWorldRenderer:
         self.terrain.water_level = level
         self.water.water_level = level
     
-    def set_weather(self, weather_type: str, intensity: float = 1.0):
-        """Set weather conditions for particle effects and clouds."""
-        self.weather.set_weather(weather_type, intensity)
+    def set_weather(self, weather_type: str, intensity: float = 1.0, biome: str = None):
+        """Set weather conditions for particle effects and clouds.
+        
+        Args:
+            weather_type: 'clear', 'rain', 'heavy_rain', 'snow', 'storm'
+            intensity: 0-1 precipitation intensity
+            biome: Optional biome name for special effects
+        """
+        # Use current biome if not specified
+        if biome is None:
+            biome = getattr(self, '_current_biome', None)
+        
+        # Override weather for special biomes
+        if biome:
+            biome_lower = biome.lower()
+            if biome_lower == 'psychedelic':
+                weather_type = 'rainbow'
+                intensity = 0.6
+            elif biome_lower == 'hellfire':
+                weather_type = 'ember'
+                intensity = 0.8
+            elif biome_lower == 'shadow':
+                weather_type = 'dark_fog'
+                intensity = 0.5
+            elif biome_lower == 'crystal':
+                weather_type = 'shimmer'
+                intensity = 0.4
+            elif biome_lower == 'void':
+                weather_type = 'clear'
+                intensity = 0.0
+        
+        self.weather.set_weather(weather_type, intensity, biome)
         
         # Track stormy state for wind system (can spawn tornadoes)
         self._is_stormy = weather_type in ['storm', 'heavy_rain']
@@ -802,8 +835,18 @@ class ModernWorldRenderer:
         else:
             self.wind.set_stormy(False)
         
-        # Sync cloud coverage with weather
-        if weather_type == 'clear':
+        # Sync cloud coverage with weather/biome
+        if biome and biome.lower() == 'hellfire':
+            self.clouds.set_weather(0.8, 0.5)  # Dark ashy clouds
+        elif biome and biome.lower() == 'shadow':
+            self.clouds.set_weather(1.0, 0.3)  # Complete overcast, slow
+        elif biome and biome.lower() == 'psychedelic':
+            self.clouds.set_weather(0.3, 2.0)  # Wispy, fast moving
+        elif biome and biome.lower() == 'crystal':
+            self.clouds.set_weather(0.2, 0.5)  # Light clouds, slow
+        elif biome and biome.lower() == 'void':
+            self.clouds.set_weather(0.0, 0.0)  # No clouds
+        elif weather_type == 'clear':
             self.clouds.set_weather(0.2)  # Few clouds
         elif weather_type == 'rain':
             self.clouds.set_weather(0.7, 1.5)  # Overcast, faster wind
@@ -815,6 +858,51 @@ class ModernWorldRenderer:
             self.clouds.set_weather(0.6, 0.5)  # Moderate clouds, slow wind
         else:
             self.clouds.set_weather(0.4, 1.0)  # Default: partly cloudy
+    
+    # =========================================================================
+    # HUD Control Methods
+    # =========================================================================
+    
+    def set_hud_yaw(self, yaw: float):
+        """Set camera yaw for compass display."""
+        self.hud.set_yaw(yaw)
+    
+    def hud_next_tool(self):
+        """Select next tool in item bar."""
+        self.hud.next_tool()
+        return self.hud.get_current_tool()
+    
+    def hud_prev_tool(self):
+        """Select previous tool in item bar."""
+        self.hud.prev_tool()
+        return self.hud.get_current_tool()
+    
+    def hud_set_status(self, text: str):
+        """Set status text displayed on HUD."""
+        self.hud.set_status(text)
+    
+    def hud_get_current_tool(self) -> str:
+        """Get the currently selected tool name."""
+        return self.hud.get_current_tool()
+    
+    def hud_set_tool(self, tool_name: str):
+        """Set the HUD tool by name (syncs with camera tool)."""
+        self.hud.set_tool_by_name(tool_name)
+    
+    def hud_resize(self, width: int, height: int):
+        """Update HUD for window resize."""
+        self.hud.resize(width, height)
+    
+    def sync_camera_menu(self, camera):
+        """Sync menu state from Camera object to HUD."""
+        self.hud.sync_from_camera(camera)
+    
+    def get_menu_preview_info(self):
+        """Get info for rendering entity preview in menu.
+        
+        Returns: (should_render, x, y, size, json_filename) or (False, 0, 0, 0, None)
+        """
+        return self.hud.get_preview_info()
     
     def render(self, dt: float = 0.016):
         """
@@ -900,6 +988,7 @@ class ModernWorldRenderer:
             fps=1000.0 / max(0.1, self.frame_stats.get('frame_time_ms', 16.67)) if self.frame_stats else 60,
             terrain_chunks=len(self.loaded_terrain_chunks),
             flora_instances=self.flora.frame_stats.get('instances_rendered', 0),
+            biome=self._current_biome or "",
         )
         
         elapsed = time.perf_counter() - start
