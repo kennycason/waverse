@@ -1560,12 +1560,27 @@ class ModernHUDRenderer:
         entity_dna = dna_data.get('dna', dna_data)
         
         # Calculate camera distance based on entity size
-        base_scale = entity_dna.get('base_scale', 1.0)
+        base_scale = float(entity_dna.get('base_scale', 1.0))
+        
+        # Calculate actual entity bounds for proper camera distance
         if is_plant:
             height_gene = entity_dna.get('height_gene', {})
-            base_scale = height_gene.get('value', 1.0) if isinstance(height_gene, dict) else 1.0
+            height_val = height_gene.get('value', 1.0) if isinstance(height_gene, dict) else 1.0
+            entity_size = float(height_val) * 1.5
+        else:
+            # For animals, calculate from body segments
+            body_segments = entity_dna.get('body_segments', [])
+            total_length = 0.0
+            max_height = 0.0
+            for seg in body_segments:
+                size = seg.get('size', [0.3, 0.3, 0.3])
+                if isinstance(size, (list, tuple)):
+                    total_length += float(size[0]) if len(size) > 0 else 0.3
+                    max_height = max(max_height, float(size[1]) if len(size) > 1 else 0.3)
+            entity_size = max(total_length, max_height) * base_scale
         
-        cam_distance = max(3.0, base_scale * 2.5)
+        # Camera distance: enough to see the whole entity
+        cam_distance = max(1.5, entity_size * 2.0)
         
         # Set up projection (perspective)
         aspect = 1.0  # Square framebuffer
@@ -1599,67 +1614,93 @@ class ModernHUDRenderer:
     def _render_animal_3d(self, dna: Dict):
         """Render animal body segments as 3D shapes."""
         body_segments = dna.get('body_segments', [])
-        base_scale = dna.get('base_scale', 1.0)
+        base_scale = float(dna.get('base_scale', 1.0))
         
         if not body_segments:
             # Fallback: single sphere
             self._draw_3d_shape('ellipsoid', 
                                glm.vec3(0, 0, 0), 
-                               glm.vec3(base_scale * 0.5, base_scale * 0.3, base_scale * 0.3),
+                               glm.vec3(0.5, 0.3, 0.3),
                                (0.5, 0.4, 0.3))
             return
         
+        # Calculate total body length for centering
+        total_length = 0.0
+        for seg in body_segments:
+            size = seg.get('size', [0.3, 0.3, 0.3])
+            if isinstance(size, (list, tuple)) and len(size) >= 1:
+                total_length += float(size[0]) * base_scale
+        
         # Draw each body segment
-        offset_x = 0.0
+        offset_x = total_length * 0.4  # Start from left, centered
+        
         for i, seg in enumerate(body_segments):
             shape = seg.get('shape', 'ellipsoid')
             size = seg.get('size', [0.3, 0.3, 0.3])
             color = self._extract_array_color(seg.get('color'), (0.5, 0.4, 0.3))
             
             if isinstance(size, (list, tuple)) and len(size) >= 3:
-                w, h, d = size[0], size[1], size[2]
+                w = float(size[0]) * base_scale
+                h = float(size[1]) * base_scale
+                d = float(size[2]) * base_scale
             else:
-                w = h = d = 0.3
+                w = h = d = 0.3 * base_scale
             
             # Animate with slight wave for snakes/worms
             movement_type = dna.get('movement_type', 'walk')
             wave_y = 0
             wave_z = 0
             if movement_type in ('crawl', 'swim'):
-                wave_y = math.sin(self._preview_rotation * 3 + i * 0.8) * 0.1
-                wave_z = math.sin(self._preview_rotation * 3 + i * 0.6) * 0.15
+                wave_y = math.sin(self._preview_rotation * 3 + i * 0.8) * 0.1 * base_scale
+                wave_z = math.sin(self._preview_rotation * 3 + i * 0.6) * 0.15 * base_scale
             
-            pos = glm.vec3(-offset_x, wave_y, wave_z)
+            pos = glm.vec3(offset_x, wave_y, wave_z)
+            # Use actual segment dimensions (they're already in world units)
             scale = glm.vec3(w * 0.5, h * 0.5, d * 0.5)
             
             self._draw_3d_shape(shape, pos, scale, color)
-            offset_x += w * 0.6
+            offset_x -= w * 0.7  # Move to next segment position
         
         # Draw limbs if present
         limbs = dna.get('limbs', [])
         for limb in limbs:
-            self._render_limb_3d(limb, dna)
+            self._render_limb_3d(limb, dna, base_scale)
         
         # Draw features (eyes)
         features = dna.get('features', [])
         for feat in features:
             if feat.get('feature_type') == 'eye':
                 eye_color = self._extract_array_color(feat.get('color'), (0.1, 0.1, 0.1))
-                eye_size = feat.get('size', 0.1)
+                eye_size = float(feat.get('size', 0.1)) * base_scale
                 # Draw eyes on first segment
                 if body_segments:
-                    seg_w = body_segments[0].get('size', [0.3, 0.3, 0.3])[0]
-                    eye_y = body_segments[0].get('size', [0.3, 0.3, 0.3])[1] * 0.3
+                    first_size = body_segments[0].get('size', [0.3, 0.3, 0.3])
+                    seg_w = float(first_size[0]) * base_scale if len(first_size) > 0 else 0.3
+                    seg_h = float(first_size[1]) * base_scale if len(first_size) > 1 else 0.3
+                    seg_d = float(first_size[2]) * base_scale if len(first_size) > 2 else 0.3
+                    eye_x = total_length * 0.4 + seg_w * 0.3
+                    eye_y = seg_h * 0.3
+                    # Left eye
                     self._draw_3d_shape('ellipsoid', 
-                                       glm.vec3(seg_w * 0.1, eye_y, seg_w * 0.2),
-                                       glm.vec3(eye_size * 0.3, eye_size * 0.3, eye_size * 0.3),
-                                       (0.95, 0.95, 0.95))  # White
-                    self._draw_3d_shape('ellipsoid', 
-                                       glm.vec3(seg_w * 0.1, eye_y, -seg_w * 0.2),
-                                       glm.vec3(eye_size * 0.3, eye_size * 0.3, eye_size * 0.3),
+                                       glm.vec3(eye_x, eye_y, seg_d * 0.4),
+                                       glm.vec3(eye_size * 0.15, eye_size * 0.15, eye_size * 0.15),
                                        (0.95, 0.95, 0.95))
+                    # Right eye
+                    self._draw_3d_shape('ellipsoid', 
+                                       glm.vec3(eye_x, eye_y, -seg_d * 0.4),
+                                       glm.vec3(eye_size * 0.15, eye_size * 0.15, eye_size * 0.15),
+                                       (0.95, 0.95, 0.95))
+                    # Pupils
+                    self._draw_3d_shape('ellipsoid', 
+                                       glm.vec3(eye_x + eye_size * 0.05, eye_y, seg_d * 0.4),
+                                       glm.vec3(eye_size * 0.08, eye_size * 0.08, eye_size * 0.08),
+                                       eye_color)
+                    self._draw_3d_shape('ellipsoid', 
+                                       glm.vec3(eye_x + eye_size * 0.05, eye_y, -seg_d * 0.4),
+                                       glm.vec3(eye_size * 0.08, eye_size * 0.08, eye_size * 0.08),
+                                       eye_color)
     
-    def _render_limb_3d(self, limb: Dict, dna: Dict):
+    def _render_limb_3d(self, limb: Dict, dna: Dict, base_scale: float = 1.0):
         """Render a limb with its segments."""
         segments = limb.get('segments', [])
         color = self._extract_array_color(limb.get('color'), (0.4, 0.3, 0.25))
@@ -1668,17 +1709,17 @@ class ModernHUDRenderer:
         if not segments:
             return
         
-        # Starting position
-        pos_x = attach[0] if len(attach) > 0 else 0
-        pos_y = attach[1] if len(attach) > 1 else 0
-        pos_z = attach[2] if len(attach) > 2 else 0
+        # Starting position (scaled)
+        pos_x = float(attach[0]) * base_scale if len(attach) > 0 else 0
+        pos_y = float(attach[1]) * base_scale if len(attach) > 1 else 0
+        pos_z = float(attach[2]) * base_scale if len(attach) > 2 else 0
         
         for seg in segments:
-            length = seg.get('length', 0.2)
-            thickness = seg.get('thickness', 0.05)
+            length = float(seg.get('length', 0.2)) * base_scale
+            thickness = float(seg.get('thickness', 0.05)) * base_scale
             
             # Animate limb
-            anim_offset = math.sin(self._preview_rotation * 5) * 0.1
+            anim_offset = math.sin(self._preview_rotation * 5) * 0.1 * base_scale
             
             self._draw_3d_shape('cylinder',
                                glm.vec3(pos_x, pos_y + anim_offset, pos_z),
@@ -1693,70 +1734,143 @@ class ModernHUDRenderer:
         leaf_color = self._extract_rgb_dict(dna.get('leaf_color'), (0.2, 0.6, 0.2))
         flower_color = self._extract_rgb_dict(dna.get('flower_color'), (0.8, 0.4, 0.6))
         
-        # Size
+        # Size from genes
         height_gene = dna.get('height_gene', {})
         width_gene = dna.get('width_gene', {})
-        height = height_gene.get('value', 1.0) if isinstance(height_gene, dict) else 1.0
-        width = width_gene.get('value', 1.0) if isinstance(width_gene, dict) else 1.0
+        height = float(height_gene.get('value', 1.0)) if isinstance(height_gene, dict) else 1.0
+        width = float(width_gene.get('value', 1.0)) if isinstance(width_gene, dict) else 1.0
+        
+        # Additional DNA properties
+        branch_count = int(dna.get('branch_count', 3))
+        leaf_density = float(dna.get('leaf_density', 0.5))
         
         plant_type = dna.get('plant_type', 'tree')
         
+        # Scale factor - make everything visible
+        scale = 0.5
+        
         # Draw trunk
-        trunk_h = height * 0.8
-        trunk_w = width * 0.15
+        trunk_h = height * 0.6 * scale
+        trunk_w = width * 0.1 * scale
         self._draw_3d_shape('cylinder', 
-                           glm.vec3(0, trunk_h * 0.25, 0),
-                           glm.vec3(trunk_w, trunk_h * 0.5, trunk_w),
+                           glm.vec3(0, 0, 0),
+                           glm.vec3(trunk_w, trunk_h, trunk_w),
                            trunk_color)
         
         # Draw canopy based on type
-        canopy_y = trunk_h * 0.6
+        canopy_y = trunk_h * 0.8
         
         if plant_type in ('tree', 'palm'):
-            # Spherical canopy
-            canopy_size = width * 0.6
+            # Layered spherical canopy
+            canopy_size = width * 0.4 * scale
+            for layer in range(max(2, int(leaf_density * 3))):
+                layer_y = canopy_y + layer * canopy_size * 0.3
+                layer_size = canopy_size * (1.0 - layer * 0.15)
+                shade = 0.8 + layer * 0.1
+                self._draw_3d_shape('ellipsoid',
+                                   glm.vec3(0, layer_y, 0),
+                                   glm.vec3(layer_size, layer_size * 0.7, layer_size),
+                                   (leaf_color[0] * shade, leaf_color[1] * shade, leaf_color[2] * shade))
+        elif plant_type == 'conifer':
+            # Cone canopy - multiple layers
+            for layer in range(3):
+                layer_y = canopy_y + layer * height * 0.15 * scale
+                layer_w = width * (0.4 - layer * 0.08) * scale
+                layer_h = height * 0.25 * scale
+                shade = 0.7 + layer * 0.15
+                self._draw_3d_shape('cone',
+                                   glm.vec3(0, layer_y, 0),
+                                   glm.vec3(layer_w, layer_h, layer_w),
+                                   (leaf_color[0] * shade, leaf_color[1] * shade, leaf_color[2] * shade))
+        elif plant_type in ('bush', 'shrub'):
+            # Wide low canopy with multiple spheres
+            bush_size = width * 0.25 * scale
+            self._draw_3d_shape('ellipsoid',
+                               glm.vec3(0, trunk_h * 0.5, 0),
+                               glm.vec3(bush_size * 1.2, bush_size * 0.6, bush_size * 1.2),
+                               leaf_color)
+            # Side clusters
+            for angle in range(0, 360, 120):
+                rad = math.radians(angle)
+                ox = math.cos(rad) * bush_size * 0.6
+                oz = math.sin(rad) * bush_size * 0.6
+                self._draw_3d_shape('ellipsoid',
+                                   glm.vec3(ox, trunk_h * 0.4, oz),
+                                   glm.vec3(bush_size * 0.8, bush_size * 0.5, bush_size * 0.8),
+                                   (leaf_color[0] * 0.9, leaf_color[1] * 0.9, leaf_color[2] * 0.9))
+        elif plant_type == 'flower':
+            # Petals around center
+            petal_count = max(5, branch_count)
+            petal_size = width * 0.15 * scale
+            for i in range(petal_count):
+                angle = (i / petal_count) * math.pi * 2
+                px = math.cos(angle) * petal_size * 1.5
+                pz = math.sin(angle) * petal_size * 1.5
+                self._draw_3d_shape('ellipsoid',
+                                   glm.vec3(px, canopy_y, pz),
+                                   glm.vec3(petal_size, petal_size * 0.3, petal_size),
+                                   flower_color)
+            # Center
+            self._draw_3d_shape('ellipsoid',
+                               glm.vec3(0, canopy_y + petal_size * 0.2, 0),
+                               glm.vec3(petal_size * 0.5, petal_size * 0.3, petal_size * 0.5),
+                               (0.9, 0.8, 0.2))
+        elif plant_type == 'mushroom':
+            # Stem
+            stem_h = height * 0.3 * scale
+            stem_w = width * 0.08 * scale
+            self._draw_3d_shape('cylinder',
+                               glm.vec3(0, 0, 0),
+                               glm.vec3(stem_w, stem_h, stem_w),
+                               (0.95, 0.9, 0.85))
+            # Cap
+            cap_color = self._extract_rgb_dict(dna.get('cap_color'), flower_color)
+            cap_w = width * 0.25 * scale
+            cap_h = height * 0.1 * scale
+            self._draw_3d_shape('ellipsoid',
+                               glm.vec3(0, stem_h, 0),
+                               glm.vec3(cap_w, cap_h, cap_w),
+                               cap_color)
+        elif plant_type == 'cactus':
+            # Main body
+            cactus_h = height * 0.5 * scale
+            cactus_w = width * 0.12 * scale
+            self._draw_3d_shape('cylinder',
+                               glm.vec3(0, 0, 0),
+                               glm.vec3(cactus_w, cactus_h, cactus_w),
+                               trunk_color)
+            # Arms
+            if branch_count > 1:
+                arm_h = cactus_h * 0.4
+                # Left arm
+                self._draw_3d_shape('cylinder',
+                                   glm.vec3(-cactus_w * 1.5, cactus_h * 0.3, 0),
+                                   glm.vec3(cactus_w * 0.7, arm_h, cactus_w * 0.7),
+                                   trunk_color)
+                # Right arm
+                self._draw_3d_shape('cylinder',
+                                   glm.vec3(cactus_w * 1.5, cactus_h * 0.5, 0),
+                                   glm.vec3(cactus_w * 0.7, arm_h * 0.8, cactus_w * 0.7),
+                                   trunk_color)
+        elif plant_type in ('grass', 'fern'):
+            # Multiple blades
+            blade_count = max(3, int(leaf_density * 6))
+            for i in range(blade_count):
+                angle = (i / blade_count) * math.pi * 2
+                blade_h = height * (0.3 + (i % 3) * 0.1) * scale
+                blade_w = width * 0.03 * scale
+                ox = math.cos(angle) * width * 0.05 * scale
+                oz = math.sin(angle) * width * 0.05 * scale
+                self._draw_3d_shape('cylinder',
+                                   glm.vec3(ox, blade_h * 0.3, oz),
+                                   glm.vec3(blade_w, blade_h, blade_w),
+                                   leaf_color)
+        else:
+            # Default tree
+            canopy_size = width * 0.35 * scale
             self._draw_3d_shape('ellipsoid',
                                glm.vec3(0, canopy_y, 0),
                                glm.vec3(canopy_size, canopy_size * 0.8, canopy_size),
-                               leaf_color)
-        elif plant_type == 'conifer':
-            # Cone canopy
-            cone_h = height * 0.8
-            cone_w = width * 0.5
-            self._draw_3d_shape('cone',
-                               glm.vec3(0, canopy_y, 0),
-                               glm.vec3(cone_w, cone_h * 0.5, cone_w),
-                               leaf_color)
-        elif plant_type in ('bush', 'shrub'):
-            # Wide low canopy
-            self._draw_3d_shape('ellipsoid',
-                               glm.vec3(0, height * 0.3, 0),
-                               glm.vec3(width * 0.5, height * 0.25, width * 0.5),
-                               leaf_color)
-        elif plant_type == 'flower':
-            # Small stem with flower on top
-            self._draw_3d_shape('ellipsoid',
-                               glm.vec3(0, canopy_y, 0),
-                               glm.vec3(width * 0.3, width * 0.15, width * 0.3),
-                               flower_color)
-        elif plant_type == 'mushroom':
-            # Cap
-            cap_color = self._extract_rgb_dict(dna.get('cap_color'), flower_color)
-            self._draw_3d_shape('ellipsoid',
-                               glm.vec3(0, trunk_h * 0.4, 0),
-                               glm.vec3(width * 0.4, height * 0.15, width * 0.4),
-                               cap_color)
-        elif plant_type == 'cactus':
-            # Tall cylinder
-            self._draw_3d_shape('cylinder',
-                               glm.vec3(0, height * 0.3, 0),
-                               glm.vec3(width * 0.15, height * 0.4, width * 0.15),
-                               trunk_color)
-        else:
-            # Default tree
-            self._draw_3d_shape('ellipsoid',
-                               glm.vec3(0, canopy_y, 0),
-                               glm.vec3(width * 0.4, width * 0.4, width * 0.4),
                                leaf_color)
     
     def _draw_3d_shape(self, shape: str, position: glm.vec3, scale: glm.vec3, 
