@@ -5520,8 +5520,8 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                 # Left stick = pan
                 if abs(gp_move[0]) > 0.1 or abs(gp_move[1]) > 0.1:
                     modern_renderer.microscope_view.pan(
-                        gp_move[1] * pan_speed,  # X = right stick axis
-                        -gp_move[0] * pan_speed  # Y = inverted forward
+                        gp_move[1] * pan_speed,  # X = left/right
+                        gp_move[0] * pan_speed   # Y = up/down (not inverted)
                     )
                 
                 # L1/R1 = zoom

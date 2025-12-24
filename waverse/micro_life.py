@@ -1004,12 +1004,433 @@ def create_stentor_dna(seed: int = None) -> MicroDNA:
     )
 
 
+def create_tardigrade_dna(seed: int = None) -> MicroDNA:
+    """Create DNA for a tardigrade (water bear) - tough little animal."""
+    rng = random.Random(seed)
+    
+    return MicroDNA(
+        species_id=rng.randint(0, 999999),
+        base_size=2.2 + rng.random() * 0.8,
+        membrane=MembranGene(
+            shape="blob",
+            color=(0.85, 0.8, 0.75),
+            transparency=0.2,
+            flexibility=0.4,
+        ),
+        organelles=[
+            OrganelleGene(OrganelleType.NUCLEUS, count=1, size=0.1,
+                         color=(0.4, 0.35, 0.45), position_bias=0.3),
+            OrganelleGene(OrganelleType.MITOCHONDRIA, count=rng.randint(15, 25), size=0.02,
+                         color=(0.9, 0.5, 0.4), position_bias=0.5),
+            # Legs (represented as pseudopods at edges)
+            OrganelleGene(OrganelleType.PSEUDOPOD, count=8, size=0.15,
+                         color=(0.8, 0.75, 0.7), position_bias=1.0),
+            OrganelleGene(OrganelleType.VACUOLE, count=rng.randint(3, 6), size=0.06,
+                         color=(0.7, 0.75, 0.8), position_bias=0.4),
+        ],
+        movement=MovementGene(
+            pattern=MovementPattern.WIGGLE,
+            speed=0.2 + rng.random() * 0.15,
+            amplitude=0.15,
+        ),
+    )
+
+
+def create_hydra_dna(seed: int = None) -> MicroDNA:
+    """Create DNA for a hydra (freshwater cnidarian with tentacles)."""
+    rng = random.Random(seed)
+    
+    return MicroDNA(
+        species_id=rng.randint(0, 999999),
+        base_size=3.0 + rng.random() * 1.5,
+        membrane=MembranGene(
+            shape="blob",
+            color=(0.7, 0.85, 0.75),
+            transparency=0.35,
+            flexibility=0.7,
+        ),
+        organelles=[
+            OrganelleGene(OrganelleType.NUCLEUS, count=1, size=0.08,
+                         color=(0.35, 0.4, 0.4), position_bias=0.2),
+            OrganelleGene(OrganelleType.MITOCHONDRIA, count=rng.randint(10, 18), size=0.025,
+                         color=(0.85, 0.45, 0.4), position_bias=0.5),
+            # Tentacles
+            OrganelleGene(OrganelleType.FLAGELLUM, count=rng.randint(5, 8), size=0.5,
+                         color=(0.75, 0.85, 0.78), position_bias=1.0),
+            OrganelleGene(OrganelleType.VACUOLE, count=rng.randint(2, 4), size=0.1,
+                         color=(0.65, 0.8, 0.7), position_bias=0.3),
+        ],
+        movement=MovementGene(
+            pattern=MovementPattern.PULSE,
+            speed=0.15,
+            frequency=0.4,
+        ),
+        metabolism=MetabolismGene(
+            is_predator=True,
+        ),
+    )
+
+
+def create_nematode_dna(seed: int = None) -> MicroDNA:
+    """Create DNA for a nematode (roundworm) - elongated worm-like creature."""
+    rng = random.Random(seed)
+    
+    return MicroDNA(
+        species_id=rng.randint(0, 999999),
+        base_size=1.8 + rng.random() * 1.0,
+        membrane=MembranGene(
+            shape="oval",
+            color=(0.9, 0.88, 0.85),
+            transparency=0.25,
+            flexibility=0.8,
+        ),
+        organelles=[
+            OrganelleGene(OrganelleType.NUCLEUS, count=1, size=0.06,
+                         color=(0.4, 0.38, 0.45), position_bias=0.2),
+            OrganelleGene(OrganelleType.MITOCHONDRIA, count=rng.randint(20, 35), size=0.015,
+                         color=(0.88, 0.48, 0.38), position_bias=0.5),
+            OrganelleGene(OrganelleType.VACUOLE, count=rng.randint(4, 8), size=0.04,
+                         color=(0.75, 0.78, 0.85), position_bias=0.5),
+        ],
+        movement=MovementGene(
+            pattern=MovementPattern.WIGGLE,
+            speed=0.8 + rng.random() * 0.4,
+            frequency=2.5,
+            amplitude=0.35,
+        ),
+    )
+
+
+def create_copepod_dna(seed: int = None) -> MicroDNA:
+    """Create DNA for a copepod (small crustacean zooplankton)."""
+    rng = random.Random(seed)
+    
+    return MicroDNA(
+        species_id=rng.randint(0, 999999),
+        base_size=1.5 + rng.random() * 0.8,
+        membrane=MembranGene(
+            shape="oval",
+            color=(0.85, 0.88, 0.9),
+            transparency=0.3,
+        ),
+        organelles=[
+            OrganelleGene(OrganelleType.NUCLEUS, count=1, size=0.1,
+                         color=(0.35, 0.35, 0.45), position_bias=0.2),
+            OrganelleGene(OrganelleType.MITOCHONDRIA, count=rng.randint(12, 20), size=0.02,
+                         color=(0.9, 0.5, 0.4), position_bias=0.5),
+            # Antennae
+            OrganelleGene(OrganelleType.FLAGELLUM, count=2, size=0.6,
+                         color=(0.8, 0.83, 0.85), position_bias=1.0),
+            # Legs
+            OrganelleGene(OrganelleType.CILIA, count=10, size=0.12,
+                         color=(0.82, 0.85, 0.87), position_bias=0.9),
+            # Eye
+            OrganelleGene(OrganelleType.VACUOLE, count=1, size=0.08,
+                         color=(0.9, 0.2, 0.2), position_bias=0.8),
+        ],
+        movement=MovementGene(
+            pattern=MovementPattern.PULSE,
+            speed=1.2 + rng.random() * 0.6,
+            frequency=4.0,
+        ),
+    )
+
+
+def create_daphnia_dna(seed: int = None) -> MicroDNA:
+    """Create DNA for a daphnia (water flea) - transparent crustacean."""
+    rng = random.Random(seed)
+    
+    return MicroDNA(
+        species_id=rng.randint(0, 999999),
+        base_size=2.0 + rng.random() * 1.0,
+        membrane=MembranGene(
+            shape="blob",
+            color=(0.88, 0.9, 0.92),
+            transparency=0.55,  # Very transparent - see organs inside
+        ),
+        organelles=[
+            OrganelleGene(OrganelleType.NUCLEUS, count=1, size=0.06,
+                         color=(0.4, 0.35, 0.45), position_bias=0.3),
+            # Visible heart and gut
+            OrganelleGene(OrganelleType.MITOCHONDRIA, count=1, size=0.15,
+                         color=(0.95, 0.3, 0.3), position_bias=0.4),  # Heart
+            OrganelleGene(OrganelleType.GOLGI, count=1, size=0.2,
+                         color=(0.6, 0.5, 0.4), position_bias=0.5),  # Gut
+            # Large compound eye
+            OrganelleGene(OrganelleType.VACUOLE, count=1, size=0.12,
+                         color=(0.1, 0.1, 0.1), position_bias=0.85),
+            # Swimming antennae
+            OrganelleGene(OrganelleType.FLAGELLUM, count=4, size=0.4,
+                         color=(0.85, 0.87, 0.9), position_bias=1.0),
+        ],
+        movement=MovementGene(
+            pattern=MovementPattern.PULSE,  # Jerky swimming
+            speed=0.9 + rng.random() * 0.5,
+            frequency=3.0,
+        ),
+    )
+
+
+def create_radiolarian_dna(seed: int = None) -> MicroDNA:
+    """Create DNA for a radiolarian (beautiful silica skeleton protozoan)."""
+    rng = random.Random(seed)
+    
+    return MicroDNA(
+        species_id=rng.randint(0, 999999),
+        base_size=1.2 + rng.random() * 0.8,
+        membrane=MembranGene(
+            shape="circle",
+            has_wall=True,
+            color=(0.9, 0.92, 0.95),
+            wall_color=(0.95, 0.97, 1.0),  # Glassy silica
+            transparency=0.4,
+        ),
+        organelles=[
+            OrganelleGene(OrganelleType.NUCLEUS, count=1, size=0.2,
+                         color=(0.5, 0.45, 0.55), position_bias=0.0),
+            # Radial spines (as flagella)
+            OrganelleGene(OrganelleType.FLAGELLUM, count=rng.randint(12, 24), size=0.25,
+                         color=(0.92, 0.94, 0.97), position_bias=1.0),
+            OrganelleGene(OrganelleType.VACUOLE, count=rng.randint(4, 8), size=0.05,
+                         color=(0.85, 0.88, 0.92), position_bias=0.5),
+        ],
+        movement=MovementGene(
+            pattern=MovementPattern.DRIFT,
+            speed=0.1,
+        ),
+        glow=0.15,
+        glow_color=(0.8, 0.9, 1.0),
+    )
+
+
+def create_foraminifera_dna(seed: int = None) -> MicroDNA:
+    """Create DNA for a foraminifera (shelled amoeba-like protozoan)."""
+    rng = random.Random(seed)
+    
+    return MicroDNA(
+        species_id=rng.randint(0, 999999),
+        base_size=0.8 + rng.random() * 0.5,
+        membrane=MembranGene(
+            shape="circle",
+            has_wall=True,
+            color=(0.95, 0.9, 0.8),  # Calcium carbonate shell
+            wall_color=(0.9, 0.85, 0.75),
+        ),
+        organelles=[
+            OrganelleGene(OrganelleType.NUCLEUS, count=1, size=0.15,
+                         color=(0.4, 0.4, 0.5), position_bias=0.0),
+            # Pseudopods extending through shell pores
+            OrganelleGene(OrganelleType.PSEUDOPOD, count=rng.randint(8, 16), size=0.2,
+                         color=(0.85, 0.8, 0.75), position_bias=1.0),
+            OrganelleGene(OrganelleType.VACUOLE, count=rng.randint(2, 4), size=0.06,
+                         color=(0.8, 0.75, 0.7), position_bias=0.4),
+        ],
+        movement=MovementGene(
+            pattern=MovementPattern.DRIFT,
+            speed=0.08,
+        ),
+    )
+
+
+def create_heliozoan_dna(seed: int = None) -> MicroDNA:
+    """Create DNA for a heliozoan (sun animalcule) - spiky radial protozoan."""
+    rng = random.Random(seed)
+    
+    return MicroDNA(
+        species_id=rng.randint(0, 999999),
+        base_size=1.0 + rng.random() * 0.6,
+        membrane=MembranGene(
+            shape="circle",
+            color=(0.92, 0.94, 0.9),
+            transparency=0.35,
+        ),
+        organelles=[
+            OrganelleGene(OrganelleType.NUCLEUS, count=1, size=0.25,
+                         color=(0.45, 0.45, 0.55), position_bias=0.0),
+            # Axopodia - stiff radiating spines
+            OrganelleGene(OrganelleType.FLAGELLUM, count=rng.randint(20, 40), size=0.35,
+                         color=(0.9, 0.92, 0.88), position_bias=1.0),
+            OrganelleGene(OrganelleType.VACUOLE, count=rng.randint(5, 10), size=0.04,
+                         color=(0.85, 0.88, 0.85), position_bias=0.5),
+        ],
+        movement=MovementGene(
+            pattern=MovementPattern.STATIC,
+            speed=0.03,
+        ),
+        metabolism=MetabolismGene(
+            is_predator=True,  # Catches prey on spines
+        ),
+    )
+
+
+def create_chlamydomonas_dna(seed: int = None) -> MicroDNA:
+    """Create DNA for chlamydomonas (green algae with two flagella)."""
+    rng = random.Random(seed)
+    
+    return MicroDNA(
+        species_id=rng.randint(0, 999999),
+        base_size=0.5 + rng.random() * 0.3,
+        membrane=MembranGene(
+            shape="circle",
+            color=(0.5, 0.8, 0.5),
+        ),
+        organelles=[
+            OrganelleGene(OrganelleType.NUCLEUS, count=1, size=0.15,
+                         color=(0.35, 0.4, 0.35), position_bias=0.0),
+            OrganelleGene(OrganelleType.CHLOROPLAST, count=1, size=0.4,
+                         color=(0.3, 0.7, 0.35), position_bias=0.3),
+            # Two flagella
+            OrganelleGene(OrganelleType.FLAGELLUM, count=2, size=0.5,
+                         color=(0.55, 0.75, 0.55), position_bias=1.0),
+            # Eyespot
+            OrganelleGene(OrganelleType.VACUOLE, count=1, size=0.05,
+                         color=(1.0, 0.4, 0.2), position_bias=0.7),
+        ],
+        movement=MovementGene(
+            pattern=MovementPattern.SPIRAL,
+            speed=0.7 + rng.random() * 0.3,
+            frequency=1.5,
+        ),
+        metabolism=MetabolismGene(
+            is_photosynthetic=True,
+        ),
+    )
+
+
+def create_oscillatoria_dna(seed: int = None) -> MicroDNA:
+    """Create DNA for oscillatoria (filamentous cyanobacteria that oscillates)."""
+    rng = random.Random(seed)
+    
+    return MicroDNA(
+        species_id=rng.randint(0, 999999),
+        base_size=0.4 + rng.random() * 0.2,
+        membrane=MembranGene(
+            shape="oval",
+            has_wall=True,
+            color=(0.3, 0.6, 0.5),
+            wall_color=(0.25, 0.5, 0.45),
+        ),
+        organelles=[
+            # No true nucleus (prokaryote)
+            OrganelleGene(OrganelleType.RIBOSOME, count=rng.randint(8, 15), size=0.03,
+                         color=(0.35, 0.4, 0.4), position_bias=0.5),
+            # Thylakoids (photosynthetic membranes)
+            OrganelleGene(OrganelleType.CHLOROPLAST, count=rng.randint(3, 6), size=0.12,
+                         color=(0.25, 0.55, 0.45), position_bias=0.5),
+        ],
+        movement=MovementGene(
+            pattern=MovementPattern.WIGGLE,
+            speed=0.3,
+            frequency=1.0,
+            amplitude=0.25,
+        ),
+        metabolism=MetabolismGene(
+            is_photosynthetic=True,
+        ),
+    )
+
+
+def create_blepharisma_dna(seed: int = None) -> MicroDNA:
+    """Create DNA for blepharisma (pink/red ciliate)."""
+    rng = random.Random(seed)
+    
+    return MicroDNA(
+        species_id=rng.randint(0, 999999),
+        base_size=1.4 + rng.random() * 0.6,
+        membrane=MembranGene(
+            shape="oval",
+            color=(0.95, 0.6, 0.65),  # Distinctive pink color
+            transparency=0.25,
+        ),
+        organelles=[
+            OrganelleGene(OrganelleType.NUCLEUS, count=1, size=0.15,
+                         color=(0.5, 0.35, 0.4), position_bias=0.2),
+            OrganelleGene(OrganelleType.MITOCHONDRIA, count=rng.randint(8, 14), size=0.03,
+                         color=(0.85, 0.45, 0.5), position_bias=0.5),
+            OrganelleGene(OrganelleType.CILIA, count=40, size=0.04,
+                         color=(0.9, 0.65, 0.7), position_bias=1.0),
+            OrganelleGene(OrganelleType.VACUOLE, count=rng.randint(2, 4), size=0.07,
+                         color=(0.85, 0.55, 0.6), position_bias=0.5),
+        ],
+        movement=MovementGene(
+            pattern=MovementPattern.SPIRAL,
+            speed=0.8 + rng.random() * 0.4,
+            frequency=1.2,
+        ),
+    )
+
+
+def create_colpoda_dna(seed: int = None) -> MicroDNA:
+    """Create DNA for colpoda (kidney-shaped ciliate common in soil)."""
+    rng = random.Random(seed)
+    
+    return MicroDNA(
+        species_id=rng.randint(0, 999999),
+        base_size=0.6 + rng.random() * 0.3,
+        membrane=MembranGene(
+            shape="blob",
+            color=(0.8, 0.82, 0.78),
+            flexibility=0.4,
+        ),
+        organelles=[
+            OrganelleGene(OrganelleType.NUCLEUS, count=1, size=0.18,
+                         color=(0.4, 0.4, 0.48), position_bias=0.2),
+            OrganelleGene(OrganelleType.MITOCHONDRIA, count=rng.randint(5, 10), size=0.03,
+                         color=(0.85, 0.5, 0.45), position_bias=0.5),
+            OrganelleGene(OrganelleType.CILIA, count=25, size=0.05,
+                         color=(0.78, 0.8, 0.76), position_bias=1.0),
+            OrganelleGene(OrganelleType.VACUOLE, count=rng.randint(1, 3), size=0.1,
+                         color=(0.7, 0.75, 0.72), position_bias=0.4),
+        ],
+        movement=MovementGene(
+            pattern=MovementPattern.WIGGLE,
+            speed=0.5 + rng.random() * 0.3,
+            frequency=1.8,
+        ),
+    )
+
+
+def create_didinium_dna(seed: int = None) -> MicroDNA:
+    """Create DNA for didinium (barrel-shaped predator that eats paramecia)."""
+    rng = random.Random(seed)
+    
+    return MicroDNA(
+        species_id=rng.randint(0, 999999),
+        base_size=0.7 + rng.random() * 0.3,
+        membrane=MembranGene(
+            shape="oval",
+            color=(0.85, 0.87, 0.82),
+        ),
+        organelles=[
+            OrganelleGene(OrganelleType.NUCLEUS, count=1, size=0.2,
+                         color=(0.4, 0.42, 0.5), position_bias=0.3),
+            OrganelleGene(OrganelleType.MITOCHONDRIA, count=rng.randint(6, 12), size=0.03,
+                         color=(0.88, 0.5, 0.42), position_bias=0.5),
+            # Two rings of cilia
+            OrganelleGene(OrganelleType.CILIA, count=30, size=0.06,
+                         color=(0.82, 0.84, 0.8), position_bias=0.95),
+            # Proboscis for feeding
+            OrganelleGene(OrganelleType.PSEUDOPOD, count=1, size=0.3,
+                         color=(0.8, 0.82, 0.78), position_bias=1.0),
+        ],
+        movement=MovementGene(
+            pattern=MovementPattern.CHASE,
+            speed=1.5 + rng.random() * 0.5,
+            frequency=2.0,
+        ),
+        metabolism=MetabolismGene(
+            is_predator=True,
+        ),
+    )
+
+
 # Template registry - organized by type
 MICRO_TEMPLATES = {
-    # Bacteria
+    # Bacteria / Cyanobacteria
     "bacteria": create_bacteria_dna,
     "coccus": create_coccus_dna,
     "spirillum": create_spirillum_dna,
+    "oscillatoria": create_oscillatoria_dna,
     
     # Protozoa (animal-like)
     "amoeba": create_amoeba_dna,
@@ -1017,6 +1438,12 @@ MICRO_TEMPLATES = {
     "vorticella": create_vorticella_dna,
     "rotifer": create_rotifer_dna,
     "stentor": create_stentor_dna,
+    "blepharisma": create_blepharisma_dna,
+    "colpoda": create_colpoda_dna,
+    "didinium": create_didinium_dna,
+    "heliozoan": create_heliozoan_dna,
+    "radiolarian": create_radiolarian_dna,
+    "foraminifera": create_foraminifera_dna,
     
     # Algae (plant-like)
     "algae": create_algae_dna,
@@ -1026,6 +1453,14 @@ MICRO_TEMPLATES = {
     "desmid": create_desmid_dna,
     "volvox": create_volvox_dna,
     "spirogyra": create_spirogyra_dna,
+    "chlamydomonas": create_chlamydomonas_dna,
+    
+    # Micro-animals
+    "tardigrade": create_tardigrade_dna,
+    "hydra": create_hydra_dna,
+    "nematode": create_nematode_dna,
+    "copepod": create_copepod_dna,
+    "daphnia": create_daphnia_dna,
     
     # Random
     "random": MicroDNA.create_random,
@@ -1036,34 +1471,53 @@ MICRO_TEMPLATES = {
 TERRAIN_POPULATIONS = {
     "water": {
         # Open water - diverse aquatic life
-        "diatom": 8,
-        "dinoflagellate": 6,
+        "diatom": 6,
+        "dinoflagellate": 5,
         "paramecium": 4,
-        "euglena": 5,
+        "euglena": 4,
+        "chlamydomonas": 5,
         "volvox": 2,
-        "bacteria": 10,
-        "algae": 4,
+        "bacteria": 8,
+        "coccus": 4,
+        "algae": 3,
         "rotifer": 2,
         "stentor": 1,
+        "copepod": 2,
+        "daphnia": 2,
+        "radiolarian": 2,
+        "heliozoan": 1,
+        "blepharisma": 1,
+        "hydra": 1,
     },
     "plant": {
         # Plant surface - bacteria, algae, some protozoa
-        "bacteria": 15,
-        "coccus": 8,
-        "algae": 6,
-        "spirogyra": 4,
-        "desmid": 3,
+        "bacteria": 12,
+        "coccus": 6,
+        "oscillatoria": 4,
+        "algae": 5,
+        "spirogyra": 3,
+        "desmid": 2,
+        "chlamydomonas": 3,
         "amoeba": 2,
         "vorticella": 2,
+        "colpoda": 2,
+        "tardigrade": 1,
+        "nematode": 2,
     },
     "ground": {
-        # Soil - bacteria, amoebae, some ciliates
-        "bacteria": 12,
-        "coccus": 10,
-        "spirillum": 5,
-        "amoeba": 6,
+        # Soil - bacteria, amoebae, ciliates, nematodes
+        "bacteria": 10,
+        "coccus": 8,
+        "spirillum": 4,
+        "oscillatoria": 2,
+        "amoeba": 5,
+        "colpoda": 4,
         "paramecium": 2,
-        "diatom": 3,  # Soil diatoms exist!
+        "didinium": 1,
+        "nematode": 4,
+        "tardigrade": 2,
+        "foraminifera": 2,
+        "diatom": 2,  # Soil diatoms exist!
     },
 }
 

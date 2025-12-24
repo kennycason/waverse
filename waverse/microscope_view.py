@@ -641,7 +641,7 @@ def run_microscope_demo():
             if abs(lx) > DEADZONE:
                 view.pan(lx * pan_speed * STICK_SENSITIVITY, 0)
             if abs(ly) > DEADZONE:
-                view.pan(0, -ly * pan_speed * STICK_SENSITIVITY)  # Inverted Y
+                view.pan(0, ly * pan_speed * STICK_SENSITIVITY)  # Not inverted
             
             # D-pad for panning
             try:
