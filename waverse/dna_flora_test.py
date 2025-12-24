@@ -765,15 +765,15 @@ def run_test_grid():
     # Create renderer
     renderer = DNAFloraRenderer(ctx)
     
-    # Camera state
-    cam_x, cam_y, cam_z = 0, 5, 15
-    cam_yaw, cam_pitch = 0, -20
+    # Camera state - start further back to see the whole grid
+    cam_x, cam_y, cam_z = 0, 12, 35
+    cam_yaw, cam_pitch = 0, -15
     
     # Generate test DNA grid with variety of plant types
     rng = np.random.default_rng(42)  # Fixed seed for reproducibility
     
-    GRID_SIZE = 10  # 10x10 grid
-    SPACING = 3.5   # 3.5 units between plants
+    GRID_SIZE = 16  # 16x16 grid = 256 plants!
+    SPACING = 3.0   # 3 units between plants
     
     # Load real DNA from backup files if available
     import os
@@ -885,11 +885,20 @@ def run_test_grid():
             })
     
     print(f"Generated {len(test_plants)} test plants")
-    print("Controls: WASD to move, Mouse to look, Q to quit")
+    print("Controls:")
+    print("  WASD - Move")
+    print("  Mouse - Look (Tab to release/capture)")
+    print("  Space/Shift - Up/Down")
+    print("  P - Save screenshot")
+    print("  Q/Escape - Quit")
     
-    # Capture mouse
-    pygame.mouse.set_visible(False)
-    pygame.event.set_grab(True)
+    # Mouse capture state (start uncaptured so user can use system)
+    mouse_captured = False
+    pygame.mouse.set_visible(True)
+    pygame.event.set_grab(False)
+    
+    # Screenshot counter
+    screenshot_count = 0
     
     clock = pygame.time.Clock()
     running = True
@@ -903,12 +912,36 @@ def run_test_grid():
             elif event.type == KEYDOWN:
                 if event.key == K_q or event.key == K_ESCAPE:
                     running = False
+                elif event.key == K_TAB:
+                    # Toggle mouse capture
+                    mouse_captured = not mouse_captured
+                    pygame.mouse.set_visible(not mouse_captured)
+                    pygame.event.set_grab(mouse_captured)
+                    if mouse_captured:
+                        pygame.mouse.get_rel()  # Clear accumulated movement
+                        print("Mouse captured - Tab to release")
+                    else:
+                        print("Mouse released - Tab to capture")
+                elif event.key == K_p:
+                    # Take screenshot
+                    import os
+                    from datetime import datetime
+                    screenshot_dir = os.path.expanduser("~/.waverse/screenshots")
+                    os.makedirs(screenshot_dir, exist_ok=True)
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    filename = f"{screenshot_dir}/flora_test_{timestamp}.png"
+                    pygame.image.save(pygame.display.get_surface(), filename)
+                    screenshot_count += 1
+                    print(f"Saved: {filename}")
         
-        # Mouse look
-        mouse_dx, mouse_dy = pygame.mouse.get_rel()
-        cam_yaw -= mouse_dx * 0.2
-        cam_pitch -= mouse_dy * 0.2
-        cam_pitch = max(-89, min(89, cam_pitch))
+        # Mouse look (only when captured)
+        if mouse_captured:
+            mouse_dx, mouse_dy = pygame.mouse.get_rel()
+            cam_yaw -= mouse_dx * 0.2
+            cam_pitch -= mouse_dy * 0.2
+            cam_pitch = max(-89, min(89, cam_pitch))
+        else:
+            pygame.mouse.get_rel()  # Discard movement when not captured
         
         # Keyboard movement
         keys = pygame.key.get_pressed()
