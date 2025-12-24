@@ -1857,10 +1857,16 @@ def run_test_grid():
     
     print(f"Generated {len(test_plants)} test plants")
     print("Controls:")
-    print("  WASD - Move, IJKL - Look")
-    print("  Space/Shift - Up/Down")
-    print("  P - Save screenshot")
-    print("  Q/Escape - Quit")
+    print("  MOVEMENT (Left Stick):")
+    print("    WASD - Move (follows camera direction)")
+    print("    Space/H - Fly UP")
+    print("    Shift/F - Fly DOWN")
+    print("  CAMERA (Right Stick):")
+    print("    I/K - Look UP/DOWN (do loops!)")
+    print("    J/L - Look LEFT/RIGHT")
+    print("  OTHER:")
+    print("    P - Save screenshot")
+    print("    Q/Escape - Quit")
     
     # Screenshot counter
     screenshot_count = 0
@@ -1900,37 +1906,47 @@ def run_test_grid():
         # Keyboard input
         keys = pygame.key.get_pressed()
         
-        # Keyboard look (IJKL)
-        look_speed = 80 * dt  # Degrees per second
-        if keys[K_i]:
-            cam_pitch += look_speed
-        if keys[K_k]:
-            cam_pitch -= look_speed
-        if keys[K_j]:
-            cam_yaw += look_speed
-        if keys[K_l]:
-            cam_yaw -= look_speed
-        cam_pitch = max(-89, min(89, cam_pitch))
-        
-        # Keyboard movement
-        move_speed = 10 * dt
-        
-        yaw_rad = math.radians(cam_yaw)
-        forward_x = -math.sin(yaw_rad)
-        forward_z = -math.cos(yaw_rad)
-        right_x = math.cos(yaw_rad)
-        right_z = -math.sin(yaw_rad)
-        
-        # Ignore all movement when system modifiers are held (for screenshots: Cmd+Shift+Ctrl+4)
+        # Ignore all input when system modifiers are held (for screenshots: Cmd+Shift+Ctrl+4)
         mods = pygame.key.get_mods()
         system_mod_held = (mods & pygame.KMOD_META) or (mods & pygame.KMOD_CTRL)
         
         if not system_mod_held:
+            # === RIGHT STICK: Camera Look (IJKL) ===
+            # I = look up, K = look down, J = look left, L = look right
+            look_speed = dt * 1.2
+            
+            if keys[K_i]: cam_pitch += look_speed * 80   # Look UP
+            if keys[K_k]: cam_pitch -= look_speed * 80   # Look DOWN
+            if keys[K_j]: cam_yaw += look_speed * 100    # Look LEFT
+            if keys[K_l]: cam_yaw -= look_speed * 100    # Look RIGHT
+            
+            # Allow full 360° loops - normalize to -180 to 180
+            while cam_pitch > 180:
+                cam_pitch -= 360
+            while cam_pitch < -180:
+                cam_pitch += 360
+            
+            # === LEFT STICK: Movement (WASD) ===
+            move_speed = 15 * dt
+            yaw_rad = math.radians(cam_yaw)
+            pitch_rad = math.radians(cam_pitch)
+            
+            # Full 3D movement following camera direction
+            forward_x = -math.sin(yaw_rad) * math.cos(pitch_rad)
+            forward_y = math.sin(pitch_rad)
+            forward_z = -math.cos(yaw_rad) * math.cos(pitch_rad)
+            
+            # Right vector stays horizontal
+            right_x = math.cos(yaw_rad)
+            right_z = -math.sin(yaw_rad)
+            
             if keys[K_w]:
                 cam_x += forward_x * move_speed
+                cam_y += forward_y * move_speed
                 cam_z += forward_z * move_speed
             if keys[K_s]:
                 cam_x -= forward_x * move_speed
+                cam_y -= forward_y * move_speed
                 cam_z -= forward_z * move_speed
             if keys[K_a]:
                 cam_x -= right_x * move_speed
@@ -1938,12 +1954,15 @@ def run_test_grid():
             if keys[K_d]:
                 cam_x += right_x * move_speed
                 cam_z += right_z * move_speed
-            if keys[K_SPACE]:
+            
+            # Vertical flight (H = up, F = down, or Space/Shift)
+            if keys[K_SPACE] or keys[K_h]:
                 cam_y += move_speed
-            if keys[K_LSHIFT]:
+            if keys[K_LSHIFT] or keys[K_f]:
                 cam_y -= move_speed
         
         # Build camera matrices
+        yaw_rad = math.radians(cam_yaw)
         pitch_rad = math.radians(cam_pitch)
         dir_x = -math.sin(yaw_rad) * math.cos(pitch_rad)
         dir_y = math.sin(pitch_rad)
@@ -2128,7 +2147,9 @@ def run_evolution_mode():
     else:
         print("Watch them grow toward center and CROSSOVER!")
     print("=" * 60)
-    print("Controls: WASD move, IJKL look, P screenshot, Q quit")
+    print("Controls:")
+    print("  WASD - Move (follows camera)   IJKL - Look (do loops!)")
+    print("  Space/H - Up   Shift/F - Down   P - Screenshot   Q - Quit")
     print("=" * 60)
     
     clock = pygame.time.Clock()
@@ -2166,27 +2187,42 @@ def run_evolution_mode():
         # Keyboard input
         keys = pygame.key.get_pressed()
         
-        # Look
-        look_speed = 80 * dt
-        if keys[K_i]: cam_pitch += look_speed
-        if keys[K_k]: cam_pitch -= look_speed
-        if keys[K_j]: cam_yaw += look_speed
-        if keys[K_l]: cam_yaw -= look_speed
-        cam_pitch = max(-89, min(89, cam_pitch))
+        # === RIGHT STICK: Camera Look (IJKL) ===
+        # I = look up, K = look down, J = look left, L = look right
+        look_speed = dt * 1.2  # Smooth control like andrew_maps
         
-        # Move
-        move_speed = 20 * dt
+        if keys[K_i]: cam_pitch += look_speed * 80   # Look UP
+        if keys[K_k]: cam_pitch -= look_speed * 80   # Look DOWN
+        if keys[K_j]: cam_yaw += look_speed * 100    # Look LEFT
+        if keys[K_l]: cam_yaw -= look_speed * 100    # Look RIGHT
+        
+        # Allow full 360° loops - normalize to -180 to 180
+        while cam_pitch > 180:
+            cam_pitch -= 360
+        while cam_pitch < -180:
+            cam_pitch += 360
+        
+        # === LEFT STICK: Movement (WASD) ===
+        move_speed = 25 * dt
         yaw_rad = math.radians(cam_yaw)
-        forward_x = -math.sin(yaw_rad)
-        forward_z = -math.cos(yaw_rad)
+        pitch_rad = math.radians(cam_pitch)
+        
+        # Full 3D movement following camera direction
+        forward_x = -math.sin(yaw_rad) * math.cos(pitch_rad)
+        forward_y = math.sin(pitch_rad)
+        forward_z = -math.cos(yaw_rad) * math.cos(pitch_rad)
+        
+        # Right vector stays horizontal
         right_x = math.cos(yaw_rad)
         right_z = -math.sin(yaw_rad)
         
         if keys[K_w]:
             cam_x += forward_x * move_speed
+            cam_y += forward_y * move_speed
             cam_z += forward_z * move_speed
         if keys[K_s]:
             cam_x -= forward_x * move_speed
+            cam_y -= forward_y * move_speed
             cam_z -= forward_z * move_speed
         if keys[K_a]:
             cam_x -= right_x * move_speed
@@ -2194,9 +2230,11 @@ def run_evolution_mode():
         if keys[K_d]:
             cam_x += right_x * move_speed
             cam_z += right_z * move_speed
-        if keys[K_SPACE]:
+        
+        # Vertical flight (H = up, F = down like andrew_maps, or Space/Shift)
+        if keys[K_SPACE] or keys[K_h]:
             cam_y += move_speed
-        if keys[K_LSHIFT]:
+        if keys[K_LSHIFT] or keys[K_f]:
             cam_y -= move_speed
         
         # === EVOLUTION STEP ===
