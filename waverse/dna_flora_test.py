@@ -920,22 +920,27 @@ def run_test_grid():
         right_x = math.cos(yaw_rad)
         right_z = -math.sin(yaw_rad)
         
-        if keys[K_w]:
-            cam_x += forward_x * move_speed
-            cam_z += forward_z * move_speed
-        if keys[K_s]:
-            cam_x -= forward_x * move_speed
-            cam_z -= forward_z * move_speed
-        if keys[K_a]:
-            cam_x -= right_x * move_speed
-            cam_z -= right_z * move_speed
-        if keys[K_d]:
-            cam_x += right_x * move_speed
-            cam_z += right_z * move_speed
-        if keys[K_SPACE]:
-            cam_y += move_speed
-        if keys[K_LSHIFT]:
-            cam_y -= move_speed
+        # Ignore all movement when system modifiers are held (for screenshots: Cmd+Shift+Ctrl+4)
+        mods = pygame.key.get_mods()
+        system_mod_held = (mods & pygame.KMOD_META) or (mods & pygame.KMOD_CTRL)
+        
+        if not system_mod_held:
+            if keys[K_w]:
+                cam_x += forward_x * move_speed
+                cam_z += forward_z * move_speed
+            if keys[K_s]:
+                cam_x -= forward_x * move_speed
+                cam_z -= forward_z * move_speed
+            if keys[K_a]:
+                cam_x -= right_x * move_speed
+                cam_z -= right_z * move_speed
+            if keys[K_d]:
+                cam_x += right_x * move_speed
+                cam_z += right_z * move_speed
+            if keys[K_SPACE]:
+                cam_y += move_speed
+            if keys[K_LSHIFT]:
+                cam_y -= move_speed
         
         # Build camera matrices
         pitch_rad = math.radians(cam_pitch)

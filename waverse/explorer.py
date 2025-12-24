@@ -4530,8 +4530,12 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
         keys = pygame.key.get_pressed()
         forward = right = up = 0
         
-        # Only allow world movement/look when menu is closed
-        if not camera.menu_open:
+        # Ignore movement when system modifiers held (Cmd+Shift+Ctrl+4 for screenshots)
+        mods = pygame.key.get_mods()
+        system_mod_held = (mods & pygame.KMOD_META) or (mods & pygame.KMOD_CTRL)
+        
+        # Only allow world movement/look when menu is closed and no system mods
+        if not camera.menu_open and not system_mod_held:
             speed = 2.5 if keys[pygame.K_LALT] else 1.0
             
             if keys[pygame.K_w] or keys[pygame.K_UP]: forward += dt * speed
