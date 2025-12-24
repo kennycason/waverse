@@ -70,6 +70,10 @@ class ModernWorldRenderer:
         self._wood_vao, self._wood_vbo = self._create_wood_mesh()
         self._dropped_items: list = []  # List of DroppedItem objects
         
+        # Debris particles (fading visual effects)
+        self._debris_vao, self._debris_vbo = self._create_debris_mesh()
+        self._debris_particles: list = []  # List of Debris objects
+        
         # Integration state
         self.loaded_terrain_chunks: set = set()
         self.loaded_flora_chunks: set = set()
@@ -172,6 +176,10 @@ class ModernWorldRenderer:
         target = cam_pos + glm.vec3(dir_x, dir_y, dir_z)
         up_vec = glm.vec3(up_x, up_y, up_z)
         view = glm.lookAt(cam_pos, target, up_vec)
+        
+        # Store for dropped items rendering
+        self._proj_matrix = projection
+        self._view_matrix = view
         
         self.sky.set_camera(projection, view, cam_pos)
         self.clouds.set_camera(projection, view, cam_pos)
@@ -1015,6 +1023,9 @@ class ModernWorldRenderer:
         # Render dropped items
         self._render_dropped_items()
         
+        # Render debris particles (fading effects)
+        self._render_debris()
+        
         # Render water (transparent, needs blending)
         # OPTIMIZATION: Skip water if camera is very high above water level
         # Water is irrelevant at high altitudes
@@ -1174,6 +1185,58 @@ class ModernWorldRenderer:
         vao = self.ctx.vertex_array(self._wood_program, [(vbo, '3f 3f 3f', 'in_position', 'in_normal', 'in_color')])
         return vao, vbo
     
+    def _create_debris_mesh(self):
+        """Create a simple cube mesh for debris particles."""
+        # Small cube for wood chips, unit size (scaled per instance)
+        half = 0.5
+        vertices = []
+        color = (1.0, 1.0, 1.0)  # White, color is applied via uniform
+        
+        # Front
+        vertices.extend([
+            -half, -half, half, 0, 0, 1, *color,
+            half, -half, half, 0, 0, 1, *color,
+            half, half, half, 0, 0, 1, *color,
+            -half, -half, half, 0, 0, 1, *color,
+            half, half, half, 0, 0, 1, *color,
+            -half, half, half, 0, 0, 1, *color,
+        ])
+        # Back
+        vertices.extend([
+            -half, -half, -half, 0, 0, -1, *color,
+            -half, half, -half, 0, 0, -1, *color,
+            half, half, -half, 0, 0, -1, *color,
+            -half, -half, -half, 0, 0, -1, *color,
+            half, half, -half, 0, 0, -1, *color,
+            half, -half, -half, 0, 0, -1, *color,
+        ])
+        # Top
+        vertices.extend([
+            -half, half, -half, 0, 1, 0, *color,
+            -half, half, half, 0, 1, 0, *color,
+            half, half, half, 0, 1, 0, *color,
+            -half, half, -half, 0, 1, 0, *color,
+            half, half, half, 0, 1, 0, *color,
+            half, half, -half, 0, 1, 0, *color,
+        ])
+        # Bottom
+        vertices.extend([
+            -half, -half, -half, 0, -1, 0, *color,
+            half, -half, -half, 0, -1, 0, *color,
+            half, -half, half, 0, -1, 0, *color,
+            -half, -half, -half, 0, -1, 0, *color,
+            half, -half, half, 0, -1, 0, *color,
+            -half, -half, half, 0, -1, 0, *color,
+        ])
+        
+        vbo = self.ctx.buffer(np.array(vertices, dtype='f4').tobytes())
+        vao = self.ctx.vertex_array(self._wood_program, [(vbo, '3f 3f 3f', 'in_position', 'in_normal', 'in_color')])
+        return vao, vbo
+    
+    def set_debris_particles(self, debris: list):
+        """Set the list of debris particles to render."""
+        self._debris_particles = debris
+    
     def set_wood_chunks(self, dropped_items: list):
         """Set the list of dropped items to render (kept name for compatibility)."""
         self._dropped_items = dropped_items
@@ -1181,6 +1244,10 @@ class ModernWorldRenderer:
     def _render_dropped_items(self):
         """Render all dropped items (wood logs, etc.)."""
         if not self._dropped_items:
+            return
+        
+        # Need matrices to render
+        if not hasattr(self, '_proj_matrix') or not hasattr(self, '_view_matrix'):
             return
         
         cam_pos = self._camera_pos if hasattr(self, '_camera_pos') else (0, 0, 0)
@@ -1209,6 +1276,49 @@ class ModernWorldRenderer:
             # For now, all dropped items use the wood mesh (can expand later)
             self._wood_vao.render()
     
+    def _render_debris(self):
+        """Render all debris particles (fading visual effects)."""
+        if not self._debris_particles:
+            return
+        
+        # Need matrices to render
+        if not hasattr(self, '_proj_matrix') or not hasattr(self, '_view_matrix'):
+            return
+        
+        cam_pos = self._camera_pos if hasattr(self, '_camera_pos') else (0, 0, 0)
+        max_dist_sq = 80 * 80
+        
+        # Enable blending for alpha fade
+        self.ctx.enable(moderngl.BLEND)
+        
+        for debris in self._debris_particles:
+            if debris.alpha <= 0:
+                continue
+            
+            dx = debris.x - cam_pos[0]
+            dy = debris.y - cam_pos[1]
+            dz = debris.z - cam_pos[2]
+            if dx*dx + dy*dy + dz*dz > max_dist_sq:
+                continue
+            
+            # Build model matrix with rotation
+            model = glm.mat4(1.0)
+            model = glm.translate(model, glm.vec3(debris.x, debris.y, debris.z))
+            model = glm.rotate(model, math.radians(debris.rotation), glm.vec3(0, 1, 0))
+            model = glm.rotate(model, math.radians(debris.rotation * 0.7), glm.vec3(1, 0, 0))
+            model = glm.scale(model, glm.vec3(debris.scale))
+            
+            # MVP
+            mvp = self._proj_matrix * self._view_matrix * model
+            
+            self._wood_program['u_mvp'].write(mvp.to_bytes() if hasattr(mvp, 'to_bytes') else bytes(mvp))
+            self._wood_program['u_model'].write(model.to_bytes() if hasattr(model, 'to_bytes') else bytes(model))
+            
+            # Render debris cube (uses same shader, color comes from mesh)
+            self._debris_vao.render()
+        
+        self.ctx.disable(moderngl.BLEND)
+    
     def cleanup(self):
         """Release all GPU resources."""
         self.sky.cleanup()
@@ -1228,6 +1338,11 @@ class ModernWorldRenderer:
             self._wood_vbo.release()
         if self._wood_program:
             self._wood_program.release()
+        # Debris
+        if self._debris_vao:
+            self._debris_vao.release()
+        if self._debris_vbo:
+            self._debris_vbo.release()
         self.loaded_terrain_chunks.clear()
         self.loaded_flora_chunks.clear()
         self._visible_structures.clear()

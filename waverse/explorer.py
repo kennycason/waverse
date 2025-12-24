@@ -991,10 +991,11 @@ def log_dna_at_cursor(camera, flora_manager, animal_manager):
         return None
 
 
-def cut_tree_at_cursor(camera, flora_manager, chunk_manager, dropped_items_list):
+def cut_tree_at_cursor(camera, flora_manager, chunk_manager, dropped_items_list, debris_list=None):
     """Cut down the nearest tree at the cursor (camera look direction).
     
     Creates dropped items (wood) that can be picked up.
+    Spawns debris particles for visual effect (if debris_list provided).
     Returns the number of items created, or 0 if no tree found.
     """
     # Get camera look direction
@@ -1060,10 +1061,49 @@ def cut_tree_at_cursor(camera, flora_manager, chunk_manager, dropped_items_list)
     else:
         height = 1.0
     
+    # Get plant colors for debris
+    trunk_color = (0.55, 0.35, 0.15)  # Default brown
+    leaf_color = (0.2, 0.6, 0.2)  # Default green
+    
+    # Try to extract colors from DNA
+    if hasattr(dna, 'trunk_color') and dna.trunk_color:
+        tc = dna.trunk_color
+        if hasattr(tc, 'r'):
+            trunk_color = (tc.r, tc.g, tc.b)
+        elif isinstance(tc, (list, tuple)) and len(tc) >= 3:
+            trunk_color = (tc[0], tc[1], tc[2])
+    
+    if hasattr(dna, 'leaf_color') and dna.leaf_color:
+        lc = dna.leaf_color
+        if hasattr(lc, 'r'):
+            leaf_color = (lc.r, lc.g, lc.b)
+        elif isinstance(lc, (list, tuple)) and len(lc) >= 3:
+            leaf_color = (lc[0], lc[1], lc[2])
+    
+    # Spawn debris particles (visual effect)
+    if debris_list is not None:
+        num_debris = int(8 + height * 4)  # More debris for bigger trees
+        for i in range(num_debris):
+            # Spawn throughout the tree volume
+            debris_y = best_plant.y + np.random.random() * height
+            debris_x = best_plant.x + (np.random.random() - 0.5) * 2.0
+            debris_z = best_plant.z + (np.random.random() - 0.5) * 2.0
+            
+            # Mix of trunk and leaf debris
+            if np.random.random() < 0.3:
+                color = trunk_color
+                dtype = "wood"
+            else:
+                color = leaf_color
+                dtype = "leaf"
+            
+            debris = Debris(debris_x, debris_y, debris_z, dtype, color)
+            debris_list.append(debris)
+    
     # Bigger trees give more wood (1-5 logs)
     wood_count = min(5, max(1, int(height * 1.5)))
     
-    # Create dropped wood items at the plant location
+    # Create dropped wood items at the plant location (center of explosion)
     for i in range(wood_count):
         # Offset slightly with random scatter
         offset_x = (np.random.random() - 0.5) * 2.0
@@ -1075,7 +1115,7 @@ def cut_tree_at_cursor(camera, flora_manager, chunk_manager, dropped_items_list)
         
         dropped = DroppedItem(
             best_plant.x + offset_x,
-            best_plant.y + offset_y + height,  # Start at tree top
+            best_plant.y + offset_y + height * 0.5,  # Start mid-height
             best_plant.z + offset_z,
             wood_item
         )
@@ -1096,8 +1136,8 @@ def cut_tree_at_cursor(camera, flora_manager, chunk_manager, dropped_items_list)
     if hasattr(plant_type, 'name'):
         plant_type = plant_type.name
     
-    camera.set_status(f"CUT {plant_type} - {wood_count} logs dropped!", 2.0)
-    print(f"  [CUT] Cut {plant_type} at ({best_plant.x:.1f}, {best_plant.z:.1f}) - {wood_count} logs")
+    camera.set_status(f"CUT {plant_type} - {wood_count} wood!", 2.0)
+    print(f"  [CUT] Cut {plant_type} at ({best_plant.x:.1f}, {best_plant.z:.1f}) - {wood_count} logs, {num_debris if debris_list is not None else 0} debris")
     
     return wood_count
 
@@ -1589,6 +1629,68 @@ class DroppedItem:
     def distance_to(self, x: float, y: float, z: float) -> float:
         """Distance from a point."""
         return math.sqrt((self.x - x)**2 + (self.y - y)**2 + (self.z - z)**2)
+
+
+class Debris:
+    """
+    Visual-only debris particle that flies out and fades away.
+    Used for tree cutting effects, explosions, etc.
+    """
+    
+    def __init__(self, x: float, y: float, z: float, 
+                 debris_type: str = "wood",
+                 color: tuple = (0.55, 0.35, 0.15)):
+        self.x = x
+        self.y = y
+        self.z = z
+        self.debris_type = debris_type
+        self.color = color
+        
+        # Random velocity (fly outward)
+        angle = np.random.random() * 2 * math.pi
+        speed = 3.0 + np.random.random() * 5.0
+        self.vx = math.cos(angle) * speed
+        self.vy = 5.0 + np.random.random() * 8.0  # Upward burst
+        self.vz = math.sin(angle) * speed
+        
+        # Spin
+        self.rotation = np.random.random() * 360
+        self.spin = (np.random.random() - 0.5) * 720  # Degrees per second
+        
+        # Size and lifetime
+        self.scale = 0.1 + np.random.random() * 0.3
+        self.lifetime = 1.5 + np.random.random() * 1.0  # 1.5-2.5 seconds
+        self.max_lifetime = self.lifetime
+        self.alpha = 1.0
+    
+    def update(self, dt: float, terrain_height: float):
+        """Update physics and fade."""
+        self.lifetime -= dt
+        
+        # Fade out over time
+        self.alpha = max(0, self.lifetime / self.max_lifetime)
+        
+        # Apply gravity
+        self.vy -= 15.0 * dt
+        
+        # Move
+        self.x += self.vx * dt
+        self.y += self.vy * dt
+        self.z += self.vz * dt
+        
+        # Spin
+        self.rotation += self.spin * dt
+        
+        # Ground collision (just stop, no bounce)
+        ground_y = terrain_height + 0.05
+        if self.y < ground_y:
+            self.y = ground_y
+            self.vy = 0
+            self.vx *= 0.8  # Friction
+            self.vz *= 0.8
+    
+    def is_alive(self) -> bool:
+        return self.lifetime > 0
 
 
 class Camera:
@@ -3167,6 +3269,89 @@ def render_dropped_items(dropped_items: list, camera_x: float, camera_y: float, 
     glDisable(GL_COLOR_MATERIAL)
 
 
+def render_debris(debris_particles: list, camera_x: float, camera_y: float, camera_z: float):
+    """Render debris particles (fading visual effects from cutting trees, etc.)."""
+    if not debris_particles:
+        return
+    
+    # Culling distance
+    max_render_dist = 80.0
+    
+    glEnable(GL_BLEND)
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+    glEnable(GL_LIGHTING)
+    glEnable(GL_COLOR_MATERIAL)
+    glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE)
+    
+    for debris in debris_particles:
+        dx = debris.x - camera_x
+        dy = debris.y - camera_y
+        dz = debris.z - camera_z
+        dist_sq = dx*dx + dy*dy + dz*dz
+        
+        if dist_sq > max_render_dist * max_render_dist:
+            continue
+        
+        if debris.alpha <= 0:
+            continue
+        
+        glPushMatrix()
+        glTranslatef(debris.x, debris.y, debris.z)
+        glRotatef(debris.rotation, 0, 1, 0)
+        glRotatef(debris.rotation * 0.7, 1, 0, 0)  # Tumble
+        
+        # Color with alpha fade
+        r, g, b = debris.color
+        glColor4f(r, g, b, debris.alpha)
+        
+        # Draw as small box or flat quad
+        size = debris.scale
+        
+        if debris.debris_type == "leaf":
+            # Flat quad for leaves
+            glBegin(GL_QUADS)
+            glNormal3f(0, 1, 0)
+            glVertex3f(-size, 0, -size * 0.6)
+            glVertex3f(size, 0, -size * 0.6)
+            glVertex3f(size, 0, size * 0.6)
+            glVertex3f(-size, 0, size * 0.6)
+            glEnd()
+        else:
+            # Small cube for wood chips
+            half = size * 0.5
+            glBegin(GL_QUADS)
+            # Front
+            glNormal3f(0, 0, 1)
+            glVertex3f(-half, -half, half)
+            glVertex3f(half, -half, half)
+            glVertex3f(half, half, half)
+            glVertex3f(-half, half, half)
+            # Back
+            glNormal3f(0, 0, -1)
+            glVertex3f(-half, -half, -half)
+            glVertex3f(-half, half, -half)
+            glVertex3f(half, half, -half)
+            glVertex3f(half, -half, -half)
+            # Top
+            glNormal3f(0, 1, 0)
+            glVertex3f(-half, half, -half)
+            glVertex3f(-half, half, half)
+            glVertex3f(half, half, half)
+            glVertex3f(half, half, -half)
+            # Bottom
+            glNormal3f(0, -1, 0)
+            glVertex3f(-half, -half, -half)
+            glVertex3f(half, -half, -half)
+            glVertex3f(half, -half, half)
+            glVertex3f(-half, -half, half)
+            glEnd()
+        
+        glPopMatrix()
+    
+    glDisable(GL_COLOR_MATERIAL)
+    glDisable(GL_BLEND)
+
+
 def render_water(camera_x: float, camera_z: float, water_level: float = 0.0):
     """Render water plane centered on camera at water level height."""
     size = 2000  # Large enough to cover visible area
@@ -4624,6 +4809,8 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
     
     # Dropped items in the world (wood, stone, etc.)
     dropped_items: list = []
+    # Debris particles (visual-only, fading)
+    debris_particles: list = []
     sky = SkySystem(chunk_dna_manager)
     water_level = config.water_level
     minimap = Minimap(chunk_manager)
@@ -4841,7 +5028,7 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                                 if USE_MODERN_RENDERER and modern_renderer:
                                     modern_renderer.invalidate_terrain_chunk(chunk_key[0], chunk_key[1])
                     elif camera.current_tool == ToolType.CUT:
-                        cut_tree_at_cursor(camera, flora_manager, chunk_manager, dropped_items)
+                        cut_tree_at_cursor(camera, flora_manager, chunk_manager, dropped_items, debris_particles)
                 elif event.key == pygame.K_t:  # T = cycle tool radius (for MINE/FILL)
                     if camera.current_tool in (ToolType.MINE, ToolType.FILL):
                         camera.cycle_tool_radius()
@@ -5146,7 +5333,7 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                                 if USE_MODERN_RENDERER and modern_renderer:
                                     modern_renderer.invalidate_terrain_chunk(chunk_key[0], chunk_key[1])
                     elif camera.current_tool == ToolType.CUT:
-                        cut_tree_at_cursor(camera, flora_manager, chunk_manager, dropped_items)
+                        cut_tree_at_cursor(camera, flora_manager, chunk_manager, dropped_items, debris_particles)
                     gamepad_speed_cooldown = 15
             
             # DPAD = Tool cycling (left/right) and tool radius (up/down)
@@ -5334,8 +5521,9 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                 camera, chunk_manager, flora_manager, animal_manager, structure_manager, climate_manager
             )
             
-            # Sync dropped items for rendering
+            # Sync dropped items and debris for rendering
             modern_renderer.set_wood_chunks(dropped_items)
+            modern_renderer.set_debris_particles(debris_particles)
             
             # Render everything via modern renderer
             modern_renderer.render()
@@ -5496,6 +5684,13 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
             if dropped.lifetime <= 0:
                 dropped_items.remove(dropped)
         
+        # Update debris particles (visual effects, fade out)
+        for debris in debris_particles[:]:
+            terrain_h = chunk_manager.get_height_at(debris.x, debris.z) * HEIGHT_SCALE
+            debris.update(dt, terrain_h)
+            if not debris.is_alive():
+                debris_particles.remove(debris)
+        
         # Auto-pickup items when walking over them
         pickup_nearby_items(camera, dropped_items, pickup_radius=2.5)
         
@@ -5517,6 +5712,9 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
             
             # Render dropped items
             render_dropped_items(dropped_items, camera.x, camera.y, camera.z)
+            
+            # Render debris particles (fading visual effects)
+            render_debris(debris_particles, camera.x, camera.y, camera.z)
             
             # Render weather effects (rain/snow particles, lightning)
             weather_renderer.render(cam_pos[0], cam_pos[1], cam_pos[2],
