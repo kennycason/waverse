@@ -148,168 +148,98 @@ void main() {
 
 
 # ============================================================================
-# MESH GENERATION (base templates)
+# MESH GENERATION (base templates matching legacy V1 shapes)
 # ============================================================================
 
-def create_tree_base_mesh() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Create a base tree mesh that will be deformed by DNA parameters.
-    Returns vertices, normals, colors.
-    
-    The mesh has:
-    - Trunk: cylinder with rings at different heights (for smooth bending)
-    - Foliage: cone/dome shape above trunk
-    - Branches: simple extensions
-    """
+def create_trunk_mesh(height: float = 1.0, radius: float = 0.08) -> Tuple[List, List, List]:
+    """Create a multi-ring trunk cylinder for smooth deformation."""
     vertices = []
     normals = []
     colors = []
     
     trunk_color = (0.45, 0.28, 0.15)
-    foliage_color = (1.0, 1.0, 1.0)  # White for tinting
-    
-    # === TRUNK (multi-ring cylinder for smooth deformation) ===
-    trunk_height = 1.0  # Normalized, will be scaled by DNA
-    trunk_radius = 0.1
-    rings = 8  # More rings = smoother curves
+    rings = 12  # More rings = smoother curves when deformed
     segments = 8
     
     for ring in range(rings):
         t = ring / (rings - 1)
-        y = t * trunk_height
+        y = t * height
         next_t = min(1.0, (ring + 1) / (rings - 1))
-        next_y = next_t * trunk_height
+        next_y = next_t * height
         
         for seg in range(segments):
             angle1 = (seg / segments) * 2 * math.pi
             angle2 = ((seg + 1) / segments) * 2 * math.pi
             
-            x1 = math.cos(angle1) * trunk_radius
-            z1 = math.sin(angle1) * trunk_radius
-            x2 = math.cos(angle2) * trunk_radius
-            z2 = math.sin(angle2) * trunk_radius
+            x1 = math.cos(angle1) * radius
+            z1 = math.sin(angle1) * radius
+            x2 = math.cos(angle2) * radius
+            z2 = math.sin(angle2) * radius
             
-            # Two triangles per quad
-            # Normal points outward
             n1 = (math.cos(angle1), 0, math.sin(angle1))
             n2 = (math.cos(angle2), 0, math.sin(angle2))
             
-            # Triangle 1
             vertices.extend([(x1, y, z1), (x2, y, z2), (x1, next_y, z1)])
             normals.extend([n1, n2, n1])
-            colors.extend([trunk_color, trunk_color, trunk_color])
+            colors.extend([trunk_color] * 3)
             
-            # Triangle 2
             vertices.extend([(x2, y, z2), (x2, next_y, z2), (x1, next_y, z1)])
             normals.extend([n2, n2, n1])
-            colors.extend([trunk_color, trunk_color, trunk_color])
+            colors.extend([trunk_color] * 3)
     
-    # === FOLIAGE (layered cone/dome) ===
-    foliage_start = trunk_height * 0.6
-    foliage_height = trunk_height * 0.6
-    foliage_layers = 4
-    
-    for layer in range(foliage_layers):
-        layer_t = layer / foliage_layers
-        next_layer_t = (layer + 1) / foliage_layers
-        
-        # Radius decreases as we go up
-        r1 = 0.4 * (1 - layer_t * 0.7)
-        r2 = 0.4 * (1 - next_layer_t * 0.7)
-        
-        y1 = foliage_start + layer_t * foliage_height
-        y2 = foliage_start + next_layer_t * foliage_height
-        
-        for seg in range(segments):
-            angle1 = (seg / segments) * 2 * math.pi
-            angle2 = ((seg + 1) / segments) * 2 * math.pi
-            
-            x1a, z1a = math.cos(angle1) * r1, math.sin(angle1) * r1
-            x2a, z2a = math.cos(angle2) * r1, math.sin(angle2) * r1
-            x1b, z1b = math.cos(angle1) * r2, math.sin(angle1) * r2
-            x2b, z2b = math.cos(angle2) * r2, math.sin(angle2) * r2
-            
-            # Normal pointing outward and up
-            n = (math.cos(angle1 + math.pi/segments), 0.5, math.sin(angle1 + math.pi/segments))
-            n_len = math.sqrt(n[0]**2 + n[1]**2 + n[2]**2)
-            n = (n[0]/n_len, n[1]/n_len, n[2]/n_len)
-            
-            # Two triangles per quad
-            vertices.extend([(x1a, y1, z1a), (x2a, y1, z2a), (x1b, y2, z1b)])
-            normals.extend([n, n, n])
-            colors.extend([foliage_color, foliage_color, foliage_color])
-            
-            vertices.extend([(x2a, y1, z2a), (x2b, y2, z2b), (x1b, y2, z1b)])
-            normals.extend([n, n, n])
-            colors.extend([foliage_color, foliage_color, foliage_color])
-    
-    # === BRANCHES (simple horizontal extensions) ===
-    branch_height = trunk_height * 0.5
-    branch_count = 4
-    branch_length = 0.25
-    branch_radius = 0.03
-    
-    for b in range(branch_count):
-        angle = (b / branch_count) * 2 * math.pi + 0.3  # Offset for variety
-        
-        bx = math.cos(angle) * trunk_radius
-        bz = math.sin(angle) * trunk_radius
-        by = branch_height + (b * 0.05)  # Stagger heights
-        
-        # Branch direction
-        dir_x = math.cos(angle)
-        dir_z = math.sin(angle)
-        
-        # Simple elongated box for branch
-        end_x = bx + dir_x * branch_length
-        end_z = bz + dir_z * branch_length
-        end_y = by - 0.05  # Slight droop
-        
-        # Just a line with some thickness (6 triangles for a simple prism)
-        # Top triangle
-        vertices.extend([
-            (bx, by + branch_radius, bz),
-            (end_x, end_y + branch_radius, end_z),
-            (bx + 0.02, by, bz + 0.02)
-        ])
-        normals.extend([(0, 1, 0), (0, 1, 0), (0, 1, 0)])
-        colors.extend([trunk_color, trunk_color, trunk_color])
-        
-        vertices.extend([
-            (end_x, end_y + branch_radius, end_z),
-            (end_x + 0.02, end_y, end_z + 0.02),
-            (bx + 0.02, by, bz + 0.02)
-        ])
-        normals.extend([(0, 1, 0), (0, 1, 0), (0, 1, 0)])
-        colors.extend([trunk_color, trunk_color, trunk_color])
-    
-    return (
-        np.array(vertices, dtype='f4'),
-        np.array(normals, dtype='f4'),
-        np.array(colors, dtype='f4')
-    )
+    return vertices, normals, colors
 
 
-def create_bush_base_mesh() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Create a base bush mesh - dome shape."""
+def create_cone_canopy(base_y: float, height: float, radius: float) -> Tuple[List, List, List]:
+    """Create a cone-shaped canopy (classic pine tree)."""
     vertices = []
     normals = []
     colors = []
     
-    foliage_color = (1.0, 1.0, 1.0)  # White for tinting
+    foliage_color = (1.0, 1.0, 1.0)
+    segments = 12
     
-    # Hemisphere dome
+    # Cone from base to tip
+    tip_y = base_y + height
+    
+    for seg in range(segments):
+        angle1 = (seg / segments) * 2 * math.pi
+        angle2 = ((seg + 1) / segments) * 2 * math.pi
+        
+        x1 = math.cos(angle1) * radius
+        z1 = math.sin(angle1) * radius
+        x2 = math.cos(angle2) * radius
+        z2 = math.sin(angle2) * radius
+        
+        # Triangle from base to tip
+        n = (math.cos(angle1 + math.pi/segments), 0.5, math.sin(angle1 + math.pi/segments))
+        n_len = math.sqrt(n[0]**2 + n[1]**2 + n[2]**2)
+        n = (n[0]/n_len, n[1]/n_len, n[2]/n_len)
+        
+        vertices.extend([(x1, base_y, z1), (x2, base_y, z2), (0, tip_y, 0)])
+        normals.extend([n, n, (0, 1, 0)])
+        colors.extend([foliage_color] * 3)
+    
+    return vertices, normals, colors
+
+
+def create_dome_canopy(base_y: float, height: float, radius: float) -> Tuple[List, List, List]:
+    """Create a dome-shaped canopy (deciduous tree)."""
+    vertices = []
+    normals = []
+    colors = []
+    
+    foliage_color = (1.0, 1.0, 1.0)
     rings = 6
-    segments = 8
-    radius = 0.4
+    segments = 10
     
     for ring in range(rings):
         phi1 = (ring / rings) * (math.pi / 2)
         phi2 = ((ring + 1) / rings) * (math.pi / 2)
         
-        y1 = math.sin(phi1) * radius
+        y1 = base_y + math.sin(phi1) * height
         r1 = math.cos(phi1) * radius
-        y2 = math.sin(phi2) * radius
+        y2 = base_y + math.sin(phi2) * height
         r2 = math.cos(phi2) * radius
         
         for seg in range(segments):
@@ -326,22 +256,340 @@ def create_bush_base_mesh() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
             x2b = math.cos(theta2) * r2
             z2b = math.sin(theta2) * r2
             
-            # Normal = position normalized
-            n1 = (x1a, y1, z1a)
-            n2 = (x2a, y1, z2a)
+            n1 = (math.cos(theta1), 0.5, math.sin(theta1))
             
             vertices.extend([(x1a, y1, z1a), (x2a, y1, z2a), (x1b, y2, z1b)])
-            normals.extend([n1, n2, n1])
-            colors.extend([foliage_color, foliage_color, foliage_color])
+            normals.extend([n1, n1, n1])
+            colors.extend([foliage_color] * 3)
             
             vertices.extend([(x2a, y1, z2a), (x2b, y2, z2b), (x1b, y2, z1b)])
-            normals.extend([n2, n2, n1])
-            colors.extend([foliage_color, foliage_color, foliage_color])
+            normals.extend([n1, n1, n1])
+            colors.extend([foliage_color] * 3)
+    
+    return vertices, normals, colors
+
+
+def create_umbrella_canopy(base_y: float, height: float, radius: float) -> Tuple[List, List, List]:
+    """Create a flat umbrella canopy (acacia style)."""
+    vertices = []
+    normals = []
+    colors = []
+    
+    foliage_color = (1.0, 1.0, 1.0)
+    segments = 12
+    
+    # Flat disc with slight center raise
+    center_y = base_y + height * 0.3
+    edge_y = base_y
+    
+    for seg in range(segments):
+        angle1 = (seg / segments) * 2 * math.pi
+        angle2 = ((seg + 1) / segments) * 2 * math.pi
+        
+        x1 = math.cos(angle1) * radius
+        z1 = math.sin(angle1) * radius
+        x2 = math.cos(angle2) * radius
+        z2 = math.sin(angle2) * radius
+        
+        # Triangle from center to edge
+        vertices.extend([(0, center_y, 0), (x1, edge_y, z1), (x2, edge_y, z2)])
+        normals.extend([(0, 1, 0)] * 3)
+        colors.extend([foliage_color] * 3)
+    
+    return vertices, normals, colors
+
+
+def create_layered_canopy(base_y: float, height: float, radius: float, layers: int = 3) -> Tuple[List, List, List]:
+    """Create stacked layer canopy (spruce style)."""
+    vertices = []
+    normals = []
+    colors = []
+    
+    foliage_color = (1.0, 1.0, 1.0)
+    segments = 10
+    
+    for layer in range(layers):
+        layer_t = layer / layers
+        layer_y = base_y + layer_t * height
+        layer_r = radius * (1 - layer_t * 0.7)  # Narrower at top
+        next_layer_y = base_y + ((layer + 0.5) / layers) * height
+        
+        for seg in range(segments):
+            angle1 = (seg / segments) * 2 * math.pi
+            angle2 = ((seg + 1) / segments) * 2 * math.pi
+            
+            x1 = math.cos(angle1) * layer_r
+            z1 = math.sin(angle1) * layer_r
+            x2 = math.cos(angle2) * layer_r
+            z2 = math.sin(angle2) * layer_r
+            
+            # Triangle pointing up to next layer center
+            vertices.extend([(x1, layer_y, z1), (x2, layer_y, z2), (0, next_layer_y, 0)])
+            normals.extend([(0, 0.7, 0.3)] * 3)
+            colors.extend([foliage_color] * 3)
+    
+    return vertices, normals, colors
+
+
+def create_branches(trunk_height: float, count: int = 6, length: float = 0.3) -> Tuple[List, List, List]:
+    """Create branches extending from trunk."""
+    vertices = []
+    normals = []
+    colors = []
+    
+    branch_color = (0.4, 0.25, 0.12)
+    
+    for b in range(count):
+        angle = (b / count) * 2 * math.pi
+        branch_y = trunk_height * (0.4 + (b / count) * 0.4)  # Stagger heights
+        
+        # Branch start at trunk
+        start_x = math.cos(angle) * 0.08
+        start_z = math.sin(angle) * 0.08
+        
+        # Branch end outward
+        end_x = math.cos(angle) * length
+        end_z = math.sin(angle) * length
+        end_y = branch_y - 0.05  # Slight droop
+        
+        # Simple triangular prism
+        up = 0.015
+        side = 0.015
+        
+        # Top face
+        vertices.extend([
+            (start_x, branch_y + up, start_z),
+            (end_x, end_y + up, end_z),
+            (start_x + side, branch_y, start_z + side)
+        ])
+        normals.extend([(0, 1, 0)] * 3)
+        colors.extend([branch_color] * 3)
+        
+        vertices.extend([
+            (end_x, end_y + up, end_z),
+            (end_x + side, end_y, end_z + side),
+            (start_x + side, branch_y, start_z + side)
+        ])
+        normals.extend([(0, 1, 0)] * 3)
+        colors.extend([branch_color] * 3)
+    
+    return vertices, normals, colors
+
+
+def create_tree_base_mesh() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Create a CONE tree (classic evergreen) with proper structure."""
+    all_verts = []
+    all_norms = []
+    all_cols = []
+    
+    # Trunk
+    v, n, c = create_trunk_mesh(height=0.6, radius=0.06)
+    all_verts.extend(v)
+    all_norms.extend(n)
+    all_cols.extend(c)
+    
+    # Branches
+    v, n, c = create_branches(trunk_height=0.6, count=6, length=0.2)
+    all_verts.extend(v)
+    all_norms.extend(n)
+    all_cols.extend(c)
+    
+    # Layered cone canopy (spruce style)
+    v, n, c = create_layered_canopy(base_y=0.3, height=0.9, radius=0.4, layers=4)
+    all_verts.extend(v)
+    all_norms.extend(n)
+    all_cols.extend(c)
+    
+    return (
+        np.array(all_verts, dtype='f4'),
+        np.array(all_norms, dtype='f4'),
+        np.array(all_cols, dtype='f4')
+    )
+
+
+def create_dome_tree_mesh() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Create a DOME tree (deciduous oak style)."""
+    all_verts = []
+    all_norms = []
+    all_cols = []
+    
+    # Trunk
+    v, n, c = create_trunk_mesh(height=0.5, radius=0.08)
+    all_verts.extend(v)
+    all_norms.extend(n)
+    all_cols.extend(c)
+    
+    # Branches
+    v, n, c = create_branches(trunk_height=0.5, count=8, length=0.3)
+    all_verts.extend(v)
+    all_norms.extend(n)
+    all_cols.extend(c)
+    
+    # Dome canopy
+    v, n, c = create_dome_canopy(base_y=0.35, height=0.5, radius=0.5)
+    all_verts.extend(v)
+    all_norms.extend(n)
+    all_cols.extend(c)
+    
+    return (
+        np.array(all_verts, dtype='f4'),
+        np.array(all_norms, dtype='f4'),
+        np.array(all_cols, dtype='f4')
+    )
+
+
+def create_umbrella_tree_mesh() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Create an UMBRELLA tree (acacia style)."""
+    all_verts = []
+    all_norms = []
+    all_cols = []
+    
+    # Tall trunk
+    v, n, c = create_trunk_mesh(height=0.8, radius=0.05)
+    all_verts.extend(v)
+    all_norms.extend(n)
+    all_cols.extend(c)
+    
+    # Umbrella canopy at top
+    v, n, c = create_umbrella_canopy(base_y=0.7, height=0.2, radius=0.6)
+    all_verts.extend(v)
+    all_norms.extend(n)
+    all_cols.extend(c)
+    
+    return (
+        np.array(all_verts, dtype='f4'),
+        np.array(all_norms, dtype='f4'),
+        np.array(all_cols, dtype='f4')
+    )
+
+
+def create_bush_base_mesh() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Create a bush mesh - low dome shape."""
+    all_verts = []
+    all_norms = []
+    all_cols = []
+    
+    # No trunk, just dome starting at ground
+    v, n, c = create_dome_canopy(base_y=0.0, height=0.4, radius=0.4)
+    all_verts.extend(v)
+    all_norms.extend(n)
+    all_cols.extend(c)
+    
+    return (
+        np.array(all_verts, dtype='f4'),
+        np.array(all_norms, dtype='f4'),
+        np.array(all_cols, dtype='f4')
+    )
+
+
+def create_fern_mesh() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Create a fern mesh - fronds radiating outward."""
+    vertices = []
+    normals = []
+    colors = []
+    
+    foliage_color = (1.0, 1.0, 1.0)
+    frond_count = 8
+    frond_length = 0.5
+    frond_width = 0.08
+    
+    for f in range(frond_count):
+        angle = (f / frond_count) * 2 * math.pi
+        
+        # Frond curves outward and down
+        start_x = 0
+        start_z = 0
+        start_y = 0.1
+        
+        mid_x = math.cos(angle) * frond_length * 0.5
+        mid_z = math.sin(angle) * frond_length * 0.5
+        mid_y = 0.25  # Curves up then down
+        
+        end_x = math.cos(angle) * frond_length
+        end_z = math.sin(angle) * frond_length
+        end_y = 0.05  # Droops at end
+        
+        # Two triangles for frond
+        perp_x = -math.sin(angle) * frond_width
+        perp_z = math.cos(angle) * frond_width
+        
+        vertices.extend([
+            (start_x, start_y, start_z),
+            (mid_x + perp_x, mid_y, mid_z + perp_z),
+            (mid_x - perp_x, mid_y, mid_z - perp_z)
+        ])
+        normals.extend([(0, 1, 0)] * 3)
+        colors.extend([foliage_color] * 3)
+        
+        vertices.extend([
+            (mid_x + perp_x, mid_y, mid_z + perp_z),
+            (end_x, end_y, end_z),
+            (mid_x - perp_x, mid_y, mid_z - perp_z)
+        ])
+        normals.extend([(0, 1, 0)] * 3)
+        colors.extend([foliage_color] * 3)
     
     return (
         np.array(vertices, dtype='f4'),
         np.array(normals, dtype='f4'),
         np.array(colors, dtype='f4')
+    )
+
+
+def create_mushroom_mesh() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Create a mushroom mesh - stem and cap."""
+    all_verts = []
+    all_norms = []
+    all_cols = []
+    
+    stem_color = (0.9, 0.85, 0.8)
+    cap_color = (1.0, 1.0, 1.0)  # Tinted by instance color
+    
+    # Stem (short cylinder)
+    segments = 8
+    stem_height = 0.3
+    stem_radius = 0.05
+    
+    for seg in range(segments):
+        angle1 = (seg / segments) * 2 * math.pi
+        angle2 = ((seg + 1) / segments) * 2 * math.pi
+        
+        x1 = math.cos(angle1) * stem_radius
+        z1 = math.sin(angle1) * stem_radius
+        x2 = math.cos(angle2) * stem_radius
+        z2 = math.sin(angle2) * stem_radius
+        
+        all_verts.extend([(x1, 0, z1), (x2, 0, z2), (x1, stem_height, z1)])
+        all_norms.extend([(math.cos(angle1), 0, math.sin(angle1))] * 3)
+        all_cols.extend([stem_color] * 3)
+        
+        all_verts.extend([(x2, 0, z2), (x2, stem_height, z2), (x1, stem_height, z1)])
+        all_norms.extend([(math.cos(angle2), 0, math.sin(angle2))] * 3)
+        all_cols.extend([stem_color] * 3)
+    
+    # Cap (dome on top)
+    cap_base = stem_height - 0.02
+    cap_height = 0.15
+    cap_radius = 0.2
+    
+    for seg in range(segments):
+        angle1 = (seg / segments) * 2 * math.pi
+        angle2 = ((seg + 1) / segments) * 2 * math.pi
+        
+        x1 = math.cos(angle1) * cap_radius
+        z1 = math.sin(angle1) * cap_radius
+        x2 = math.cos(angle2) * cap_radius
+        z2 = math.sin(angle2) * cap_radius
+        
+        # Triangle from edge to top
+        all_verts.extend([(x1, cap_base, z1), (x2, cap_base, z2), (0, cap_base + cap_height, 0)])
+        all_norms.extend([(0, 0.7, 0.3)] * 3)
+        all_cols.extend([cap_color] * 3)
+    
+    return (
+        np.array(all_verts, dtype='f4'),
+        np.array(all_norms, dtype='f4'),
+        np.array(all_cols, dtype='f4')
     )
 
 
@@ -364,17 +612,23 @@ class DNAFloraRenderer:
             fragment_shader=DNA_FLORA_FRAGMENT_SHADER
         )
         
-        # Create base meshes
-        self.tree_mesh = create_tree_base_mesh()
-        self.bush_mesh = create_bush_base_mesh()
+        # Create base meshes for different plant types
+        self.meshes = {
+            'tree_cone': create_tree_base_mesh(),
+            'tree_dome': create_dome_tree_mesh(),
+            'tree_umbrella': create_umbrella_tree_mesh(),
+            'bush': create_bush_base_mesh(),
+            'fern': create_fern_mesh(),
+            'mushroom': create_mushroom_mesh(),
+        }
         
-        # Create VBOs for meshes
-        self.tree_vbo = self._create_mesh_vbo(self.tree_mesh)
-        self.bush_vbo = self._create_mesh_vbo(self.bush_mesh)
+        # Create VBOs for each mesh type
+        self.mesh_vbos = {}
+        for name, mesh in self.meshes.items():
+            self.mesh_vbos[name] = self._create_mesh_vbo(mesh)
         
-        # Instance data: will be created per render
-        self.tree_instances = []
-        self.bush_instances = []
+        # Instance data per mesh type
+        self.instances = {name: [] for name in self.meshes}
         
         # Camera matrices
         self.projection = glm.mat4(1.0)
@@ -390,11 +644,14 @@ class DNAFloraRenderer:
         data[:, 6:9] = cols
         return self.ctx.buffer(data.tobytes())
     
-    def add_tree_instance(self, x: float, y: float, z: float, 
-                          scale: float, rotation: float,
-                          color: Tuple[float, float, float],
-                          dna: PlantDNA):
-        """Add a tree instance with DNA parameters."""
+    def add_instance(self, mesh_type: str, x: float, y: float, z: float, 
+                     scale: float, rotation: float,
+                     color: Tuple[float, float, float],
+                     dna: PlantDNA = None):
+        """Add an instance with DNA parameters."""
+        if mesh_type not in self.instances:
+            mesh_type = 'bush'  # Fallback
+        
         # Extract DNA parameters
         curve = 0.0
         twist = 0.0
@@ -402,20 +659,21 @@ class DNAFloraRenderer:
         height = 1.0
         droop = 0.0
         
-        # Get from DNA if available
-        if dna.trunk_segments:
-            seg = dna.trunk_segments[0]
-            curve = getattr(seg, 'curve', 0.0)
-            twist = getattr(seg, 'twist', 0.0)
-            taper = getattr(seg, 'taper', 0.8)
+        if dna:
+            # Get from DNA if available
+            if dna.trunk_segments:
+                seg = dna.trunk_segments[0]
+                curve = getattr(seg, 'curve', 0.0)
+                twist = getattr(seg, 'twist', 0.0)
+                taper = getattr(seg, 'taper', 0.8)
+            
+            height_gene = getattr(dna, 'height_gene', None)
+            if height_gene:
+                height = height_gene.value if hasattr(height_gene, 'value') else 1.0
+            
+            droop = getattr(dna, 'droop', 0.0)
         
-        height_gene = getattr(dna, 'height_gene', None)
-        if height_gene:
-            height = height_gene.value if hasattr(height_gene, 'value') else 1.0
-        
-        droop = getattr(dna, 'droop', 0.0)
-        
-        self.tree_instances.append((
+        self.instances[mesh_type].append((
             x, y, z,           # position
             scale,             # scale
             rotation,          # rotation
@@ -425,34 +683,6 @@ class DNAFloraRenderer:
             taper,             # DNA taper
             height,            # DNA height
             droop              # DNA branch droop
-        ))
-    
-    def add_bush_instance(self, x: float, y: float, z: float,
-                          scale: float, rotation: float,
-                          color: Tuple[float, float, float],
-                          dna: PlantDNA):
-        """Add a bush instance with DNA parameters."""
-        curve = 0.0
-        twist = 0.0
-        taper = 1.0
-        height = 0.5
-        droop = 0.0
-        
-        if dna.trunk_segments:
-            seg = dna.trunk_segments[0]
-            curve = getattr(seg, 'curve', 0.0) * 0.3  # Less curve for bushes
-            twist = getattr(seg, 'twist', 0.0) * 0.5
-        
-        height_gene = getattr(dna, 'height_gene', None)
-        if height_gene:
-            height = height_gene.value * 0.5 if hasattr(height_gene, 'value') else 0.5
-        
-        self.bush_instances.append((
-            x, y, z,
-            scale,
-            rotation,
-            *color,
-            curve, twist, taper, height, droop
         ))
     
     def set_camera(self, projection: glm.mat4, view: glm.mat4):
@@ -466,13 +696,12 @@ class DNAFloraRenderer:
         self.program['u_sun_dir'].value = (0.5, 0.8, 0.3)
         self.program['u_ambient'].value = (0.4, 0.4, 0.45)
         
-        # Render trees
-        if self.tree_instances:
-            self._render_instances(self.tree_vbo, self.tree_instances, len(self.tree_mesh[0]))
-        
-        # Render bushes
-        if self.bush_instances:
-            self._render_instances(self.bush_vbo, self.bush_instances, len(self.bush_mesh[0]))
+        # Render each mesh type
+        for mesh_type, instances in self.instances.items():
+            if instances:
+                vbo = self.mesh_vbos[mesh_type]
+                vertex_count = len(self.meshes[mesh_type][0])
+                self._render_instances(vbo, instances, vertex_count)
     
     def _render_instances(self, mesh_vbo: moderngl.Buffer, instances: list, vertex_count: int):
         """Render instances of a mesh type."""
@@ -505,8 +734,8 @@ class DNAFloraRenderer:
     
     def clear_instances(self):
         """Clear all instances for next frame."""
-        self.tree_instances.clear()
-        self.bush_instances.clear()
+        for instances in self.instances.values():
+            instances.clear()
 
 
 # ============================================================================
@@ -540,28 +769,104 @@ def run_test_grid():
     cam_x, cam_y, cam_z = 0, 5, 15
     cam_yaw, cam_pitch = 0, -20
     
-    # Generate test DNA grid
+    # Generate test DNA grid with variety of plant types
     rng = np.random.default_rng(42)  # Fixed seed for reproducibility
     
-    GRID_SIZE = 8  # 8x8 grid
-    SPACING = 3.0  # 3 units between plants
+    GRID_SIZE = 10  # 10x10 grid
+    SPACING = 3.5   # 3.5 units between plants
+    
+    # Load real DNA from backup files if available
+    import os
+    import json
+    real_dnas = []
+    dna_log_dir = os.path.expanduser("~/.waverse/dna_logs")
+    if os.path.exists(dna_log_dir):
+        for fname in os.listdir(dna_log_dir):
+            if fname.startswith("plant_dna_") and fname.endswith(".json"):
+                try:
+                    with open(os.path.join(dna_log_dir, fname)) as f:
+                        data = json.load(f)
+                        if 'dna' in data:
+                            real_dnas.append(data['dna'])
+                except:
+                    pass
+    print(f"Loaded {len(real_dnas)} real DNA samples from logs")
+    
+    # Mesh types to cycle through
+    mesh_types = ['tree_cone', 'tree_dome', 'tree_umbrella', 'bush', 'fern', 'mushroom']
     
     test_plants = []
     
     for gx in range(GRID_SIZE):
         for gz in range(GRID_SIZE):
-            # Alternate between trees and bushes
-            is_tree = (gx + gz) % 2 == 0
+            # Cycle through mesh types
+            mesh_idx = (gx + gz * 3) % len(mesh_types)
+            mesh_type = mesh_types[mesh_idx]
             
-            # Create random DNA
-            seed = int(rng.integers(0, 2**31))
-            if is_tree:
-                dna = PlantDNA.create_random(PlantType.TREE, seed)
+            # Create DNA - use real DNA if available, otherwise random
+            if real_dnas and rng.random() < 0.3:
+                # Use real DNA parameters (30% chance)
+                real_dna = real_dnas[int(rng.integers(0, len(real_dnas)))]
+                
+                # Map to our mesh type based on plant_type
+                pt = real_dna.get('plant_type', 'tree').lower()
+                if 'fern' in pt:
+                    mesh_type = 'fern'
+                elif 'mushroom' in pt:
+                    mesh_type = 'mushroom'
+                elif 'bush' in pt or 'shrub' in pt:
+                    mesh_type = 'bush'
+                elif 'umbrella' in str(real_dna.get('canopy_shape', '')).lower():
+                    mesh_type = 'tree_umbrella'
+                elif 'dome' in str(real_dna.get('canopy_shape', '')).lower():
+                    mesh_type = 'tree_dome'
+                else:
+                    mesh_type = 'tree_cone'
+                
+                # Create DNA from real data
+                plant_type = PlantType.TREE
+                if mesh_type == 'bush':
+                    plant_type = PlantType.BUSH
+                elif mesh_type == 'fern':
+                    plant_type = PlantType.FERN
+                elif mesh_type == 'mushroom':
+                    plant_type = PlantType.MUSHROOM
+                
+                seed = real_dna.get('species_id', int(rng.integers(0, 2**31)))
+                dna = PlantDNA.create_random(plant_type, seed)
+                
+                # Apply real DNA parameters
+                if 'trunk_segments' in real_dna and real_dna['trunk_segments']:
+                    seg = real_dna['trunk_segments'][0]
+                    dna.trunk_segments[0].curve = seg.get('curve', 0)
+                    dna.trunk_segments[0].twist = seg.get('twist', 0)
+                    dna.trunk_segments[0].taper = seg.get('taper', 0.8)
+                
+                if 'height_gene' in real_dna:
+                    dna.height_gene.value = real_dna['height_gene'].get('value', 1.0)
+                
+                if 'leaf_color' in real_dna:
+                    lc = real_dna['leaf_color']
+                    dna.leaf_color.r = lc.get('r', 0.3)
+                    dna.leaf_color.g = lc.get('g', 0.6)
+                    dna.leaf_color.b = lc.get('b', 0.2)
+                
+                dna.droop = real_dna.get('droop', 0.0)
             else:
-                dna = PlantDNA.create_random(PlantType.BUSH, seed)
-            
-            # Mutate for variety
-            dna = dna.mutate(rng, strength=0.5)
+                # Create random DNA
+                plant_type = PlantType.TREE
+                if mesh_type == 'bush':
+                    plant_type = PlantType.BUSH
+                elif mesh_type == 'fern':
+                    plant_type = PlantType.FERN
+                elif mesh_type == 'mushroom':
+                    plant_type = PlantType.MUSHROOM
+                
+                seed = int(rng.integers(0, 2**31))
+                dna = PlantDNA.create_random(plant_type, seed)
+                
+                # Mutate for variety
+                dna = dna.mutate(rng, strength=0.6)
             
             # Position in grid
             x = (gx - GRID_SIZE/2) * SPACING
@@ -572,11 +877,11 @@ def run_test_grid():
             
             test_plants.append({
                 'x': x, 'y': 0, 'z': z,
-                'scale': 2.0 + rng.random(),
+                'scale': 2.0 + rng.random() * 1.5,
                 'rotation': rng.random() * math.pi * 2,
                 'color': color,
                 'dna': dna,
-                'is_tree': is_tree
+                'mesh_type': mesh_type
             })
     
     print(f"Generated {len(test_plants)} test plants")
@@ -651,18 +956,12 @@ def run_test_grid():
         # Add all plant instances
         renderer.clear_instances()
         for plant in test_plants:
-            if plant['is_tree']:
-                renderer.add_tree_instance(
-                    plant['x'], plant['y'], plant['z'],
-                    plant['scale'], plant['rotation'],
-                    plant['color'], plant['dna']
-                )
-            else:
-                renderer.add_bush_instance(
-                    plant['x'], plant['y'], plant['z'],
-                    plant['scale'], plant['rotation'],
-                    plant['color'], plant['dna']
-                )
+            renderer.add_instance(
+                plant['mesh_type'],
+                plant['x'], plant['y'], plant['z'],
+                plant['scale'], plant['rotation'],
+                plant['color'], plant['dna']
+            )
         
         renderer.render()
         
