@@ -1072,6 +1072,471 @@ def create_flower_mesh() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     )
 
 
+def create_oak_mesh() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Create a majestic oak - thick trunk with massive rounded canopy."""
+    all_verts = []
+    all_norms = []
+    all_cols = []
+    
+    # Thick gnarly trunk
+    v, n, c = create_trunk_mesh(height=0.5, radius=0.12)
+    all_verts.extend(v)
+    all_norms.extend(n)
+    all_cols.extend(c)
+    
+    # Many branches with dense leaves
+    v, n, c = create_recursive_branches(trunk_height=0.5, count=10, max_depth=3, seed=7777)
+    all_verts.extend(v)
+    all_norms.extend(n)
+    all_cols.extend(c)
+    
+    # Massive dome canopy - multiple overlapping spheres
+    foliage_color = (1.0, 1.0, 1.0)
+    
+    # Main central dome
+    v, n, c = create_dome_canopy(base_y=0.4, height=0.6, radius=0.6)
+    all_verts.extend(v)
+    all_norms.extend(n)
+    all_cols.extend(c)
+    
+    # Extra side lobes for that oak look
+    for offset_angle in [0, 1.5, 3.0, 4.5]:
+        ox = math.cos(offset_angle) * 0.25
+        oz = math.sin(offset_angle) * 0.25
+        # Create smaller satellite domes
+        rings = 4
+        segments = 8
+        lobe_r = 0.3
+        lobe_h = 0.35
+        base_y = 0.45
+        
+        for ring in range(rings):
+            phi1 = (ring / rings) * (math.pi / 2)
+            phi2 = ((ring + 1) / rings) * (math.pi / 2)
+            y1 = base_y + math.sin(phi1) * lobe_h
+            r1 = math.cos(phi1) * lobe_r
+            y2 = base_y + math.sin(phi2) * lobe_h
+            r2 = math.cos(phi2) * lobe_r
+            
+            for seg in range(segments):
+                theta1 = (seg / segments) * 2 * math.pi
+                theta2 = ((seg + 1) / segments) * 2 * math.pi
+                
+                x1a = ox + math.cos(theta1) * r1
+                z1a = oz + math.sin(theta1) * r1
+                x2a = ox + math.cos(theta2) * r1
+                z2a = oz + math.sin(theta2) * r1
+                x1b = ox + math.cos(theta1) * r2
+                z1b = oz + math.sin(theta1) * r2
+                x2b = ox + math.cos(theta2) * r2
+                z2b = oz + math.sin(theta2) * r2
+                
+                n = (math.cos(theta1), 0.5, math.sin(theta1))
+                all_verts.extend([(x1a, y1, z1a), (x2a, y1, z2a), (x1b, y2, z1b)])
+                all_norms.extend([n] * 3)
+                all_cols.extend([foliage_color] * 3)
+                all_verts.extend([(x2a, y1, z2a), (x2b, y2, z2b), (x1b, y2, z1b)])
+                all_norms.extend([n] * 3)
+                all_cols.extend([foliage_color] * 3)
+    
+    return (
+        np.array(all_verts, dtype='f4'),
+        np.array(all_norms, dtype='f4'),
+        np.array(all_cols, dtype='f4')
+    )
+
+
+def create_birch_mesh() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Create a birch - thin white trunk with delicate canopy."""
+    all_verts = []
+    all_norms = []
+    all_cols = []
+    
+    # Thin white trunk (color will be applied, but we mark it distinctly)
+    trunk_color = (0.9, 0.88, 0.8)  # Birch white
+    segments = 6
+    rings = 8
+    height = 0.7
+    radius = 0.03  # Very thin
+    
+    for ring in range(rings):
+        t1 = ring / rings
+        t2 = (ring + 1) / rings
+        y1 = t1 * height
+        y2 = t2 * height
+        
+        for seg in range(segments):
+            a1 = (seg / segments) * 2 * math.pi
+            a2 = ((seg + 1) / segments) * 2 * math.pi
+            
+            x1 = math.cos(a1) * radius
+            z1 = math.sin(a1) * radius
+            x2 = math.cos(a2) * radius
+            z2 = math.sin(a2) * radius
+            
+            # Add characteristic birch "marks" via slight color variation
+            mark = 0.85 + 0.1 * math.sin(ring * 3)
+            col = (trunk_color[0] * mark, trunk_color[1] * mark, trunk_color[2] * mark)
+            
+            n = (math.cos(a1), 0, math.sin(a1))
+            all_verts.extend([(x1, y1, z1), (x2, y1, z2), (x1, y2, z1)])
+            all_norms.extend([n] * 3)
+            all_cols.extend([col] * 3)
+            all_verts.extend([(x2, y1, z2), (x2, y2, z2), (x1, y2, z1)])
+            all_norms.extend([n] * 3)
+            all_cols.extend([col] * 3)
+    
+    # Delicate feathery branches
+    v, n, c = create_recursive_branches(trunk_height=0.7, count=6, max_depth=2, seed=2222)
+    all_verts.extend(v)
+    all_norms.extend(n)
+    all_cols.extend(c)
+    
+    # Light, airy canopy
+    v, n, c = create_dome_canopy(base_y=0.5, height=0.35, radius=0.35)
+    all_verts.extend(v)
+    all_norms.extend(n)
+    all_cols.extend(c)
+    
+    return (
+        np.array(all_verts, dtype='f4'),
+        np.array(all_norms, dtype='f4'),
+        np.array(all_cols, dtype='f4')
+    )
+
+
+def create_baobab_mesh() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Create a baobab - massive thick trunk with small canopy."""
+    all_verts = []
+    all_norms = []
+    all_cols = []
+    
+    # MASSIVE trunk - the signature of baobab
+    trunk_color = (0.55, 0.4, 0.3)
+    segments = 10
+    rings = 6
+    height = 0.6
+    base_radius = 0.25  # Very thick at base
+    top_radius = 0.12   # Narrows at top
+    
+    for ring in range(rings):
+        t1 = ring / rings
+        t2 = (ring + 1) / rings
+        y1 = t1 * height
+        y2 = t2 * height
+        r1 = base_radius * (1 - t1 * 0.5)  # Tapers
+        r2 = base_radius * (1 - t2 * 0.5)
+        
+        # Add bulge in the middle (characteristic baobab shape)
+        bulge1 = 1.0 + 0.15 * math.sin(t1 * math.pi)
+        bulge2 = 1.0 + 0.15 * math.sin(t2 * math.pi)
+        r1 *= bulge1
+        r2 *= bulge2
+        
+        for seg in range(segments):
+            a1 = (seg / segments) * 2 * math.pi
+            a2 = ((seg + 1) / segments) * 2 * math.pi
+            
+            x1a = math.cos(a1) * r1
+            z1a = math.sin(a1) * r1
+            x2a = math.cos(a2) * r1
+            z2a = math.sin(a2) * r1
+            x1b = math.cos(a1) * r2
+            z1b = math.sin(a1) * r2
+            x2b = math.cos(a2) * r2
+            z2b = math.sin(a2) * r2
+            
+            n = (math.cos(a1), 0, math.sin(a1))
+            all_verts.extend([(x1a, y1, z1a), (x2a, y1, z2a), (x1b, y2, z1b)])
+            all_norms.extend([n] * 3)
+            all_cols.extend([trunk_color] * 3)
+            all_verts.extend([(x2a, y1, z2a), (x2b, y2, z2b), (x1b, y2, z1b)])
+            all_norms.extend([n] * 3)
+            all_cols.extend([trunk_color] * 3)
+    
+    # Stubby branches reaching up
+    branch_color = (0.5, 0.35, 0.25)
+    for b in range(6):
+        angle = (b / 6) * 2 * math.pi
+        bx = math.cos(angle) * 0.15
+        bz = math.sin(angle) * 0.15
+        
+        # Short thick branch
+        for seg in range(4):
+            a = (seg / 4) * 2 * math.pi
+            r = 0.03
+            all_verts.extend([
+                (bx, height, bz),
+                (bx + math.cos(a) * r, height + 0.12, bz + math.sin(a) * r),
+                (bx + math.cos(angle) * 0.1, height + 0.15, bz + math.sin(angle) * 0.1)
+            ])
+            all_norms.extend([(0, 1, 0)] * 3)
+            all_cols.extend([branch_color] * 3)
+    
+    # Small canopy (baobabs are sparse on top)
+    foliage_color = (1.0, 1.0, 1.0)
+    v, n, c = create_dome_canopy(base_y=height + 0.1, height=0.2, radius=0.25)
+    all_verts.extend(v)
+    all_norms.extend(n)
+    all_cols.extend(c)
+    
+    return (
+        np.array(all_verts, dtype='f4'),
+        np.array(all_norms, dtype='f4'),
+        np.array(all_cols, dtype='f4')
+    )
+
+
+def create_pine_mesh() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Create a tall pine - straight trunk with layered cone branches."""
+    all_verts = []
+    all_norms = []
+    all_cols = []
+    
+    # Tall straight trunk
+    v, n, c = create_trunk_mesh(height=0.7, radius=0.05)
+    all_verts.extend(v)
+    all_norms.extend(n)
+    all_cols.extend(c)
+    
+    # Layered cone canopy (classic pine shape)
+    foliage_color = (1.0, 1.0, 1.0)
+    layers = 5
+    segments = 10
+    
+    for layer in range(layers):
+        layer_t = layer / layers
+        base_y = 0.25 + layer_t * 0.65
+        layer_r = 0.4 * (1 - layer_t * 0.8)  # Shrinks toward top
+        tip_y = base_y + 0.15
+        
+        for seg in range(segments):
+            a1 = (seg / segments) * 2 * math.pi
+            a2 = ((seg + 1) / segments) * 2 * math.pi
+            
+            x1 = math.cos(a1) * layer_r
+            z1 = math.sin(a1) * layer_r
+            x2 = math.cos(a2) * layer_r
+            z2 = math.sin(a2) * layer_r
+            
+            # Cone layer pointing up
+            all_verts.extend([(x1, base_y, z1), (x2, base_y, z2), (0, tip_y, 0)])
+            n = (0, 0.6, 0.4)
+            all_norms.extend([n] * 3)
+            all_cols.extend([foliage_color] * 3)
+    
+    return (
+        np.array(all_verts, dtype='f4'),
+        np.array(all_norms, dtype='f4'),
+        np.array(all_cols, dtype='f4')
+    )
+
+
+def create_cypress_mesh() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Create a cypress - tall narrow columnar shape."""
+    all_verts = []
+    all_norms = []
+    all_cols = []
+    
+    foliage_color = (1.0, 1.0, 1.0)
+    height = 1.0
+    segments = 10
+    rings = 12
+    
+    # Columnar shape - narrow at base and top, slight bulge in middle
+    for ring in range(rings):
+        t1 = ring / rings
+        t2 = (ring + 1) / rings
+        y1 = t1 * height
+        y2 = t2 * height
+        
+        # Slight bulge profile
+        r1 = 0.1 + 0.05 * math.sin(t1 * math.pi)
+        r2 = 0.1 + 0.05 * math.sin(t2 * math.pi)
+        
+        for seg in range(segments):
+            a1 = (seg / segments) * 2 * math.pi
+            a2 = ((seg + 1) / segments) * 2 * math.pi
+            
+            x1a = math.cos(a1) * r1
+            z1a = math.sin(a1) * r1
+            x2a = math.cos(a2) * r1
+            z2a = math.sin(a2) * r1
+            x1b = math.cos(a1) * r2
+            z1b = math.sin(a1) * r2
+            x2b = math.cos(a2) * r2
+            z2b = math.sin(a2) * r2
+            
+            n = (math.cos(a1), 0, math.sin(a1))
+            all_verts.extend([(x1a, y1, z1a), (x2a, y1, z2a), (x1b, y2, z1b)])
+            all_norms.extend([n] * 3)
+            all_cols.extend([foliage_color] * 3)
+            all_verts.extend([(x2a, y1, z2a), (x2b, y2, z2b), (x1b, y2, z1b)])
+            all_norms.extend([n] * 3)
+            all_cols.extend([foliage_color] * 3)
+    
+    # Pointed top
+    for seg in range(segments):
+        a1 = (seg / segments) * 2 * math.pi
+        a2 = ((seg + 1) / segments) * 2 * math.pi
+        
+        x1 = math.cos(a1) * 0.08
+        z1 = math.sin(a1) * 0.08
+        x2 = math.cos(a2) * 0.08
+        z2 = math.sin(a2) * 0.08
+        
+        all_verts.extend([(x1, height, z1), (x2, height, z2), (0, height + 0.15, 0)])
+        all_norms.extend([(0, 1, 0)] * 3)
+        all_cols.extend([foliage_color] * 3)
+    
+    return (
+        np.array(all_verts, dtype='f4'),
+        np.array(all_norms, dtype='f4'),
+        np.array(all_cols, dtype='f4')
+    )
+
+
+def create_maple_mesh() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Create a maple - horizontal layered branches with full canopy."""
+    all_verts = []
+    all_norms = []
+    all_cols = []
+    
+    # Medium trunk
+    v, n, c = create_trunk_mesh(height=0.45, radius=0.07)
+    all_verts.extend(v)
+    all_norms.extend(n)
+    all_cols.extend(c)
+    
+    # Horizontal branches spreading out
+    v, n, c = create_recursive_branches(trunk_height=0.45, count=8, max_depth=2, seed=5555)
+    all_verts.extend(v)
+    all_norms.extend(n)
+    all_cols.extend(c)
+    
+    # Full rounded canopy with horizontal layers
+    foliage_color = (1.0, 1.0, 1.0)
+    layers = 3
+    
+    for layer in range(layers):
+        layer_y = 0.35 + layer * 0.15
+        layer_r = 0.45 - layer * 0.1
+        
+        # Each layer is a flat disc with scalloped edges
+        v, n, c = create_umbrella_canopy(base_y=layer_y, height=0.1, radius=layer_r)
+        all_verts.extend(v)
+        all_norms.extend(n)
+        all_cols.extend(c)
+    
+    # Top dome
+    v, n, c = create_dome_canopy(base_y=0.6, height=0.3, radius=0.35)
+    all_verts.extend(v)
+    all_norms.extend(n)
+    all_cols.extend(c)
+    
+    return (
+        np.array(all_verts, dtype='f4'),
+        np.array(all_norms, dtype='f4'),
+        np.array(all_cols, dtype='f4')
+    )
+
+
+def create_bonsai_mesh() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Create a bonsai - twisted artistic trunk with cloud-like canopy puffs."""
+    all_verts = []
+    all_norms = []
+    all_cols = []
+    
+    trunk_color = (0.4, 0.28, 0.18)
+    foliage_color = (1.0, 1.0, 1.0)
+    
+    # Twisted trunk (S-curve)
+    segments = 6
+    rings = 10
+    
+    for ring in range(rings):
+        t1 = ring / rings
+        t2 = (ring + 1) / rings
+        y1 = t1 * 0.4
+        y2 = t2 * 0.4
+        
+        # S-curve offset
+        curve1 = math.sin(t1 * math.pi * 2) * 0.08
+        curve2 = math.sin(t2 * math.pi * 2) * 0.08
+        r1 = 0.04 * (1 - t1 * 0.5)
+        r2 = 0.04 * (1 - t2 * 0.5)
+        
+        for seg in range(segments):
+            a1 = (seg / segments) * 2 * math.pi
+            a2 = ((seg + 1) / segments) * 2 * math.pi
+            
+            x1a = curve1 + math.cos(a1) * r1
+            z1a = math.sin(a1) * r1
+            x2a = curve1 + math.cos(a2) * r1
+            z2a = math.sin(a2) * r1
+            x1b = curve2 + math.cos(a1) * r2
+            z1b = math.sin(a1) * r2
+            x2b = curve2 + math.cos(a2) * r2
+            z2b = math.sin(a2) * r2
+            
+            n = (math.cos(a1), 0, math.sin(a1))
+            all_verts.extend([(x1a, y1, z1a), (x2a, y1, z2a), (x1b, y2, z1b)])
+            all_norms.extend([n] * 3)
+            all_cols.extend([trunk_color] * 3)
+            all_verts.extend([(x2a, y1, z2a), (x2b, y2, z2b), (x1b, y2, z1b)])
+            all_norms.extend([n] * 3)
+            all_cols.extend([trunk_color] * 3)
+    
+    # Cloud puffs - small domes at branch tips
+    puff_positions = [
+        (0.15, 0.45, 0.0),
+        (-0.1, 0.5, 0.08),
+        (0.0, 0.55, -0.1),
+        (0.08, 0.4, 0.1),
+    ]
+    
+    for px, py, pz in puff_positions:
+        rings = 4
+        segs = 6
+        puff_r = 0.08
+        puff_h = 0.06
+        
+        for ring in range(rings):
+            phi1 = (ring / rings) * (math.pi / 2)
+            phi2 = ((ring + 1) / rings) * (math.pi / 2)
+            y1 = py + math.sin(phi1) * puff_h
+            r1 = math.cos(phi1) * puff_r
+            y2 = py + math.sin(phi2) * puff_h
+            r2 = math.cos(phi2) * puff_r
+            
+            for seg in range(segs):
+                theta1 = (seg / segs) * 2 * math.pi
+                theta2 = ((seg + 1) / segs) * 2 * math.pi
+                
+                x1a = px + math.cos(theta1) * r1
+                z1a = pz + math.sin(theta1) * r1
+                x2a = px + math.cos(theta2) * r1
+                z2a = pz + math.sin(theta2) * r1
+                x1b = px + math.cos(theta1) * r2
+                z1b = pz + math.sin(theta1) * r2
+                x2b = px + math.cos(theta2) * r2
+                z2b = pz + math.sin(theta2) * r2
+                
+                n = (math.cos(theta1), 0.5, math.sin(theta1))
+                all_verts.extend([(x1a, y1, z1a), (x2a, y1, z2a), (x1b, y2, z1b)])
+                all_norms.extend([n] * 3)
+                all_cols.extend([foliage_color] * 3)
+                all_verts.extend([(x2a, y1, z2a), (x2b, y2, z2b), (x1b, y2, z1b)])
+                all_norms.extend([n] * 3)
+                all_cols.extend([foliage_color] * 3)
+    
+    return (
+        np.array(all_verts, dtype='f4'),
+        np.array(all_norms, dtype='f4'),
+        np.array(all_cols, dtype='f4')
+    )
+
+
 # ============================================================================
 # DNA FLORA RENDERER
 # ============================================================================
@@ -1093,9 +1558,19 @@ class DNAFloraRenderer:
         
         # Create base meshes for different plant types
         self.meshes = {
+            # Classic trees
             'tree_cone': create_tree_base_mesh(),
             'tree_dome': create_dome_tree_mesh(),
             'tree_umbrella': create_umbrella_tree_mesh(),
+            # Full trees with dense canopies
+            'oak': create_oak_mesh(),
+            'birch': create_birch_mesh(),
+            'maple': create_maple_mesh(),
+            'pine': create_pine_mesh(),
+            'cypress': create_cypress_mesh(),
+            'baobab': create_baobab_mesh(),
+            'bonsai': create_bonsai_mesh(),
+            # Other plants
             'bush': create_bush_base_mesh(),
             'fern': create_fern_mesh(),
             'mushroom': create_mushroom_mesh(),
