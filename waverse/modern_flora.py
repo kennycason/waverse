@@ -2557,12 +2557,13 @@ class ModernFloraRenderer:
     
     def clear_instances(self):
         """Clear all pending instances."""
-        for key in self.pending_instances:
+        for key in list(self.pending_instances.keys()):
             self.pending_instances[key] = []
     
     def upload_instances(self):
         """Upload pending instances to GPU."""
-        for mesh_type, instances in self.pending_instances.items():
+        # Copy items to avoid dict modification during iteration
+        for mesh_type, instances in list(self.pending_instances.items()):
             if not instances:
                 continue
             
