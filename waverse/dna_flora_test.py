@@ -2238,7 +2238,7 @@ def run_evolution_mode():
                             'population': best_plant['population'],
                             'generation': best_plant['generation'],
                             'scale': best_plant['scale'],
-                            'plant_type': dna.plant_type.name if hasattr(dna, 'plant_type') else 'UNKNOWN',
+                            'plant_type': dna.plant_type.name if hasattr(dna.plant_type, 'name') else str(dna.plant_type) if hasattr(dna, 'plant_type') else 'UNKNOWN',
                             'species_id': dna.species_id,
                             'height': dna.height_gene.value if hasattr(dna.height_gene, 'value') else 1.0,
                             'width': dna.width_gene.value if hasattr(dna.width_gene, 'value') else 1.0,
