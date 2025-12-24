@@ -89,7 +89,7 @@ class MicroscopeView:
         # View state
         self.view_x = 25.0  # Center of view
         self.view_y = 25.0
-        self.zoom = 5.0     # Zoom level (higher = more zoomed in)
+        self.zoom = 0.5     # Zoom level (higher = more zoomed in) - start zoomed out
         
         # Animation
         self.time = 0.0
@@ -534,6 +534,7 @@ def run_microscope_demo():
     import pygame
     
     pygame.init()
+    pygame.joystick.init()
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MAJOR_VERSION, 3)
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MINOR_VERSION, 3)
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_PROFILE_MASK, pygame.GL_CONTEXT_PROFILE_CORE)
@@ -559,13 +560,21 @@ def run_microscope_demo():
     running = True
     paused = False
     
+    # Initialize joysticks
+    joysticks = []
+    for i in range(pygame.joystick.get_count()):
+        js = pygame.joystick.Joystick(i)
+        js.init()
+        joysticks.append(js)
+        print(f"Controller {i}: {js.get_name()}")
+    
     print("Controls:")
-    print("  WASD / Arrow keys: Pan view")
-    print("  Mouse wheel: Zoom")
-    print("  Space: Pause/unpause")
-    print("  Click: Select organism")
-    print("  R: Add random organism")
-    print("  ESC: Exit")
+    print("  WASD / Arrow keys / Left stick: Pan view")
+    print("  Mouse wheel / L2/R2 triggers: Zoom")
+    print("  Space / Start button: Pause/unpause")
+    print("  Click / A button: Select organism")
+    print("  R / Y button: Add random organism")
+    print("  ESC / B button: Exit")
     
     while running:
         dt = clock.tick(60) / 1000.0
@@ -593,6 +602,21 @@ def run_microscope_demo():
                     view.zoom_in()
                 elif event.button == 5:  # Scroll down
                     view.zoom_out()
+            elif event.type == pygame.JOYBUTTONDOWN:
+                # Controller button handling
+                if event.button == 0:  # A button - select at center
+                    org = view.select_at(640, 360)  # Center of screen
+                    if org:
+                        print(f"Selected: species={org.dna.species_id}, energy={org.energy:.1f}")
+                elif event.button == 1:  # B button - exit
+                    running = False
+                elif event.button == 3:  # Y button - add random
+                    dna = MicroDNA.create_random()
+                    view.world.add_organism(view.view_x, view.view_y, dna)
+                    print(f"Added organism. Total: {len(view.world.organisms)}")
+                elif event.button == 9:  # Start button - pause
+                    paused = not paused
+                    print("Paused" if paused else "Running")
         
         # Pan with keys
         keys = pygame.key.get_pressed()
@@ -605,6 +629,53 @@ def run_microscope_demo():
             view.pan(0, pan_speed)
         if keys[pygame.K_DOWN] or keys[pygame.K_s]:
             view.pan(0, -pan_speed)
+        
+        # Controller input
+        for js in joysticks:
+            # Left stick for panning
+            DEADZONE = 0.15
+            lx = js.get_axis(0)  # Left stick X
+            ly = js.get_axis(1)  # Left stick Y
+            
+            if abs(lx) > DEADZONE:
+                view.pan(lx * pan_speed, 0)
+            if abs(ly) > DEADZONE:
+                view.pan(0, -ly * pan_speed)  # Inverted Y
+            
+            # D-pad for panning
+            try:
+                hat = js.get_hat(0)
+                if hat[0] != 0:
+                    view.pan(hat[0] * pan_speed * 0.5, 0)
+                if hat[1] != 0:
+                    view.pan(0, hat[1] * pan_speed * 0.5)
+            except:
+                pass
+            
+            # Triggers for zoom (L2 = axis 4, R2 = axis 5 on most controllers)
+            try:
+                l2 = js.get_axis(4)  # L2 trigger (-1 to 1)
+                r2 = js.get_axis(5)  # R2 trigger (-1 to 1)
+                
+                # Normalize triggers (often -1 = released, 1 = pressed)
+                l2_pressed = (l2 + 1) / 2  # 0 to 1
+                r2_pressed = (r2 + 1) / 2  # 0 to 1
+                
+                if r2_pressed > 0.1:
+                    view.zoom_in(1.0 + r2_pressed * 0.05)
+                if l2_pressed > 0.1:
+                    view.zoom_out(1.0 + l2_pressed * 0.05)
+            except:
+                pass
+            
+            # Shoulder buttons for zoom (L1/R1)
+            try:
+                if js.get_button(4):  # L1
+                    view.zoom_out(1.02)
+                if js.get_button(5):  # R1
+                    view.zoom_in(1.02)
+            except:
+                pass
         
         # Update
         if not paused:
