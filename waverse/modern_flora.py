@@ -2418,7 +2418,7 @@ class ModernFloraRenderer:
         
         # DNA-generated mesh cache: species_id -> (verts, normals, colors)
         self._dna_mesh_cache: Dict[int, Tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
-        self._dna_mesh_cache_max = 200  # Limit cached DNA meshes
+        self._dna_mesh_cache_max = 50  # Reduced for memory safety
         
         # Pending instance data (before GPU upload)
         # Initialize with all mesh types from templates
@@ -2535,6 +2535,26 @@ class ModernFloraRenderer:
             (x, y, z, scale, rotation, color_r, color_g, color_b)
         )
     
+    def _cleanup_oldest_batches(self, keep_count: int):
+        """Remove oldest DNA batches to prevent memory explosion."""
+        # Get DNA batches (those starting with 'dna_')
+        dna_batch_keys = [k for k in self.batches.keys() if k.startswith('dna_')]
+        
+        # Remove oldest ones
+        to_remove = dna_batch_keys[:len(dna_batch_keys) - keep_count]
+        for key in to_remove:
+            batch = self.batches.pop(key, None)
+            if batch:
+                if batch.mesh_vbo:
+                    batch.mesh_vbo.release()
+                if batch.instance_vbo:
+                    batch.instance_vbo.release()
+                if batch.vao:
+                    batch.vao.release()
+            # Also clean from mesh_templates
+            self.mesh_templates.pop(key, None)
+            self.pending_instances.pop(key, None)
+    
     def clear_instances(self):
         """Clear all pending instances."""
         for key in self.pending_instances:
@@ -2565,6 +2585,10 @@ class ModernFloraRenderer:
                     vertex_count=vertex_count
                 )
                 self.batches[mesh_type] = batch
+                
+                # Limit total batches to prevent memory explosion
+                if len(self.batches) > 100:
+                    self._cleanup_oldest_batches(50)
             else:
                 batch = self.batches[mesh_type]
             
@@ -2572,16 +2596,12 @@ class ModernFloraRenderer:
             instance_count = len(instances)
             instance_data = np.array(instances, dtype='f4')
             
-            # OPTIMIZATION: Use buffer orphaning pattern
-            # Create new buffer BEFORE releasing old one - lets GPU driver handle async
-            new_instance_vbo = self.ctx.buffer(instance_data.tobytes())
-            
-            # Store old references for deferred cleanup
+            # Store old references for cleanup
             old_vbo = batch.instance_vbo
             old_vao = batch.vao
             
-            # Assign new buffer first
-            batch.instance_vbo = new_instance_vbo
+            # Create new instance buffer
+            batch.instance_vbo = self.ctx.buffer(instance_data.tobytes())
             batch.instance_count = instance_count
             
             # Create new VAO
@@ -2594,21 +2614,11 @@ class ModernFloraRenderer:
                 ]
             )
             
-            # Now release old resources (after new ones are ready)
+            # Release old resources
             if old_vbo:
                 old_vbo.release()
             if old_vao:
                 old_vao.release()
-            
-            # Create VAO
-            batch.vao = self.ctx.vertex_array(
-                self.program,
-                [
-                    (batch.mesh_vbo, '3f 3f 3f', 'in_position', 'in_normal', 'in_color'),
-                    (batch.instance_vbo, '3f 1f 1f 3f /i', 'in_instance_pos', 
-                     'in_instance_scale', 'in_instance_rot', 'in_instance_color'),
-                ]
-            )
     
     def set_wind(self, wind_dir: tuple, wind_strength: float, wind_time: float,
                   has_tornado: bool = False, tornado_center: tuple = (0, 0),
