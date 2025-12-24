@@ -593,6 +593,329 @@ def create_mushroom_mesh() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     )
 
 
+def create_palm_mesh() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Create a palm tree - tall trunk with fronds at top."""
+    all_verts = []
+    all_norms = []
+    all_cols = []
+    
+    # Tall thin trunk
+    v, n, c = create_trunk_mesh(height=0.8, radius=0.04)
+    all_verts.extend(v)
+    all_norms.extend(n)
+    all_cols.extend(c)
+    
+    # Palm fronds at top (like fern but higher)
+    foliage_color = (1.0, 1.0, 1.0)
+    frond_count = 7
+    frond_length = 0.4
+    base_y = 0.75
+    
+    for f in range(frond_count):
+        angle = (f / frond_count) * 2 * math.pi
+        
+        # Frond curves outward and droops
+        mid_x = math.cos(angle) * frond_length * 0.4
+        mid_z = math.sin(angle) * frond_length * 0.4
+        mid_y = base_y + 0.15
+        
+        end_x = math.cos(angle) * frond_length
+        end_z = math.sin(angle) * frond_length
+        end_y = base_y - 0.1  # Droops down
+        
+        perp_x = -math.sin(angle) * 0.06
+        perp_z = math.cos(angle) * 0.06
+        
+        all_verts.extend([
+            (0, base_y, 0),
+            (mid_x + perp_x, mid_y, mid_z + perp_z),
+            (mid_x - perp_x, mid_y, mid_z - perp_z)
+        ])
+        all_norms.extend([(0, 1, 0)] * 3)
+        all_cols.extend([foliage_color] * 3)
+        
+        all_verts.extend([
+            (mid_x, mid_y, mid_z),
+            (end_x + perp_x, end_y, end_z + perp_z),
+            (end_x - perp_x, end_y, end_z - perp_z)
+        ])
+        all_norms.extend([(0, 0.5, 0.5)] * 3)
+        all_cols.extend([foliage_color] * 3)
+    
+    return (
+        np.array(all_verts, dtype='f4'),
+        np.array(all_norms, dtype='f4'),
+        np.array(all_cols, dtype='f4')
+    )
+
+
+def create_willow_mesh() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Create a weeping willow - drooping branches."""
+    all_verts = []
+    all_norms = []
+    all_cols = []
+    
+    # Short thick trunk
+    v, n, c = create_trunk_mesh(height=0.4, radius=0.08)
+    all_verts.extend(v)
+    all_norms.extend(n)
+    all_cols.extend(c)
+    
+    # Cascading layers
+    foliage_color = (1.0, 1.0, 1.0)
+    layers = 4
+    segments = 12
+    
+    for layer in range(layers):
+        layer_y = 0.35 + layer * 0.12
+        layer_r = 0.35 - layer * 0.05
+        droop = 0.15 + layer * 0.08
+        
+        for seg in range(segments):
+            angle1 = (seg / segments) * 2 * math.pi
+            angle2 = ((seg + 1) / segments) * 2 * math.pi
+            
+            x1 = math.cos(angle1) * layer_r
+            z1 = math.sin(angle1) * layer_r
+            x2 = math.cos(angle2) * layer_r
+            z2 = math.sin(angle2) * layer_r
+            
+            # Triangle drooping down
+            all_verts.extend([
+                (0, layer_y, 0),
+                (x1, layer_y - droop, z1),
+                (x2, layer_y - droop, z2)
+            ])
+            all_norms.extend([(0, 0.3, 0.7)] * 3)
+            all_cols.extend([foliage_color] * 3)
+    
+    return (
+        np.array(all_verts, dtype='f4'),
+        np.array(all_norms, dtype='f4'),
+        np.array(all_cols, dtype='f4')
+    )
+
+
+def create_spiral_mesh() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Create a spiral plant - twisted upward growth."""
+    vertices = []
+    normals = []
+    colors = []
+    
+    foliage_color = (1.0, 1.0, 1.0)
+    turns = 3
+    segments = 24
+    height = 0.8
+    radius = 0.15
+    
+    for i in range(segments):
+        t = i / segments
+        next_t = (i + 1) / segments
+        
+        # Spiral path
+        angle = t * turns * 2 * math.pi
+        next_angle = next_t * turns * 2 * math.pi
+        
+        x1 = math.cos(angle) * radius * (1 - t * 0.5)
+        z1 = math.sin(angle) * radius * (1 - t * 0.5)
+        y1 = t * height
+        
+        x2 = math.cos(next_angle) * radius * (1 - next_t * 0.5)
+        z2 = math.sin(next_angle) * radius * (1 - next_t * 0.5)
+        y2 = next_t * height
+        
+        # Triangle strip
+        vertices.extend([
+            (0, y1, 0), (x1, y1, z1), (x2, y2, z2)
+        ])
+        normals.extend([(math.cos(angle), 0.5, math.sin(angle))] * 3)
+        colors.extend([foliage_color] * 3)
+    
+    return (
+        np.array(vertices, dtype='f4'),
+        np.array(normals, dtype='f4'),
+        np.array(colors, dtype='f4')
+    )
+
+
+def create_grass_mesh() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Create grass - simple blades."""
+    vertices = []
+    normals = []
+    colors = []
+    
+    foliage_color = (1.0, 1.0, 1.0)
+    blade_count = 5
+    
+    for b in range(blade_count):
+        angle = (b / blade_count) * 2 * math.pi + 0.3
+        offset = 0.03
+        
+        base_x = math.cos(angle) * offset
+        base_z = math.sin(angle) * offset
+        
+        # Blade curves outward
+        tip_x = math.cos(angle) * 0.1
+        tip_z = math.sin(angle) * 0.1
+        tip_y = 0.25 + (b % 3) * 0.05
+        
+        # Simple triangle blade
+        vertices.extend([
+            (base_x - 0.01, 0, base_z),
+            (base_x + 0.01, 0, base_z),
+            (tip_x, tip_y, tip_z)
+        ])
+        normals.extend([(0, 0.5, 0.5)] * 3)
+        colors.extend([foliage_color] * 3)
+    
+    return (
+        np.array(vertices, dtype='f4'),
+        np.array(normals, dtype='f4'),
+        np.array(colors, dtype='f4')
+    )
+
+
+def create_cactus_mesh() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Create a cactus - thick column with arms."""
+    all_verts = []
+    all_norms = []
+    all_cols = []
+    
+    cactus_color = (0.3, 0.6, 0.3)  # Green
+    
+    # Main column
+    segments = 8
+    height = 0.6
+    radius = 0.08
+    
+    for seg in range(segments):
+        angle1 = (seg / segments) * 2 * math.pi
+        angle2 = ((seg + 1) / segments) * 2 * math.pi
+        
+        x1 = math.cos(angle1) * radius
+        z1 = math.sin(angle1) * radius
+        x2 = math.cos(angle2) * radius
+        z2 = math.sin(angle2) * radius
+        
+        all_verts.extend([(x1, 0, z1), (x2, 0, z2), (x1, height, z1)])
+        all_norms.extend([(math.cos(angle1), 0, math.sin(angle1))] * 3)
+        all_cols.extend([cactus_color] * 3)
+        
+        all_verts.extend([(x2, 0, z2), (x2, height, z2), (x1, height, z1)])
+        all_norms.extend([(math.cos(angle2), 0, math.sin(angle2))] * 3)
+        all_cols.extend([cactus_color] * 3)
+    
+    # Top cap
+    for seg in range(segments):
+        angle1 = (seg / segments) * 2 * math.pi
+        angle2 = ((seg + 1) / segments) * 2 * math.pi
+        
+        x1 = math.cos(angle1) * radius
+        z1 = math.sin(angle1) * radius
+        x2 = math.cos(angle2) * radius
+        z2 = math.sin(angle2) * radius
+        
+        all_verts.extend([(x1, height, z1), (x2, height, z2), (0, height + 0.05, 0)])
+        all_norms.extend([(0, 1, 0)] * 3)
+        all_cols.extend([cactus_color] * 3)
+    
+    # Side arm
+    arm_base_y = height * 0.4
+    arm_length = 0.15
+    arm_radius = 0.04
+    
+    for seg in range(6):
+        angle1 = (seg / 6) * 2 * math.pi
+        angle2 = ((seg + 1) / 6) * 2 * math.pi
+        
+        # Arm going right
+        x1 = radius + math.sin(angle1) * arm_radius
+        z1 = math.cos(angle1) * arm_radius
+        x2 = radius + math.sin(angle2) * arm_radius
+        z2 = math.cos(angle2) * arm_radius
+        
+        all_verts.extend([
+            (x1, arm_base_y, z1),
+            (x2, arm_base_y, z2),
+            (radius + arm_length, arm_base_y + 0.15, 0)
+        ])
+        all_norms.extend([(1, 0.5, 0)] * 3)
+        all_cols.extend([cactus_color] * 3)
+    
+    return (
+        np.array(all_verts, dtype='f4'),
+        np.array(all_norms, dtype='f4'),
+        np.array(all_cols, dtype='f4')
+    )
+
+
+def create_flower_mesh() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Create a flower - stem with petals."""
+    all_verts = []
+    all_norms = []
+    all_cols = []
+    
+    stem_color = (0.2, 0.5, 0.2)
+    petal_color = (1.0, 1.0, 1.0)  # Tinted by instance
+    center_color = (0.9, 0.7, 0.2)  # Yellow center
+    
+    # Thin stem
+    stem_height = 0.3
+    stem_radius = 0.01
+    segments = 6
+    
+    for seg in range(segments):
+        angle1 = (seg / segments) * 2 * math.pi
+        angle2 = ((seg + 1) / segments) * 2 * math.pi
+        
+        x1 = math.cos(angle1) * stem_radius
+        z1 = math.sin(angle1) * stem_radius
+        x2 = math.cos(angle2) * stem_radius
+        z2 = math.sin(angle2) * stem_radius
+        
+        all_verts.extend([(x1, 0, z1), (x2, 0, z2), (x1, stem_height, z1)])
+        all_norms.extend([(0, 1, 0)] * 3)
+        all_cols.extend([stem_color] * 3)
+    
+    # Petals
+    petal_count = 6
+    petal_length = 0.08
+    
+    for p in range(petal_count):
+        angle = (p / petal_count) * 2 * math.pi
+        
+        px = math.cos(angle) * petal_length
+        pz = math.sin(angle) * petal_length
+        
+        all_verts.extend([
+            (0, stem_height, 0),
+            (px, stem_height + 0.02, pz),
+            (px * 0.5, stem_height + 0.04, pz * 0.5)
+        ])
+        all_norms.extend([(0, 1, 0)] * 3)
+        all_cols.extend([petal_color] * 3)
+    
+    # Center
+    for seg in range(segments):
+        angle1 = (seg / segments) * 2 * math.pi
+        angle2 = ((seg + 1) / segments) * 2 * math.pi
+        
+        x1 = math.cos(angle1) * 0.02
+        z1 = math.sin(angle1) * 0.02
+        x2 = math.cos(angle2) * 0.02
+        z2 = math.sin(angle2) * 0.02
+        
+        all_verts.extend([(x1, stem_height, z1), (x2, stem_height, z2), (0, stem_height + 0.03, 0)])
+        all_norms.extend([(0, 1, 0)] * 3)
+        all_cols.extend([center_color] * 3)
+    
+    return (
+        np.array(all_verts, dtype='f4'),
+        np.array(all_norms, dtype='f4'),
+        np.array(all_cols, dtype='f4')
+    )
+
+
 # ============================================================================
 # DNA FLORA RENDERER
 # ============================================================================
@@ -620,6 +943,12 @@ class DNAFloraRenderer:
             'bush': create_bush_base_mesh(),
             'fern': create_fern_mesh(),
             'mushroom': create_mushroom_mesh(),
+            'palm': create_palm_mesh(),
+            'willow': create_willow_mesh(),
+            'spiral': create_spiral_mesh(),
+            'grass': create_grass_mesh(),
+            'cactus': create_cactus_mesh(),
+            'flower': create_flower_mesh(),
         }
         
         # Create VBOs for each mesh type
@@ -765,15 +1094,19 @@ def run_test_grid():
     # Create renderer
     renderer = DNAFloraRenderer(ctx)
     
-    # Camera state - start further back to see the whole grid
-    cam_x, cam_y, cam_z = 0, 12, 35
-    cam_yaw, cam_pitch = 0, -15
+    # Camera state - start further back and higher to see the whole grid
+    cam_x, cam_y, cam_z = 0, 25, 50
+    cam_yaw, cam_pitch = 0, -25
+    
+    # FPS tracking
+    fps_history = []
+    last_fps_print = 0
     
     # Generate test DNA grid with variety of plant types
     rng = np.random.default_rng(42)  # Fixed seed for reproducibility
     
-    GRID_SIZE = 16  # 16x16 grid = 256 plants!
-    SPACING = 3.0   # 3 units between plants
+    GRID_SIZE = 24  # 24x24 grid = 576 plants!
+    SPACING = 2.5   # 2.5 units between plants (denser)
     
     # Load real DNA from backup files if available
     import os
@@ -792,8 +1125,13 @@ def run_test_grid():
                     pass
     print(f"Loaded {len(real_dnas)} real DNA samples from logs")
     
-    # Mesh types to cycle through
-    mesh_types = ['tree_cone', 'tree_dome', 'tree_umbrella', 'bush', 'fern', 'mushroom']
+    # Mesh types to cycle through - all 12 types!
+    mesh_types = [
+        'tree_cone', 'tree_dome', 'tree_umbrella', 
+        'bush', 'fern', 'mushroom',
+        'palm', 'willow', 'spiral',
+        'grass', 'cactus', 'flower'
+    ]
     
     test_plants = []
     
@@ -907,14 +1245,22 @@ def run_test_grid():
                 if event.key == K_q or event.key == K_ESCAPE:
                     running = False
                 elif event.key == K_p:
-                    # Take screenshot
+                    # Take screenshot from OpenGL framebuffer
                     import os
                     from datetime import datetime
+                    from PIL import Image
+                    
                     screenshot_dir = os.path.expanduser("~/.waverse/screenshots")
                     os.makedirs(screenshot_dir, exist_ok=True)
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                     filename = f"{screenshot_dir}/flora_test_{timestamp}.png"
-                    pygame.image.save(pygame.display.get_surface(), filename)
+                    
+                    # Read pixels from OpenGL framebuffer
+                    pixels = ctx.fbo.read(components=3)
+                    img = Image.frombytes('RGB', (WIDTH, HEIGHT), pixels)
+                    img = img.transpose(Image.FLIP_TOP_BOTTOM)  # OpenGL is upside down
+                    img.save(filename)
+                    
                     screenshot_count += 1
                     print(f"Saved: {filename}")
         
@@ -993,6 +1339,20 @@ def run_test_grid():
         renderer.render()
         
         pygame.display.flip()
+        
+        # FPS tracking
+        fps = clock.get_fps()
+        fps_history.append(fps)
+        if len(fps_history) > 60:
+            fps_history.pop(0)
+        
+        import time
+        now = time.time()
+        if now - last_fps_print > 2.0:  # Print every 2 seconds
+            avg_fps = sum(fps_history) / len(fps_history) if fps_history else 0
+            mesh_count = sum(len(instances) for instances in renderer.instances.values())
+            print(f"FPS: {avg_fps:.1f} | Plants: {mesh_count} | Draw calls: {len(renderer.meshes)}")
+            last_fps_print = now
     
     pygame.quit()
 
