@@ -43,7 +43,8 @@ from .sky import SkySystem
 from .animals import AnimalManager
 from .chunk_worker import ChunkWorker
 from .microscope_view import MicroscopeView
-from .micro_life import MicroDNA, MICRO_TEMPLATES
+from . import micro_life
+from .micro_life import MicroDNA, MICRO_TEMPLATES, TERRAIN_POPULATIONS
 
 
 # =============================================================================
@@ -1249,38 +1250,49 @@ def populate_microscope_world(world, terrain_type: str):
         world: MicroscopeWorld instance to populate
         terrain_type: "water", "plant", or "ground"
     """
-    # Different organisms for different terrains
-    if terrain_type == "water":
-        # Aquatic microbes - algae, paramecium, bacteria
-        templates = [
-            ("algae", 8),
-            ("paramecium", 5),
-            ("bacteria", 15),
-        ]
-    elif terrain_type == "plant":
-        # Plant surface - mostly bacteria, some algae
-        templates = [
-            ("bacteria", 20),
-            ("algae", 3),
-        ]
-    else:  # ground
-        # Soil microbes - bacteria, amoeba
-        templates = [
-            ("bacteria", 18),
-            ("amoeba", 5),
-        ]
+    import random
     
-    # Add organisms
-    for template_name, count in templates:
+    # Get terrain-specific population from micro_life.py
+    population = TERRAIN_POPULATIONS.get(terrain_type, TERRAIN_POPULATIONS["ground"])
+    
+    # Add organisms based on population counts
+    total = 0
+    for template_name, count in population.items():
         template_func = MICRO_TEMPLATES.get(template_name)
         if template_func:
-            for _ in range(count):
-                dna = template_func()
+            for i in range(count):
+                # Pass unique seed for variety
+                dna = template_func(seed=random.randint(0, 999999))
                 x = world.rng.random() * world.width
                 y = world.rng.random() * world.height
                 world.add_organism(x, y, dna)
+                total += 1
     
-    print(f"  [MICRO] Populated world with {len(world.organisms)} organisms for {terrain_type}")
+    # Add some floating debris/particles (non-living)
+    num_debris = random.randint(20, 40)
+    for _ in range(num_debris):
+        # Create tiny static "organic debris" particles
+        debris_dna = MicroDNA(
+            species_id=random.randint(0, 999999),
+            base_size=0.05 + random.random() * 0.15,
+            membrane=micro_life.MembranGene(
+                shape="circle",
+                color=(0.6 + random.random() * 0.2,
+                       0.55 + random.random() * 0.2,
+                       0.4 + random.random() * 0.2),
+                transparency=0.5 + random.random() * 0.3,
+            ),
+            organelles=[],  # No internal structure - just debris
+            movement=micro_life.MovementGene(
+                pattern=micro_life.MovementPattern.DRIFT,
+                speed=0.02,
+            ),
+        )
+        x = world.rng.random() * world.width
+        y = world.rng.random() * world.height
+        world.add_organism(x, y, debris_dna)
+    
+    print(f"  [MICRO] Populated world with {total} organisms + {num_debris} debris for {terrain_type}")
 
 
 def _set_terrain_height_at_world_pos(chunk_manager, world_x, world_z, delta, modified_chunks):
