@@ -30,6 +30,12 @@ try:
 except ImportError:
     PIL_AVAILABLE = False
 
+# Import DNA geometry system
+from .dna_geometry import (
+    GeometryBuilder, GeometrySegment,
+    plant_dna_to_geometry, animal_dna_to_geometry
+)
+
 
 # =============================================================================
 # SHADERS
@@ -1548,10 +1554,10 @@ class ModernHUDRenderer:
         self._draw_preview_texture(x, y, w, h)
     
     def _render_3d_to_framebuffer(self, dna_data: Dict, is_plant: bool):
-        """Render the entity's 3D geometry to the preview framebuffer."""
+        """Render the entity's 3D geometry to the preview framebuffer using DNA geometry system."""
         # Bind framebuffer
         self._preview_fbo.use()
-        self._preview_fbo.clear(0.15, 0.15, 0.2, 1.0)  # Dark background
+        self._preview_fbo.clear(0.12, 0.12, 0.18, 1.0)  # Dark background
         
         # Enable depth testing
         self.ctx.enable(moderngl.DEPTH_TEST)
@@ -1559,28 +1565,31 @@ class ModernHUDRenderer:
         # Get the actual DNA dict
         entity_dna = dna_data.get('dna', dna_data)
         
-        # Calculate camera distance based on entity size
-        base_scale = float(entity_dna.get('base_scale', 1.0))
-        
-        # Calculate actual entity bounds for proper camera distance
+        # Convert DNA to geometry using the new system
         if is_plant:
-            height_gene = entity_dna.get('height_gene', {})
-            height_val = height_gene.get('value', 1.0) if isinstance(height_gene, dict) else 1.0
-            entity_size = float(height_val) * 1.5
+            geometry_root = plant_dna_to_geometry(entity_dna)
         else:
-            # For animals, calculate from body segments
-            body_segments = entity_dna.get('body_segments', [])
-            total_length = 0.0
-            max_height = 0.0
-            for seg in body_segments:
-                size = seg.get('size', [0.3, 0.3, 0.3])
-                if isinstance(size, (list, tuple)):
-                    total_length += float(size[0]) if len(size) > 0 else 0.3
-                    max_height = max(max_height, float(size[1]) if len(size) > 1 else 0.3)
-            entity_size = max(total_length, max_height) * base_scale
+            geometry_root = animal_dna_to_geometry(entity_dna)
+        
+        # Build mesh from geometry tree
+        verts, norms, colors = GeometryBuilder.build_mesh(geometry_root)
+        
+        # Calculate bounding box for camera positioning
+        if len(verts) > 0:
+            min_y = min(v[1] for v in verts)
+            max_y = max(v[1] for v in verts)
+            max_x = max(abs(v[0]) for v in verts)
+            max_z = max(abs(v[2]) for v in verts)
+            entity_height = max_y - min_y
+            entity_width = max(max_x, max_z) * 2
+            entity_size = max(entity_height, entity_width)
+            center_y = (min_y + max_y) / 2
+        else:
+            entity_size = 1.0
+            center_y = 0.0
         
         # Camera distance: enough to see the whole entity
-        cam_distance = max(1.5, entity_size * 2.0)
+        cam_distance = max(2.0, entity_size * 1.8)
         
         # Set up projection (perspective)
         aspect = 1.0  # Square framebuffer
@@ -1589,10 +1598,10 @@ class ModernHUDRenderer:
         # Set up view (camera orbiting around entity)
         eye_x = math.sin(self._preview_rotation) * cam_distance
         eye_z = math.cos(self._preview_rotation) * cam_distance
-        eye_y = cam_distance * 0.4  # Slightly above
+        eye_y = center_y + cam_distance * 0.3  # Look at center
         view = glm.lookAt(
             glm.vec3(eye_x, eye_y, eye_z),
-            glm.vec3(0, 0, 0),
+            glm.vec3(0, center_y, 0),  # Look at vertical center
             glm.vec3(0, 1, 0)
         )
         
@@ -1602,14 +1611,42 @@ class ModernHUDRenderer:
         self._preview_program['u_light_dir'].value = (0.5, 1.0, 0.3)
         self._preview_program['u_ambient'].value = (0.4, 0.4, 0.5)
         
-        if is_plant:
-            self._render_plant_3d(entity_dna)
-        else:
-            self._render_animal_3d(entity_dna)
+        # Render the DNA-generated mesh
+        self._render_dna_mesh(verts, norms, colors)
         
         # Restore default framebuffer
         self.ctx.screen.use()
         self.ctx.disable(moderngl.DEPTH_TEST)
+    
+    def _render_dna_mesh(self, verts: np.ndarray, norms: np.ndarray, colors: np.ndarray):
+        """Render a mesh generated from DNA geometry."""
+        if len(verts) == 0:
+            return
+        
+        # Interleave vertex data: position (3) + normal (3) + color (3)
+        vertex_count = len(verts)
+        mesh_data = np.zeros((vertex_count, 9), dtype='f4')
+        mesh_data[:, 0:3] = verts
+        mesh_data[:, 3:6] = norms
+        mesh_data[:, 6:9] = colors
+        
+        # Create temporary buffer and VAO
+        vbo = self.ctx.buffer(mesh_data.tobytes())
+        vao = self.ctx.vertex_array(
+            self._preview_program,
+            [(vbo, '3f 3f 3f', 'in_position', 'in_normal', 'in_color')]
+        )
+        
+        # Set model matrix (identity - geometry is already positioned)
+        model = glm.mat4(1.0)
+        self._preview_program['u_model'].write(model)
+        
+        # Render
+        vao.render(moderngl.TRIANGLES)
+        
+        # Cleanup
+        vao.release()
+        vbo.release()
     
     def _render_animal_3d(self, dna: Dict):
         """Render animal body segments as 3D shapes."""
