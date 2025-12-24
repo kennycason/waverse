@@ -97,6 +97,10 @@ class MicroscopeView:
         # Selected organism for DNA sampling
         self.selected: Optional[Microorganism] = None
         
+        # Terrain type and tint color
+        self.terrain_type = "water"
+        self.terrain_tint = (0.1, 0.2, 0.3, 0.15)  # RGBA tint overlay
+        
         # Create shader program
         self.program = ctx.program(
             vertex_shader=MICRO_VERTEX_SHADER,
@@ -116,6 +120,39 @@ class MicroscopeView:
         
         # Set up projection matrix (2D orthographic)
         self._update_projection()
+    
+    def set_terrain(self, terrain_type: str):
+        """Set the terrain type and update tint color."""
+        self.terrain_type = terrain_type
+        
+        # Set background and tint based on terrain
+        if terrain_type == "water":
+            self.bg_color = (0.02, 0.05, 0.12)
+            self.terrain_tint = (0.1, 0.3, 0.5, 0.12)  # Blue tint
+        elif terrain_type == "plant":
+            self.bg_color = (0.03, 0.08, 0.04)
+            self.terrain_tint = (0.2, 0.5, 0.2, 0.1)   # Green tint
+        else:  # ground
+            self.bg_color = (0.06, 0.05, 0.03)
+            self.terrain_tint = (0.4, 0.3, 0.2, 0.1)   # Brown tint
+    
+    def get_organism_at_cursor(self) -> Optional[Microorganism]:
+        """Get the organism at the center of the view (cursor position)."""
+        # Find organism closest to view center
+        closest = None
+        closest_dist = float('inf')
+        
+        for org in self.world.organisms:
+            dx = org.x - self.view_x
+            dy = org.y - self.view_y
+            dist = math.sqrt(dx*dx + dy*dy)
+            
+            # Check if within organism bounds
+            if dist < org.dna.base_size * 1.5 and dist < closest_dist:
+                closest = org
+                closest_dist = dist
+        
+        return closest
     
     def _update_projection(self):
         """Update the projection matrix based on view."""
@@ -227,7 +264,7 @@ class MicroscopeView:
         if self.selected:
             self._add_selection_highlight(vertices, self.selected)
         
-        # Upload and render
+        # Upload and render world content
         if vertices:
             data = np.array(vertices, dtype='f4').tobytes()
             
@@ -244,6 +281,9 @@ class MicroscopeView:
             
             self.vbo.write(data)
             self.vao.render(moderngl.TRIANGLES, vertices=len(vertices) // 6)
+        
+        # Render HUD elements (in screen space)
+        self._render_hud()
     
     def _add_background_particles(self, vertices: List):
         """Add floating particles in the background."""
@@ -388,6 +428,145 @@ class MicroscopeView:
         
         # Ring
         self._add_ring_simple(vertices, x, y, size, size * 1.1, 24, color)
+    
+    def _render_hud(self):
+        """Render HUD elements: minimap, crosshair, terrain tint."""
+        # Switch to screen-space projection
+        screen_proj = np.array([
+            [2.0 / self.width, 0, 0, -1],
+            [0, 2.0 / self.height, 0, -1],
+            [0, 0, -1, 0],
+            [0, 0, 0, 1],
+        ], dtype='f4')
+        
+        self.program['u_projection'].write(screen_proj.tobytes())
+        self.program['u_offset'].value = (0, 0)
+        self.program['u_scale'].value = 1.0
+        
+        hud_vertices = []
+        
+        # --- Terrain tint overlay (very subtle) ---
+        tint = self.terrain_tint
+        # Full screen quad with low alpha
+        hud_vertices.extend([0, 0, *tint])
+        hud_vertices.extend([self.width, 0, *tint])
+        hud_vertices.extend([self.width, self.height, *tint])
+        hud_vertices.extend([0, 0, *tint])
+        hud_vertices.extend([self.width, self.height, *tint])
+        hud_vertices.extend([0, self.height, *tint])
+        
+        # --- Crosshair in center ---
+        cx, cy = self.width / 2, self.height / 2
+        crosshair_size = 15
+        crosshair_thick = 2
+        crosshair_color = (1.0, 1.0, 1.0, 0.7)
+        
+        # Horizontal line
+        hud_vertices.extend([cx - crosshair_size, cy - crosshair_thick/2, *crosshair_color])
+        hud_vertices.extend([cx + crosshair_size, cy - crosshair_thick/2, *crosshair_color])
+        hud_vertices.extend([cx + crosshair_size, cy + crosshair_thick/2, *crosshair_color])
+        hud_vertices.extend([cx - crosshair_size, cy - crosshair_thick/2, *crosshair_color])
+        hud_vertices.extend([cx + crosshair_size, cy + crosshair_thick/2, *crosshair_color])
+        hud_vertices.extend([cx - crosshair_size, cy + crosshair_thick/2, *crosshair_color])
+        
+        # Vertical line
+        hud_vertices.extend([cx - crosshair_thick/2, cy - crosshair_size, *crosshair_color])
+        hud_vertices.extend([cx + crosshair_thick/2, cy - crosshair_size, *crosshair_color])
+        hud_vertices.extend([cx + crosshair_thick/2, cy + crosshair_size, *crosshair_color])
+        hud_vertices.extend([cx - crosshair_thick/2, cy - crosshair_size, *crosshair_color])
+        hud_vertices.extend([cx + crosshair_thick/2, cy + crosshair_size, *crosshair_color])
+        hud_vertices.extend([cx - crosshair_thick/2, cy + crosshair_size, *crosshair_color])
+        
+        # Center gap (dark)
+        gap_size = 4
+        gap_color = (0.0, 0.0, 0.0, 0.5)
+        hud_vertices.extend([cx - gap_size, cy - gap_size, *gap_color])
+        hud_vertices.extend([cx + gap_size, cy - gap_size, *gap_color])
+        hud_vertices.extend([cx + gap_size, cy + gap_size, *gap_color])
+        hud_vertices.extend([cx - gap_size, cy - gap_size, *gap_color])
+        hud_vertices.extend([cx + gap_size, cy + gap_size, *gap_color])
+        hud_vertices.extend([cx - gap_size, cy + gap_size, *gap_color])
+        
+        # --- Mini-map in top-right corner ---
+        map_size = 100
+        map_margin = 15
+        map_x = self.width - map_size - map_margin
+        map_y = self.height - map_size - map_margin
+        
+        # Map background (semi-transparent)
+        map_bg_color = (*self.bg_color, 0.6)
+        hud_vertices.extend([map_x, map_y, *map_bg_color])
+        hud_vertices.extend([map_x + map_size, map_y, *map_bg_color])
+        hud_vertices.extend([map_x + map_size, map_y + map_size, *map_bg_color])
+        hud_vertices.extend([map_x, map_y, *map_bg_color])
+        hud_vertices.extend([map_x + map_size, map_y + map_size, *map_bg_color])
+        hud_vertices.extend([map_x, map_y + map_size, *map_bg_color])
+        
+        # Map border
+        border_color = (0.5, 0.6, 0.7, 0.8)
+        border_thick = 2
+        # Top
+        hud_vertices.extend([map_x, map_y + map_size - border_thick, *border_color])
+        hud_vertices.extend([map_x + map_size, map_y + map_size - border_thick, *border_color])
+        hud_vertices.extend([map_x + map_size, map_y + map_size, *border_color])
+        hud_vertices.extend([map_x, map_y + map_size - border_thick, *border_color])
+        hud_vertices.extend([map_x + map_size, map_y + map_size, *border_color])
+        hud_vertices.extend([map_x, map_y + map_size, *border_color])
+        # Bottom
+        hud_vertices.extend([map_x, map_y, *border_color])
+        hud_vertices.extend([map_x + map_size, map_y, *border_color])
+        hud_vertices.extend([map_x + map_size, map_y + border_thick, *border_color])
+        hud_vertices.extend([map_x, map_y, *border_color])
+        hud_vertices.extend([map_x + map_size, map_y + border_thick, *border_color])
+        hud_vertices.extend([map_x, map_y + border_thick, *border_color])
+        # Left
+        hud_vertices.extend([map_x, map_y, *border_color])
+        hud_vertices.extend([map_x + border_thick, map_y, *border_color])
+        hud_vertices.extend([map_x + border_thick, map_y + map_size, *border_color])
+        hud_vertices.extend([map_x, map_y, *border_color])
+        hud_vertices.extend([map_x + border_thick, map_y + map_size, *border_color])
+        hud_vertices.extend([map_x, map_y + map_size, *border_color])
+        # Right
+        hud_vertices.extend([map_x + map_size - border_thick, map_y, *border_color])
+        hud_vertices.extend([map_x + map_size, map_y, *border_color])
+        hud_vertices.extend([map_x + map_size, map_y + map_size, *border_color])
+        hud_vertices.extend([map_x + map_size - border_thick, map_y, *border_color])
+        hud_vertices.extend([map_x + map_size, map_y + map_size, *border_color])
+        hud_vertices.extend([map_x + map_size - border_thick, map_y + map_size, *border_color])
+        
+        # Organism dots on minimap
+        for org in self.world.organisms:
+            # Map world position to minimap position
+            ox = map_x + (org.x / self.world.width) * map_size
+            oy = map_y + (org.y / self.world.height) * map_size
+            dot_size = 2
+            dot_color = (*org.dna.membrane.color, 0.7)
+            
+            hud_vertices.extend([ox - dot_size, oy - dot_size, *dot_color])
+            hud_vertices.extend([ox + dot_size, oy - dot_size, *dot_color])
+            hud_vertices.extend([ox + dot_size, oy + dot_size, *dot_color])
+            hud_vertices.extend([ox - dot_size, oy - dot_size, *dot_color])
+            hud_vertices.extend([ox + dot_size, oy + dot_size, *dot_color])
+            hud_vertices.extend([ox - dot_size, oy + dot_size, *dot_color])
+        
+        # Current view position indicator (bright dot)
+        view_dot_x = map_x + (self.view_x / self.world.width) * map_size
+        view_dot_y = map_y + (self.view_y / self.world.height) * map_size
+        view_dot_size = 4
+        view_dot_color = (1.0, 1.0, 1.0, 1.0)
+        
+        hud_vertices.extend([view_dot_x - view_dot_size, view_dot_y - view_dot_size, *view_dot_color])
+        hud_vertices.extend([view_dot_x + view_dot_size, view_dot_y - view_dot_size, *view_dot_color])
+        hud_vertices.extend([view_dot_x + view_dot_size, view_dot_y + view_dot_size, *view_dot_color])
+        hud_vertices.extend([view_dot_x - view_dot_size, view_dot_y - view_dot_size, *view_dot_color])
+        hud_vertices.extend([view_dot_x + view_dot_size, view_dot_y + view_dot_size, *view_dot_color])
+        hud_vertices.extend([view_dot_x - view_dot_size, view_dot_y + view_dot_size, *view_dot_color])
+        
+        # Upload and render HUD
+        if hud_vertices:
+            data = np.array(hud_vertices, dtype='f4').tobytes()
+            self.vbo.write(data)
+            self.vao.render(moderngl.TRIANGLES, vertices=len(hud_vertices) // 6)
     
     # === PRIMITIVE HELPERS ===
     

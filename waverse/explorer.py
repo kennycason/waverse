@@ -1295,6 +1295,99 @@ def populate_microscope_world(world, terrain_type: str):
     print(f"  [MICRO] Populated world with {total} organisms + {num_debris} debris for {terrain_type}")
 
 
+def scan_microorganism_at_cursor(camera, modern_renderer):
+    """Scan and log the DNA of a microorganism at the microscope cursor.
+    
+    Similar to scanning plants/animals but for microorganisms.
+    """
+    import json
+    import os
+    from datetime import datetime
+    
+    if not modern_renderer or not hasattr(modern_renderer, 'microscope_view'):
+        camera.set_status("No microscope view", 1.5)
+        return None
+    
+    microscope = modern_renderer.microscope_view
+    org = microscope.get_organism_at_cursor()
+    
+    if org is None:
+        camera.set_status("No organism at cursor", 1.5)
+        return None
+    
+    dna = org.dna
+    
+    # Build DNA data for saving
+    dna_data = {
+        "type": "microorganism",
+        "species_id": dna.species_id,
+        "generation": dna.generation,
+        "base_size": float(dna.base_size),
+        "terrain": camera.microscope_terrain_type,
+        "membrane": {
+            "shape": dna.membrane.shape,
+            "color": list(dna.membrane.color),
+            "has_wall": dna.membrane.has_wall,
+            "transparency": float(dna.membrane.transparency),
+        },
+        "organelles": [
+            {
+                "type": o.organelle_type.name,
+                "count": int(o.count),
+                "size": float(o.size),
+                "color": list(o.color),
+            }
+            for o in dna.organelles
+        ],
+        "movement": {
+            "pattern": dna.movement.pattern.name,
+            "speed": float(dna.movement.speed),
+        },
+        "metabolism": {
+            "is_predator": dna.metabolism.is_predator,
+            "is_photosynthetic": dna.metabolism.is_photosynthetic,
+        },
+        "glow": float(dna.glow),
+        "timestamp": datetime.now().isoformat(),
+    }
+    
+    # Save to ~/.waverse/dna_logs/
+    log_dir = os.path.expanduser("~/.waverse/dna_logs")
+    os.makedirs(log_dir, exist_ok=True)
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"micro_dna_{timestamp}.json"
+    filepath = os.path.join(log_dir, filename)
+    
+    try:
+        with open(filepath, 'w') as f:
+            json.dump(dna_data, f, indent=2)
+        
+        # Get organism "name" based on movement pattern and features
+        org_type = "Microbe"
+        if dna.metabolism.is_photosynthetic:
+            org_type = "Algae"
+        elif dna.metabolism.is_predator:
+            org_type = "Predator"
+        elif dna.membrane.has_wall:
+            org_type = "Bacteria"
+        elif dna.membrane.shape == "amoeba":
+            org_type = "Amoeba"
+        
+        camera.set_status(f"SCANNED: {org_type} (species {dna.species_id})", 2.5)
+        print(f"  [MICRO SCAN] Logged {org_type} DNA to {filename}")
+        
+        # Select the scanned organism for visual feedback
+        microscope.selected = org
+        
+        return filepath
+        
+    except Exception as e:
+        print(f"  [MICRO SCAN] Error saving DNA: {e}")
+        camera.set_status("Error saving DNA", 1.5)
+        return None
+
+
 def _set_terrain_height_at_world_pos(chunk_manager, world_x, world_z, delta, modified_chunks):
     """Set terrain height at a world position, updating ALL chunks that share this vertex.
     
@@ -5298,15 +5391,20 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                     elif camera.current_tool == ToolType.CUT:
                         cut_tree_at_cursor(camera, flora_manager, chunk_manager, dropped_items, debris_particles, modern_renderer, fallen_trees)
                     elif camera.current_tool == ToolType.MICRO:
-                        # Activate microscope view - sample what's at cursor
-                        terrain_type = get_terrain_type_at_cursor(camera, chunk_manager, flora_manager)
-                        camera.microscope_active = True
-                        camera.microscope_terrain_type = terrain_type
-                        # Initialize microscope world with organisms based on terrain
-                        if modern_renderer and hasattr(modern_renderer, 'microscope_view'):
-                            modern_renderer.microscope_view.world.clear()
-                            populate_microscope_world(modern_renderer.microscope_view.world, terrain_type)
-                        camera.set_status(f"Microscope: viewing {terrain_type} life")
+                        if camera.microscope_active:
+                            # Already in microscope - scan organism at cursor
+                            scan_microorganism_at_cursor(camera, modern_renderer)
+                        else:
+                            # Activate microscope view - sample what's at cursor
+                            terrain_type = get_terrain_type_at_cursor(camera, chunk_manager, flora_manager)
+                            camera.microscope_active = True
+                            camera.microscope_terrain_type = terrain_type
+                            # Initialize microscope world with organisms based on terrain
+                            if modern_renderer and hasattr(modern_renderer, 'microscope_view'):
+                                modern_renderer.microscope_view.world.clear()
+                                modern_renderer.microscope_view.set_terrain(terrain_type)
+                                populate_microscope_world(modern_renderer.microscope_view.world, terrain_type)
+                            camera.set_status(f"Microscope: viewing {terrain_type} life")
                 elif event.key == pygame.K_t:  # T = cycle tool radius (for MINE/FILL)
                     if camera.current_tool in (ToolType.MINE, ToolType.FILL):
                         camera.cycle_tool_radius()
@@ -5649,14 +5747,19 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                     elif camera.current_tool == ToolType.CUT:
                         cut_tree_at_cursor(camera, flora_manager, chunk_manager, dropped_items, debris_particles, modern_renderer, fallen_trees)
                     elif camera.current_tool == ToolType.MICRO:
-                        # Activate microscope view
-                        terrain_type = get_terrain_type_at_cursor(camera, chunk_manager, flora_manager)
-                        camera.microscope_active = True
-                        camera.microscope_terrain_type = terrain_type
-                        if modern_renderer and hasattr(modern_renderer, 'microscope_view'):
-                            modern_renderer.microscope_view.world.clear()
-                            populate_microscope_world(modern_renderer.microscope_view.world, terrain_type)
-                        camera.set_status(f"Microscope: viewing {terrain_type} life")
+                        if camera.microscope_active:
+                            # Already in microscope - scan organism at cursor
+                            scan_microorganism_at_cursor(camera, modern_renderer)
+                        else:
+                            # Activate microscope view
+                            terrain_type = get_terrain_type_at_cursor(camera, chunk_manager, flora_manager)
+                            camera.microscope_active = True
+                            camera.microscope_terrain_type = terrain_type
+                            if modern_renderer and hasattr(modern_renderer, 'microscope_view'):
+                                modern_renderer.microscope_view.world.clear()
+                                modern_renderer.microscope_view.set_terrain(terrain_type)
+                                populate_microscope_world(modern_renderer.microscope_view.world, terrain_type)
+                            camera.set_status(f"Microscope: viewing {terrain_type} life")
                     gamepad_speed_cooldown = 15
             
             # DPAD = Tool cycling (left/right) and tool radius (up/down)
