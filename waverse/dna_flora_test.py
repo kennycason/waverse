@@ -2150,6 +2150,7 @@ def run_evolution_mode():
     print("Controls:")
     print("  WASD - Move (follows camera)   IJKL - Look (do loops!)")
     print("  Space/H - Up   Shift/F - Down   P - Screenshot   Q - Quit")
+    print("  LEFT CLICK - Save plant DNA to seed folder!")
     print("=" * 60)
     
     clock = pygame.time.Clock()
@@ -2157,6 +2158,13 @@ def run_evolution_mode():
     fps_history = []
     last_fps_print = 0
     screenshot_count = 0
+    selected_plant = None  # For highlighting
+    
+    # DNA seed folder
+    import os
+    import json
+    seed_dir = os.path.expanduser("~/.waverse/dna_seeds")
+    os.makedirs(seed_dir, exist_ok=True)
     
     while running:
         dt = clock.tick(60) / 1000.0
@@ -2164,11 +2172,116 @@ def run_evolution_mode():
         for event in pygame.event.get():
             if event.type == QUIT:
                 running = False
+            elif event.type == MOUSEBUTTONDOWN:
+                if event.button == 1:  # Left click - select and save plant
+                    mouse_x, mouse_y = event.pos
+                    
+                    # Convert mouse position to normalized device coords
+                    ndc_x = (2.0 * mouse_x / WIDTH) - 1.0
+                    ndc_y = 1.0 - (2.0 * mouse_y / HEIGHT)
+                    
+                    # Build ray from camera
+                    yaw_r = math.radians(cam_yaw)
+                    pitch_r = math.radians(cam_pitch)
+                    
+                    # Camera forward direction
+                    cam_fwd = glm.vec3(
+                        -math.sin(yaw_r) * math.cos(pitch_r),
+                        math.sin(pitch_r),
+                        -math.cos(yaw_r) * math.cos(pitch_r)
+                    )
+                    cam_right = glm.normalize(glm.cross(cam_fwd, glm.vec3(0, 1, 0)))
+                    cam_up = glm.cross(cam_right, cam_fwd)
+                    
+                    # Ray direction (simple approximation)
+                    fov_factor = math.tan(math.radians(30))  # Half of 60 degree FOV
+                    aspect = WIDTH / HEIGHT
+                    ray_dir = glm.normalize(
+                        cam_fwd + cam_right * ndc_x * fov_factor * aspect + cam_up * ndc_y * fov_factor
+                    )
+                    
+                    # Find nearest plant to the ray
+                    best_plant = None
+                    best_dist = float('inf')
+                    cam_pos = glm.vec3(cam_x, cam_y, cam_z)
+                    
+                    for plant in plants:
+                        plant_pos = glm.vec3(plant['x'], plant['y'] + plant['scale'], plant['z'])
+                        to_plant = plant_pos - cam_pos
+                        
+                        # Project onto ray
+                        t = glm.dot(to_plant, ray_dir)
+                        if t > 0:  # Plant is in front
+                            closest_on_ray = cam_pos + ray_dir * t
+                            dist_to_ray = glm.length(plant_pos - closest_on_ray)
+                            dist_from_cam = glm.length(to_plant)
+                            
+                            # Scale threshold by distance (further = harder to click)
+                            threshold = 3.0 + dist_from_cam * 0.05
+                            
+                            if dist_to_ray < threshold and dist_from_cam < best_dist:
+                                best_plant = plant
+                                best_dist = dist_from_cam
+                    
+                    if best_plant:
+                        selected_plant = best_plant
+                        
+                        # Save DNA to seed folder
+                        from datetime import datetime
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        seed_file = f"{seed_dir}/seed_{best_plant['mesh_type']}_{timestamp}.json"
+                        
+                        # Serialize DNA
+                        dna = best_plant['dna']
+                        dna_dict = {
+                            'mesh_type': best_plant['mesh_type'],
+                            'population': best_plant['population'],
+                            'generation': best_plant['generation'],
+                            'scale': best_plant['scale'],
+                            'plant_type': dna.plant_type.name if hasattr(dna, 'plant_type') else 'UNKNOWN',
+                            'species_id': dna.species_id,
+                            'height': dna.height_gene.value if hasattr(dna.height_gene, 'value') else 1.0,
+                            'width': dna.width_gene.value if hasattr(dna.width_gene, 'value') else 1.0,
+                            'leaf_color': {
+                                'r': dna.leaf_color.r,
+                                'g': dna.leaf_color.g,
+                                'b': dna.leaf_color.b,
+                            },
+                            'trunk_color': {
+                                'r': dna.trunk_color.r,
+                                'g': dna.trunk_color.g,
+                                'b': dna.trunk_color.b,
+                            } if hasattr(dna, 'trunk_color') else None,
+                            'trunk_segments': [
+                                {
+                                    'length': seg.length,
+                                    'width': seg.width,
+                                    'curve': seg.curve,
+                                    'twist': seg.twist,
+                                    'taper': seg.taper,
+                                }
+                                for seg in (dna.trunk_segments or [])
+                            ],
+                            'branch_count': getattr(dna, 'branch_count', 0),
+                            'branch_angle': getattr(dna, 'branch_angle', 0),
+                            'droop': getattr(dna, 'droop', 0),
+                            'leaf_size': getattr(dna, 'leaf_size', 1.0),
+                            'canopy_spread': getattr(dna, 'canopy_spread', 1.0),
+                        }
+                        
+                        with open(seed_file, 'w') as f:
+                            json.dump(dna_dict, f, indent=2)
+                        
+                        print(f"🌱 SAVED DNA: {seed_file}")
+                        print(f"   Type: {best_plant['mesh_type']} | Pop: {best_plant['population']} | Gen: {best_plant['generation']}")
+                    else:
+                        selected_plant = None
+                        print("No plant at click location")
+                        
             elif event.type == KEYDOWN:
                 if event.key == K_q or event.key == K_ESCAPE:
                     running = False
                 elif event.key == K_p:
-                    import os
                     from datetime import datetime
                     from PIL import Image
                     
