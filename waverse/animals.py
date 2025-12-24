@@ -869,6 +869,18 @@ class AnimalManager:
         elif biome == 'swamp':
             # Lots of amphibians, insects, crocs
             num_animals = rng.integers(4, 9)
+        elif biome in ('ocean', 'underwater', 'coral_reef'):
+            # TEEMING with sea life!
+            num_animals = rng.integers(8, 15)
+        elif biome == 'meadow':
+            # Lots of insects and small creatures
+            num_animals = rng.integers(5, 10)
+        elif biome in ('forest', 'deciduous'):
+            # Rich woodland life
+            num_animals = rng.integers(4, 8)
+        elif biome == 'volcanic':
+            # Harsh but some life survives
+            num_animals = rng.integers(1, 4)
         else:
             # Default (grassland, etc.)
             num_animals = rng.integers(3, 7)
@@ -1280,6 +1292,56 @@ class AnimalManager:
                 dna.has_glow = True
                 dna.glow_color = (0.2, 0.05, 0.25)
                 dna.glow_intensity = 0.2
+            elif biome in ('ocean', 'underwater', 'coral_reef'):
+                # COLORFUL tropical fish! Vibrant reef colors
+                if rng.random() < 0.7:  # 70% colorful
+                    reef_colors = [
+                        (0.95, 0.5, 0.1),   # Orange clownfish
+                        (0.2, 0.6, 0.95),   # Blue tang
+                        (0.95, 0.95, 0.2),  # Yellow tang
+                        (0.9, 0.3, 0.5),    # Pink reef fish
+                        (0.4, 0.9, 0.5),    # Green reef fish
+                        (0.7, 0.2, 0.9),    # Purple reef fish
+                        (0.95, 0.1, 0.1),   # Red reef fish
+                        (0.1, 0.9, 0.9),    # Cyan reef fish
+                    ]
+                    c = reef_colors[int(rng.integers(0, len(reef_colors)))]
+                    dna.primary_color = c
+                    # Add random pattern stripes
+                    if rng.random() < 0.4:
+                        stripe = reef_colors[int(rng.integers(0, len(reef_colors)))]
+                        dna.secondary_color = stripe
+            elif biome == 'meadow':
+                # Natural colors - browns, greens, some colorful butterflies
+                if animal_type == AnimalType.MOTH or animal_type == AnimalType.INSECT:
+                    # Colorful butterflies!
+                    phase = rng.random() * 6.28
+                    dna.primary_color = (
+                        0.6 + 0.4 * np.sin(phase),
+                        0.5 + 0.5 * np.sin(phase + 1.5),
+                        0.5 + 0.5 * np.sin(phase + 3.0)
+                    )
+            elif biome == 'swamp':
+                # Muddy greens and browns
+                dna.primary_color = (
+                    0.3 + rng.random() * 0.2,
+                    0.35 + rng.random() * 0.2,
+                    0.15 + rng.random() * 0.1
+                )
+            elif biome in ('tundra', 'frozen'):
+                # White/pale arctic colors
+                dna.primary_color = (
+                    0.85 + rng.random() * 0.15,
+                    0.85 + rng.random() * 0.15,
+                    0.9 + rng.random() * 0.1
+                )
+            elif biome == 'volcanic':
+                # Dark grays and reds
+                dna.primary_color = (
+                    0.3 + rng.random() * 0.25,
+                    0.2 + rng.random() * 0.15,
+                    0.15 + rng.random() * 0.1
+                )
             
             # World position
             world_x = chunk_world_x + local_x * tile_scale
