@@ -886,16 +886,10 @@ def run_test_grid():
     
     print(f"Generated {len(test_plants)} test plants")
     print("Controls:")
-    print("  WASD - Move")
-    print("  Mouse - Look (Tab to release/capture)")
+    print("  WASD - Move, IJKL - Look")
     print("  Space/Shift - Up/Down")
     print("  P - Save screenshot")
     print("  Q/Escape - Quit")
-    
-    # Mouse capture state (start uncaptured so user can use system)
-    mouse_captured = False
-    pygame.mouse.set_visible(True)
-    pygame.event.set_grab(False)
     
     # Screenshot counter
     screenshot_count = 0
@@ -912,16 +906,6 @@ def run_test_grid():
             elif event.type == KEYDOWN:
                 if event.key == K_q or event.key == K_ESCAPE:
                     running = False
-                elif event.key == K_TAB:
-                    # Toggle mouse capture
-                    mouse_captured = not mouse_captured
-                    pygame.mouse.set_visible(not mouse_captured)
-                    pygame.event.set_grab(mouse_captured)
-                    if mouse_captured:
-                        pygame.mouse.get_rel()  # Clear accumulated movement
-                        print("Mouse captured - Tab to release")
-                    else:
-                        print("Mouse released - Tab to capture")
                 elif event.key == K_p:
                     # Take screenshot
                     import os
@@ -934,17 +918,22 @@ def run_test_grid():
                     screenshot_count += 1
                     print(f"Saved: {filename}")
         
-        # Mouse look (only when captured)
-        if mouse_captured:
-            mouse_dx, mouse_dy = pygame.mouse.get_rel()
-            cam_yaw -= mouse_dx * 0.2
-            cam_pitch -= mouse_dy * 0.2
-            cam_pitch = max(-89, min(89, cam_pitch))
-        else:
-            pygame.mouse.get_rel()  # Discard movement when not captured
+        # Keyboard input
+        keys = pygame.key.get_pressed()
+        
+        # Keyboard look (IJKL)
+        look_speed = 80 * dt  # Degrees per second
+        if keys[K_i]:
+            cam_pitch += look_speed
+        if keys[K_k]:
+            cam_pitch -= look_speed
+        if keys[K_j]:
+            cam_yaw += look_speed
+        if keys[K_l]:
+            cam_yaw -= look_speed
+        cam_pitch = max(-89, min(89, cam_pitch))
         
         # Keyboard movement
-        keys = pygame.key.get_pressed()
         move_speed = 10 * dt
         
         yaw_rad = math.radians(cam_yaw)
