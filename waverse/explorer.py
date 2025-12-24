@@ -991,7 +991,7 @@ def log_dna_at_cursor(camera, flora_manager, animal_manager):
         return None
 
 
-def cut_tree_at_cursor(camera, flora_manager, chunk_manager, dropped_items_list, debris_list=None):
+def cut_tree_at_cursor(camera, flora_manager, chunk_manager, dropped_items_list, debris_list=None, modern_renderer=None):
     """Cut down the nearest tree at the cursor (camera look direction).
     
     Creates dropped items (wood) that can be picked up.
@@ -1128,16 +1128,24 @@ def cut_tree_at_cursor(camera, flora_manager, chunk_manager, dropped_items_list,
             p for p in flora_manager.chunk_plants[best_plant_chunk] 
             if p is not best_plant
         ]
-        # Invalidate display list so it re-renders
+        # Invalidate display list so it re-renders (legacy)
         if best_plant_chunk in flora_manager.display_lists:
             del flora_manager.display_lists[best_plant_chunk]
+        # Invalidate modern renderer flora cache
+        if modern_renderer and hasattr(modern_renderer, 'flora'):
+            cx, cz = best_plant_chunk
+            if (cx, cz) in modern_renderer.loaded_flora_chunks:
+                modern_renderer.loaded_flora_chunks.discard((cx, cz))
+                # Clear the batch for this chunk type
+                modern_renderer.flora.clear_instances()
     
     plant_type = getattr(dna, 'plant_type', 'plant')
     if hasattr(plant_type, 'name'):
         plant_type = plant_type.name
     
     camera.set_status(f"CUT {plant_type} - {wood_count} wood!", 2.0)
-    print(f"  [CUT] Cut {plant_type} at ({best_plant.x:.1f}, {best_plant.z:.1f}) - {wood_count} logs, {num_debris if debris_list is not None else 0} debris")
+    print(f"  [CUT] Cut {plant_type} at ({best_plant.x:.1f}, {best_plant.z:.1f}) - {wood_count} logs")
+    print(f"        Dropped items: {len(dropped_items_list)}, Debris: {len(debris_list) if debris_list else 0}")
     
     return wood_count
 
@@ -5028,7 +5036,7 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                                 if USE_MODERN_RENDERER and modern_renderer:
                                     modern_renderer.invalidate_terrain_chunk(chunk_key[0], chunk_key[1])
                     elif camera.current_tool == ToolType.CUT:
-                        cut_tree_at_cursor(camera, flora_manager, chunk_manager, dropped_items, debris_particles)
+                        cut_tree_at_cursor(camera, flora_manager, chunk_manager, dropped_items, debris_particles, modern_renderer)
                 elif event.key == pygame.K_t:  # T = cycle tool radius (for MINE/FILL)
                     if camera.current_tool in (ToolType.MINE, ToolType.FILL):
                         camera.cycle_tool_radius()
@@ -5333,7 +5341,7 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                                 if USE_MODERN_RENDERER and modern_renderer:
                                     modern_renderer.invalidate_terrain_chunk(chunk_key[0], chunk_key[1])
                     elif camera.current_tool == ToolType.CUT:
-                        cut_tree_at_cursor(camera, flora_manager, chunk_manager, dropped_items, debris_particles)
+                        cut_tree_at_cursor(camera, flora_manager, chunk_manager, dropped_items, debris_particles, modern_renderer)
                     gamepad_speed_cooldown = 15
             
             # DPAD = Tool cycling (left/right) and tool radius (up/down)

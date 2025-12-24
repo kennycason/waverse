@@ -292,17 +292,17 @@ class ModernHUDRenderer:
     """
     
     # Available tools with descriptions
-    # First 3 match ToolType.ALL_TOOLS order: SCAN, MINE, FILL
+    # Matches ToolType.ALL_TOOLS order: SCAN, MINE, FILL, CUT
     TOOLS = [
         ('camera', 'SCAN', 'SCAN TOOL - ANALYZE AND LOG DNA OF PLANTS/ANIMALS'),
         ('pickaxe', 'MINE', 'MINE TOOL - DIG INTO TERRAIN AND LOWER GROUND'),
         ('shovel', 'FILL', 'FILL TOOL - RAISE TERRAIN AND BUILD UP GROUND'),
-        ('axe', 'CUT', 'CUT TOOL - HARVEST PLANTS AND TREES [COMING SOON]'),
+        ('axe', 'CUT', 'CUT TOOL - CHOP TREES FOR WOOD'),
         ('magnifier', 'ZOOM', 'ZOOM TOOL - INSPECT OBJECTS UP CLOSE [COMING SOON]'),
         ('microscope', 'MICRO', 'MICRO TOOL - VIEW CELLULAR DETAILS [COMING SOON]'),
     ]
     
-    INVENTORY_COLS = 2  # 2 columns for inventory grid
+    INVENTORY_COLS = 4  # 4 columns for inventory grid (square slots)
     
     def __init__(self, ctx: moderngl.Context, screen_width: int = 1920, screen_height: int = 1080):
         self.ctx = ctx
@@ -357,6 +357,7 @@ class ModernHUDRenderer:
         self.log_filter_names = ["ALL", "PLANTS", "ANIMALS"]
         self.favorites = set()  # Set of favorited log filenames
         self.inventory_index = 0  # Selected tool in inventory tab
+        self.inventory_items = []  # Actual inventory items from camera
         
         # PNG image cache for DNA log previews
         self._image_cache: Dict[str, moderngl.Texture] = {}
@@ -1195,65 +1196,105 @@ class ModernHUDRenderer:
     
     def _draw_inventory_tab(self, vertices: List, menu_x: float, content_y: float,
                              menu_w: float, content_h: float):
-        """Draw the INVENTORY tab content - shows available tools."""
-        # Header
+        """Draw the INVENTORY tab content - shows tools and collected items."""
+        # TOOLS SECTION
         self._draw_text(vertices, "TOOLS", menu_x + 20, content_y, 2.0, 0.4, 0.8, 1.0, 1.0)
-        content_y += 30
+        content_y += 28
         
-        # Tool grid - 2 columns
-        cols = 2
-        slot_w = (menu_w - 60) / cols
-        slot_h = 60
+        # Square slots for tools - 4 columns
+        cols = self.INVENTORY_COLS
+        slot_size = 55  # Square slots
+        padding = 8
         
-        # First 3 tools are implemented
-        num_implemented = 3
+        # First 4 tools are implemented (SCAN, MINE, FILL, CUT)
+        num_implemented = 4
         
         for i, (icon_name, label, description) in enumerate(self.TOOLS):
             col = i % cols
             row = i // cols
             
-            slot_x = menu_x + 20 + col * slot_w
-            slot_y = content_y + row * slot_h
+            slot_x = menu_x + 20 + col * (slot_size + padding)
+            slot_y = content_y + row * (slot_size + padding)
             
-            is_selected = (i == self.inventory_index)
+            is_selected = (self.inventory_index == i)
             is_equipped = (i == self.selected_tool)
             is_available = (i < num_implemented)
             
             # Slot background
             if is_selected:
-                # Selected item - bright highlight
                 if is_available:
-                    self._add_quad(vertices, slot_x, slot_y, slot_w - 10, slot_h - 8,
+                    self._add_quad(vertices, slot_x, slot_y, slot_size, slot_size,
                                   0, 0, 0, 0, 0.25, 0.4, 0.6, 0.9)
                 else:
-                    # Unavailable - dimmer selection
-                    self._add_quad(vertices, slot_x, slot_y, slot_w - 10, slot_h - 8,
+                    self._add_quad(vertices, slot_x, slot_y, slot_size, slot_size,
                                   0, 0, 0, 0, 0.2, 0.2, 0.25, 0.8)
             elif is_equipped:
-                # Currently equipped - subtle highlight
-                self._add_quad(vertices, slot_x, slot_y, slot_w - 10, slot_h - 8,
-                              0, 0, 0, 0, 0.15, 0.25, 0.15, 0.7)
-            
-            # Tool name - dim if unavailable
-            if is_available:
-                name_color = (1.0, 1.0, 1.0) if is_selected else (0.7, 0.7, 0.7)
+                self._add_quad(vertices, slot_x, slot_y, slot_size, slot_size,
+                              0, 0, 0, 0, 0.15, 0.3, 0.15, 0.8)
             else:
-                name_color = (0.5, 0.5, 0.5) if is_selected else (0.35, 0.35, 0.35)
-            self._draw_text(vertices, label, slot_x + 10, slot_y + 10, 2.2, *name_color, 1.0)
+                self._add_quad(vertices, slot_x, slot_y, slot_size, slot_size,
+                              0, 0, 0, 0, 0.1, 0.1, 0.12, 0.7)
             
-            # Status indicator
+            # Border
+            self._add_quad(vertices, slot_x, slot_y, slot_size, 2, 0, 0, 0, 0, 0.3, 0.3, 0.35, 0.8)
+            self._add_quad(vertices, slot_x, slot_y + slot_size - 2, slot_size, 2, 0, 0, 0, 0, 0.3, 0.3, 0.35, 0.8)
+            self._add_quad(vertices, slot_x, slot_y, 2, slot_size, 0, 0, 0, 0, 0.3, 0.3, 0.35, 0.8)
+            self._add_quad(vertices, slot_x + slot_size - 2, slot_y, 2, slot_size, 0, 0, 0, 0, 0.3, 0.3, 0.35, 0.8)
+            
+            # Tool name (abbreviated to fit square)
+            short_label = label[:4]
+            name_color = (1.0, 1.0, 1.0) if is_available else (0.4, 0.4, 0.4)
+            self._draw_text(vertices, short_label, slot_x + 6, slot_y + 20, 1.8, *name_color, 1.0)
+            
+            # Equipped indicator
             if is_equipped:
-                self._draw_text(vertices, "[EQUIPPED]", slot_x + 10, slot_y + 35, 1.3, 0.4, 0.9, 0.4, 1.0)
-            elif not is_available:
-                self._draw_text(vertices, "[COMING SOON]", slot_x + 10, slot_y + 35, 1.2, 0.5, 0.4, 0.3, 0.8)
-            else:
-                self._draw_text(vertices, "PRESS A TO EQUIP", slot_x + 10, slot_y + 35, 1.2, 0.5, 0.5, 0.5, 0.7)
+                self._draw_text(vertices, "[E]", slot_x + 6, slot_y + 38, 1.2, 0.4, 0.9, 0.4, 1.0)
+        
+        # RESOURCES SECTION
+        tools_rows = (len(self.TOOLS) + cols - 1) // cols
+        resources_y = content_y + tools_rows * (slot_size + padding) + 15
+        
+        self._draw_text(vertices, "RESOURCES", menu_x + 20, resources_y, 2.0, 0.8, 0.6, 0.3, 1.0)
+        resources_y += 28
+        
+        # Get actual inventory items (excluding tools)
+        resource_items = [item for item in self.inventory_items 
+                         if not item.item_type.startswith('tool:')]
+        
+        if not resource_items:
+            self._draw_text(vertices, "EMPTY", menu_x + 25, resources_y + 15, 1.5, 0.4, 0.4, 0.4, 0.8)
+        else:
+            for i, item in enumerate(resource_items[:8]):  # Max 8 resource slots shown
+                col = i % cols
+                row = i // cols
+                
+                slot_x = menu_x + 20 + col * (slot_size + padding)
+                slot_y = resources_y + row * (slot_size + padding)
+                
+                # Slot background
+                self._add_quad(vertices, slot_x, slot_y, slot_size, slot_size,
+                              0, 0, 0, 0, 0.12, 0.1, 0.08, 0.8)
+                
+                # Border
+                self._add_quad(vertices, slot_x, slot_y, slot_size, 2, 0, 0, 0, 0, 0.4, 0.3, 0.2, 0.8)
+                self._add_quad(vertices, slot_x, slot_y + slot_size - 2, slot_size, 2, 0, 0, 0, 0, 0.4, 0.3, 0.2, 0.8)
+                self._add_quad(vertices, slot_x, slot_y, 2, slot_size, 0, 0, 0, 0, 0.4, 0.3, 0.2, 0.8)
+                self._add_quad(vertices, slot_x + slot_size - 2, slot_y, 2, slot_size, 0, 0, 0, 0, 0.4, 0.3, 0.2, 0.8)
+                
+                # Item name
+                short_name = item.name[:5].upper()
+                self._draw_text(vertices, short_name, slot_x + 4, slot_y + 12, 1.5, 0.9, 0.8, 0.6, 1.0)
+                
+                # Count
+                if item.count > 1:
+                    count_str = f"x{item.count}"
+                    self._draw_text(vertices, count_str, slot_x + 4, slot_y + 32, 1.8, 1.0, 1.0, 0.8, 1.0)
         
         # Description area at bottom
-        desc_y = menu_y = content_y + ((len(self.TOOLS) + cols - 1) // cols) * slot_h + 20
+        desc_y = resources_y + 2 * (slot_size + padding) + 15
         
         # Description background
-        self._add_quad(vertices, menu_x + 15, desc_y, menu_w - 30, 50,
+        self._add_quad(vertices, menu_x + 15, desc_y, menu_w - 30, 45,
                       0, 0, 0, 0, 0.08, 0.08, 0.12, 0.9)
         
         # Description border
@@ -1263,7 +1304,7 @@ class ModernHUDRenderer:
         # Selected tool description
         if 0 <= self.inventory_index < len(self.TOOLS):
             _, label, description = self.TOOLS[self.inventory_index]
-            self._draw_text(vertices, description, menu_x + 25, desc_y + 18, 1.6, 0.9, 0.9, 0.7, 1.0)
+            self._draw_text(vertices, description, menu_x + 25, desc_y + 15, 1.4, 0.9, 0.9, 0.7, 1.0)
     
     def _draw_controls_tab(self, vertices: List, menu_x: float, content_y: float,
                            menu_w: float, content_h: float):
@@ -1344,6 +1385,12 @@ class ModernHUDRenderer:
         
         # Sync inventory selection
         self.inventory_index = camera.inventory_index if hasattr(camera, 'inventory_index') else 0
+        
+        # Sync actual inventory items
+        if hasattr(camera, 'inventory'):
+            self.inventory_items = list(camera.inventory)
+        else:
+            self.inventory_items = []
     
     def get_preview_info(self):
         """Get info needed for entity preview rendering.
