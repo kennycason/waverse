@@ -4427,12 +4427,18 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                             for chunk_key in modified_chunks:
                                 if chunk_key in chunk_renderer.display_lists:
                                     del chunk_renderer.display_lists[chunk_key]
+                                # Also invalidate modern renderer chunks
+                                if USE_MODERN_RENDERER and modern_renderer:
+                                    modern_renderer.invalidate_terrain_chunk(chunk_key[0], chunk_key[1])
                     elif camera.current_tool == ToolType.FILL:
                         modified_chunks = modify_terrain_at_cursor(camera, chunk_manager, "FILL", camera.tool_radius)
                         if modified_chunks:
                             for chunk_key in modified_chunks:
                                 if chunk_key in chunk_renderer.display_lists:
                                     del chunk_renderer.display_lists[chunk_key]
+                                # Also invalidate modern renderer chunks
+                                if USE_MODERN_RENDERER and modern_renderer:
+                                    modern_renderer.invalidate_terrain_chunk(chunk_key[0], chunk_key[1])
                 elif event.key == pygame.K_t:  # T = cycle tool radius (for MINE/FILL)
                     if camera.current_tool in (ToolType.MINE, ToolType.FILL):
                         camera.cycle_tool_radius()
@@ -4724,12 +4730,18 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                             for chunk_key in modified_chunks:
                                 if chunk_key in chunk_renderer.display_lists:
                                     del chunk_renderer.display_lists[chunk_key]
+                                # Also invalidate modern renderer chunks
+                                if USE_MODERN_RENDERER and modern_renderer:
+                                    modern_renderer.invalidate_terrain_chunk(chunk_key[0], chunk_key[1])
                     elif camera.current_tool == ToolType.FILL:
                         modified_chunks = modify_terrain_at_cursor(camera, chunk_manager, "FILL", camera.tool_radius)
                         if modified_chunks:
                             for chunk_key in modified_chunks:
                                 if chunk_key in chunk_renderer.display_lists:
                                     del chunk_renderer.display_lists[chunk_key]
+                                # Also invalidate modern renderer chunks
+                                if USE_MODERN_RENDERER and modern_renderer:
+                                    modern_renderer.invalidate_terrain_chunk(chunk_key[0], chunk_key[1])
                     gamepad_speed_cooldown = 15
             
             # DPAD = Tool cycling (left/right) and tool radius (up/down)

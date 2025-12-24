@@ -233,6 +233,17 @@ class ModernWorldRenderer:
             self.terrain.remove_chunk(cx, cz)
             self.loaded_terrain_chunks.discard(key)
     
+    def invalidate_terrain_chunk(self, cx: int, cz: int):
+        """Invalidate a terrain chunk so it gets regenerated with updated heightmap.
+        
+        Call this after modifying terrain (MINE/FILL).
+        """
+        key = (cx, cz)
+        if key in self.loaded_terrain_chunks:
+            self.terrain.remove_chunk(cx, cz)
+            self.loaded_terrain_chunks.discard(key)
+            # The chunk will be recreated on the next update_chunks_around_camera call
+    
     def load_flora_for_chunk(self, cx: int, cz: int, flora_manager: Any, 
                             chunk_manager: Any = None, cam_x: float = 0, cam_z: float = 0):
         """
