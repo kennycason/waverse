@@ -428,6 +428,24 @@ def plant_dna_to_geometry(dna: Any) -> GeometrySegment:
         canopy_shape = getattr(dna, 'canopy_shape', 'dome')
         canopy_spread = getattr(dna, 'canopy_spread', 1.0)
     
+    # Clamp to reasonable sizes for world rendering
+    # Different plant types have different max sizes
+    if plant_type in ('giant_tree', 'tall_tree', 'alien'):
+        max_height = 8.0  # Still notable but not absurd
+        max_width = 2.5
+    elif plant_type in ('tree', 'pine', 'oak'):
+        max_height = 5.0  # Normal tree height
+        max_width = 2.0
+    elif plant_type in ('bush', 'shrub', 'flower', 'grass', 'groundcover'):
+        max_height = 1.5  # Small plants
+        max_width = 1.0
+    else:
+        max_height = 4.0  # Default
+        max_width = 1.5
+    
+    height = min(height, max_height)
+    width = min(width, max_width)
+    
     # Build trunk segment
     trunk = GeometrySegment(
         shape="cylinder",

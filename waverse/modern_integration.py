@@ -299,13 +299,9 @@ class ModernWorldRenderer:
         
         # Use DNA-driven geometry if enabled
         if self.use_dna_geometry and dna:
-            # Get height from DNA for scale
-            height_gene = getattr(dna, 'height_gene', None)
-            if height_gene and hasattr(height_gene, 'value'):
-                scale = height_gene.value * base_scale
-                scale = max(0.5, min(50.0, scale))
-            else:
-                scale = base_scale * 3.0
+            # DNA geometry already includes height from DNA genes
+            # Just use base_scale (typically 1.0) to avoid double-scaling
+            scale = base_scale
             
             self.flora.add_instance_from_dna(dna, x, y, z, scale, rotation)
             return
