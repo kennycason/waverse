@@ -499,48 +499,136 @@ class ModernTerrainRenderer:
                 result[invert_zone, 0], result[invert_zone, 2] = result[invert_zone, 2].copy(), result[invert_zone, 0].copy()
             
             elif biome_lower == 'hellfire':
-                # VOLCANIC - lava in low areas, dark rock high
-                lava_mask = all_heights < 5
-                cooling_mask = (all_heights >= 5) & (all_heights < 15)
-                rock_mask = all_heights >= 15
+                # VOLCANIC HELLSCAPE - molten lava, obsidian, ash
+                lava_mask = all_heights < 8
+                cooling_mask = (all_heights >= 8) & (all_heights < 20)
+                rock_mask = (all_heights >= 20) & (all_heights < 60)
+                ash_mask = all_heights >= 60
                 
-                glow = 0.7 + 0.3 * np.sin(all_wx * 0.1 + all_wz * 0.1)
-                result[lava_mask, 0] = 0.95 * glow[lava_mask]
-                result[lava_mask, 1] = 0.35 * glow[lava_mask]
-                result[lava_mask, 2] = 0.05
+                # Lava with flowing animation effect (position-based shimmer)
+                lava_flow = np.sin(all_wx * 0.08 + all_wz * 0.06) * 0.5 + 0.5
+                lava_heat = 0.8 + 0.2 * lava_flow
+                result[lava_mask, 0] = np.clip(0.95 * lava_heat[lava_mask], 0.7, 1.0)
+                result[lava_mask, 1] = np.clip(0.25 + 0.25 * lava_flow[lava_mask], 0.15, 0.5)
+                result[lava_mask, 2] = 0.02
                 
-                t = (all_heights[cooling_mask] - 5) / 10.0
-                result[cooling_mask, 0] = 0.45 - t * 0.25
-                result[cooling_mask, 1] = 0.15 - t * 0.1
-                result[cooling_mask, 2] = 0.08
+                # Lava cracks in the cooled rock
+                crack_pattern = np.sin(all_wx * 0.2) * np.sin(all_wz * 0.2)
+                lava_crack = (np.abs(crack_pattern) < 0.05) & cooling_mask
                 
-                result[rock_mask, 0] = 0.22 + all_heights[rock_mask] * 0.001
-                result[rock_mask, 1] = 0.12
-                result[rock_mask, 2] = 0.10
+                # Cooling rock - dark with red undertones
+                t = (all_heights[cooling_mask] - 8) / 12.0
+                result[cooling_mask, 0] = np.clip(0.5 - t * 0.3, 0.15, 0.5)
+                result[cooling_mask, 1] = np.clip(0.12 - t * 0.06, 0.05, 0.15)
+                result[cooling_mask, 2] = 0.05
+                
+                # Lava cracks glow through
+                result[lava_crack, 0] = 0.9
+                result[lava_crack, 1] = 0.4
+                result[lava_crack, 2] = 0.05
+                
+                # Obsidian rock - black glass with purple sheen
+                obsidian_sheen = np.sin(all_wx * 0.1 + all_wz * 0.15) * 0.5 + 0.5
+                result[rock_mask, 0] = 0.08 + obsidian_sheen[rock_mask] * 0.08
+                result[rock_mask, 1] = 0.05
+                result[rock_mask, 2] = 0.12 + obsidian_sheen[rock_mask] * 0.06
+                
+                # Ash-covered peaks - gray with red dust
+                result[ash_mask, 0] = 0.35
+                result[ash_mask, 1] = 0.28
+                result[ash_mask, 2] = 0.25
+                
+                # Scattered ember spots
+                ember_hash = (np.floor(all_wx * 0.3) * 73856093 + np.floor(all_wz * 0.3) * 19349663) % 1000
+                ember_mask = (ember_hash < 20) & rock_mask
+                result[ember_mask] = [0.95, 0.5, 0.1]
             
             elif biome_lower == 'shadow':
-                # DARK AND SCARY
-                darkness = 0.15 + 0.05 * np.sin(all_wx * 0.05) * np.sin(all_wz * 0.05)
-                result[:, 0] = darkness * 0.6
-                result[:, 1] = darkness * 0.4
-                result[:, 2] = darkness + 0.08
-                # Add eerie glow spots
-                glow_mask = np.abs(np.sin(all_wx * 0.3) * np.sin(all_wz * 0.3)) > 0.95
-                result[glow_mask] = [0.4, 0.1, 0.5]
+                # DARK AND TERRIFYING - twisted corrupted landscape
+                # Base darkness with slow undulating patterns
+                darkness = 0.08 + 0.04 * np.sin(all_wx * 0.02) * np.sin(all_wz * 0.02)
+                
+                # Corruption veins - dark purple tendrils spreading across land
+                vein_pattern = np.sin(all_wx * 0.08 + all_wz * 0.05) * np.cos(all_wx * 0.03 - all_wz * 0.07)
+                vein_mask = np.abs(vein_pattern) < 0.15
+                
+                # Base dark purple-gray
+                result[:, 0] = darkness * 0.5 + 0.05
+                result[:, 1] = darkness * 0.3
+                result[:, 2] = darkness * 0.8 + 0.12
+                
+                # Corruption veins are darker purple
+                result[vein_mask, 0] = 0.15
+                result[vein_mask, 1] = 0.02
+                result[vein_mask, 2] = 0.25
+                
+                # Glowing eyes scattered across the land (CREEPY!)
+                eye_x = np.floor(all_wx * 0.05)
+                eye_z = np.floor(all_wz * 0.05)
+                eye_hash = (eye_x * 73856093 + eye_z * 19349663) % 1000
+                eye_mask = (eye_hash < 15) & (all_heights > 5)  # 1.5% chance, above water
+                result[eye_mask] = [0.8, 0.1, 0.2]  # Glowing red eyes
+                
+                # Occasional eerie green glow spots
+                glow_mask = np.abs(np.sin(all_wx * 0.3) * np.sin(all_wz * 0.3)) > 0.92
+                result[glow_mask] = [0.1, 0.5, 0.2]
             
             elif biome_lower == 'crystal':
-                # CRYSTALLINE - pale with prismatic effects
-                prism = np.abs(np.sin(all_wx * 0.15 + all_wz * 0.15 + all_heights * 0.2))
-                result[:, 0] = np.clip(0.7 + prism * 0.25, 0, 1)
-                result[:, 1] = np.clip(0.85 + prism * 0.1, 0, 1)
-                result[:, 2] = 0.95
+                # CRYSTALLINE WONDERLAND - prismatic rainbow reflections
+                # Multiple overlapping wave patterns for iridescence
+                wave1 = np.sin(all_wx * 0.12 + all_heights * 0.15)
+                wave2 = np.sin(all_wz * 0.14 + all_heights * 0.12 + 2.0)
+                wave3 = np.sin((all_wx + all_wz) * 0.08 + all_heights * 0.1 + 4.0)
+                
+                # Prismatic color from wave interference
+                prism = wave1 * wave2 * 0.5 + 0.5
+                
+                # Base crystal white with rainbow tints
+                result[:, 0] = np.clip(0.75 + wave1 * 0.2 + prism * 0.15, 0.5, 1.0)
+                result[:, 1] = np.clip(0.85 + wave2 * 0.15, 0.6, 1.0)
+                result[:, 2] = np.clip(0.92 + wave3 * 0.1, 0.7, 1.0)
+                
+                # Crystal facet edges - sharp lines where colors shift
+                facet_pattern = np.floor(all_wx * 0.1) + np.floor(all_wz * 0.1)
+                facet_hue = (facet_pattern * 0.618) % 1.0  # Golden ratio for variety
+                facet_mask = (facet_hue < 0.3)
+                result[facet_mask, 0] = np.clip(result[facet_mask, 0] + 0.15, 0, 1)
+                result[facet_mask, 1] = np.clip(result[facet_mask, 1] - 0.1, 0, 1)
+                
+                # Bright reflection spots
+                reflect_mask = (wave1 > 0.9) & (wave2 > 0.8)
+                result[reflect_mask] = [1.0, 1.0, 1.0]
             
             elif biome_lower == 'void':
-                # THE VOID - almost entirely black
-                void_noise = 0.02 + 0.03 * np.abs(np.sin(all_wx * 0.08) * np.cos(all_wz * 0.08))
-                result[:, 0] = void_noise
-                result[:, 1] = void_noise * 0.5
-                result[:, 2] = void_noise + 0.05
+                # THE VOID - cosmic horror, stars in the darkness
+                # Near-black base with subtle purple undertones
+                void_base = 0.02
+                result[:, 0] = void_base
+                result[:, 1] = void_base * 0.3
+                result[:, 2] = void_base + 0.03
+                
+                # Distant nebula glow - very subtle color patches
+                nebula_x = all_wx * 0.003
+                nebula_z = all_wz * 0.003
+                nebula = np.sin(nebula_x) * np.cos(nebula_z) * 0.5 + 0.5
+                result[:, 0] += nebula * 0.04
+                result[:, 2] += (1 - nebula) * 0.05
+                
+                # Stars! Random bright points
+                star_hash = (np.floor(all_wx * 0.5) * 73856093 + np.floor(all_wz * 0.5) * 19349663) % 10000
+                star_mask = star_hash < 30  # 0.3% chance of star
+                result[star_mask] = [0.9, 0.9, 1.0]  # White stars
+                
+                # Occasional colored stars
+                color_star_mask = (star_hash >= 30) & (star_hash < 40)
+                result[color_star_mask, 0] = 0.8
+                result[color_star_mask, 1] = 0.5
+                result[color_star_mask, 2] = 1.0  # Purple stars
+                
+                # Void rifts - tears in reality with glowing edges
+                rift_pattern = np.sin(all_wx * 0.04) + np.sin(all_wz * 0.05)
+                rift_mask = np.abs(rift_pattern) < 0.08
+                result[rift_mask] = [0.4, 0.0, 0.6]  # Glowing purple rift edges
             
             colors = result.reshape((num_cells, 6, 3)).reshape((num_verts, 3))
         else:
