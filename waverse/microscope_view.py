@@ -488,13 +488,13 @@ class MicroscopeView:
         hud_vertices.extend([cx - gap_size, cy + gap_size, *gap_color])
         
         # --- Mini-map in top-right corner ---
-        map_size = 100
-        map_margin = 15
+        map_size = 60  # Smaller minimap
+        map_margin = 10
         map_x = self.width - map_size - map_margin
-        map_y = self.height - map_size - map_margin
+        map_y = self.height - map_size - map_margin  # Top-right (Y increases upward in screen space)
         
-        # Map background (semi-transparent)
-        map_bg_color = (*self.bg_color, 0.6)
+        # Map background (semi-transparent dark)
+        map_bg_color = (0.0, 0.0, 0.0, 0.5)
         hud_vertices.extend([map_x, map_y, *map_bg_color])
         hud_vertices.extend([map_x + map_size, map_y, *map_bg_color])
         hud_vertices.extend([map_x + map_size, map_y + map_size, *map_bg_color])
@@ -502,9 +502,9 @@ class MicroscopeView:
         hud_vertices.extend([map_x + map_size, map_y + map_size, *map_bg_color])
         hud_vertices.extend([map_x, map_y + map_size, *map_bg_color])
         
-        # Map border
-        border_color = (0.5, 0.6, 0.7, 0.8)
-        border_thick = 2
+        # Map border (bright so it's visible)
+        border_color = (0.8, 0.85, 0.9, 0.9)
+        border_thick = 1
         # Top
         hud_vertices.extend([map_x, map_y + map_size - border_thick, *border_color])
         hud_vertices.extend([map_x + map_size, map_y + map_size - border_thick, *border_color])
@@ -534,13 +534,13 @@ class MicroscopeView:
         hud_vertices.extend([map_x + map_size, map_y + map_size, *border_color])
         hud_vertices.extend([map_x + map_size - border_thick, map_y + map_size, *border_color])
         
-        # Organism dots on minimap
+        # Organism dots on minimap (small, subtle)
         for org in self.world.organisms:
             # Map world position to minimap position
             ox = map_x + (org.x / self.world.width) * map_size
             oy = map_y + (org.y / self.world.height) * map_size
-            dot_size = 2
-            dot_color = (*org.dna.membrane.color, 0.7)
+            dot_size = 1
+            dot_color = (*org.dna.membrane.color, 0.5)
             
             hud_vertices.extend([ox - dot_size, oy - dot_size, *dot_color])
             hud_vertices.extend([ox + dot_size, oy - dot_size, *dot_color])
@@ -549,18 +549,30 @@ class MicroscopeView:
             hud_vertices.extend([ox + dot_size, oy + dot_size, *dot_color])
             hud_vertices.extend([ox - dot_size, oy + dot_size, *dot_color])
         
-        # Current view position indicator (bright dot)
+        # Current view position indicator (bright pulsing dot with outline)
         view_dot_x = map_x + (self.view_x / self.world.width) * map_size
         view_dot_y = map_y + (self.view_y / self.world.height) * map_size
-        view_dot_size = 4
-        view_dot_color = (1.0, 1.0, 1.0, 1.0)
         
-        hud_vertices.extend([view_dot_x - view_dot_size, view_dot_y - view_dot_size, *view_dot_color])
-        hud_vertices.extend([view_dot_x + view_dot_size, view_dot_y - view_dot_size, *view_dot_color])
-        hud_vertices.extend([view_dot_x + view_dot_size, view_dot_y + view_dot_size, *view_dot_color])
-        hud_vertices.extend([view_dot_x - view_dot_size, view_dot_y - view_dot_size, *view_dot_color])
-        hud_vertices.extend([view_dot_x + view_dot_size, view_dot_y + view_dot_size, *view_dot_color])
-        hud_vertices.extend([view_dot_x - view_dot_size, view_dot_y + view_dot_size, *view_dot_color])
+        # Outer ring (red/orange for visibility)
+        pulse = 0.7 + 0.3 * math.sin(self.time * 3)
+        outer_size = 5
+        outer_color = (1.0, 0.4, 0.2, pulse)
+        hud_vertices.extend([view_dot_x - outer_size, view_dot_y - outer_size, *outer_color])
+        hud_vertices.extend([view_dot_x + outer_size, view_dot_y - outer_size, *outer_color])
+        hud_vertices.extend([view_dot_x + outer_size, view_dot_y + outer_size, *outer_color])
+        hud_vertices.extend([view_dot_x - outer_size, view_dot_y - outer_size, *outer_color])
+        hud_vertices.extend([view_dot_x + outer_size, view_dot_y + outer_size, *outer_color])
+        hud_vertices.extend([view_dot_x - outer_size, view_dot_y + outer_size, *outer_color])
+        
+        # Inner white dot
+        inner_size = 3
+        inner_color = (1.0, 1.0, 1.0, 1.0)
+        hud_vertices.extend([view_dot_x - inner_size, view_dot_y - inner_size, *inner_color])
+        hud_vertices.extend([view_dot_x + inner_size, view_dot_y - inner_size, *inner_color])
+        hud_vertices.extend([view_dot_x + inner_size, view_dot_y + inner_size, *inner_color])
+        hud_vertices.extend([view_dot_x - inner_size, view_dot_y - inner_size, *inner_color])
+        hud_vertices.extend([view_dot_x + inner_size, view_dot_y + inner_size, *inner_color])
+        hud_vertices.extend([view_dot_x - inner_size, view_dot_y + inner_size, *inner_color])
         
         # Upload and render HUD
         if hud_vertices:
