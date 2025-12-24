@@ -45,9 +45,10 @@ class ModernWorldRenderer:
     - Camera for view state
     """
     
-    def __init__(self, ctx: moderngl.Context, enable_waves: bool = False):
+    def __init__(self, ctx: moderngl.Context, enable_waves: bool = False, use_dna_geometry: bool = True):
         self.ctx = ctx
         self.enable_waves = enable_waves
+        self.use_dna_geometry = use_dna_geometry  # Use DNA-driven mesh generation
         
         # Sub-renderers
         self.sky = ModernSkyRenderer(ctx)  # Rendered first (background)
@@ -295,6 +296,20 @@ class ModernWorldRenderer:
         
         # Determine mesh type and get visual properties from DNA
         dna = getattr(plant, 'dna', None)
+        
+        # Use DNA-driven geometry if enabled
+        if self.use_dna_geometry and dna:
+            # Get height from DNA for scale
+            height_gene = getattr(dna, 'height_gene', None)
+            if height_gene and hasattr(height_gene, 'value'):
+                scale = height_gene.value * base_scale
+                scale = max(0.5, min(50.0, scale))
+            else:
+                scale = base_scale * 3.0
+            
+            self.flora.add_instance_from_dna(dna, x, y, z, scale, rotation)
+            return
+        
         if dna:
             plant_type = getattr(dna, 'plant_type', 'bush')
             canopy_shape = getattr(dna, 'canopy_shape', 'dome')

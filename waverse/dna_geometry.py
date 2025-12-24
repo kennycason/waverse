@@ -410,9 +410,9 @@ def plant_dna_to_geometry(dna: Any) -> GeometrySegment:
         trunk_color = _dict_to_color(dna.get('trunk_color'), (0.4, 0.25, 0.15))
         leaf_color = _dict_to_color(dna.get('leaf_color'), (0.2, 0.6, 0.2))
         flower_color = _dict_to_color(dna.get('flower_color'), (0.8, 0.4, 0.6))
-        branch_count = dna.get('branch_count', 3)
-        branch_angle = dna.get('branch_angle', 0.5)
-        leaf_density = dna.get('leaf_density', 0.5)
+        branch_count = int(dna.get('branch_count', 3)) if dna.get('branch_count') is not None else 3
+        branch_angle = float(dna.get('branch_angle', 0.5)) if dna.get('branch_angle') is not None else 0.5
+        leaf_density = float(dna.get('leaf_density', 0.5)) if dna.get('leaf_density') is not None else 0.5
         canopy_shape = dna.get('canopy_shape', 'dome')
         canopy_spread = dna.get('canopy_spread', 1.0)
     else:

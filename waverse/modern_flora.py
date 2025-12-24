@@ -11,9 +11,12 @@ try:
     from pyglm import glm
 except ImportError:
     import glm
-from typing import Dict, Tuple, List, Optional
+from typing import Dict, Tuple, List, Optional, Any
 from dataclasses import dataclass, field
 import math
+
+# Import DNA geometry system for DNA-driven mesh generation
+from .dna_geometry import GeometryBuilder, plant_dna_to_geometry
 
 
 # =============================================================================
@@ -2413,6 +2416,10 @@ class ModernFloraRenderer:
         # Instance batches: type -> FloraInstanceBatch
         self.batches: Dict[str, FloraInstanceBatch] = {}
         
+        # DNA-generated mesh cache: species_id -> (verts, normals, colors)
+        self._dna_mesh_cache: Dict[int, Tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
+        self._dna_mesh_cache_max = 200  # Limit cached DNA meshes
+        
         # Pending instance data (before GPU upload)
         # Initialize with all mesh types from templates
         self.pending_instances: Dict[str, List[Tuple[float, float, float, float, float, float, float, float]]] = {
@@ -2465,6 +2472,66 @@ class ModernFloraRenderer:
             self.pending_instances[mesh_type] = []
         
         self.pending_instances[mesh_type].append(
+            (x, y, z, scale, rotation, color_r, color_g, color_b)
+        )
+    
+    def add_instance_from_dna(self, dna: Any, x: float, y: float, z: float,
+                               scale: float, rotation: float):
+        """Add a flora instance using DNA-generated geometry.
+        
+        This generates (or retrieves cached) mesh from DNA parameters.
+        Provides true genetic variation in plant shapes.
+        """
+        # Get species_id for caching
+        if hasattr(dna, 'species_id'):
+            species_id = dna.species_id
+        elif isinstance(dna, dict):
+            species_id = dna.get('species_id', id(dna))
+        else:
+            species_id = id(dna)
+        
+        # Generate or retrieve cached mesh
+        if species_id not in self._dna_mesh_cache:
+            # Generate mesh from DNA
+            geometry_root = plant_dna_to_geometry(dna)
+            verts, norms, colors = GeometryBuilder.build_mesh(geometry_root)
+            
+            # Cache it (with LRU eviction if needed)
+            if len(self._dna_mesh_cache) >= self._dna_mesh_cache_max:
+                # Remove oldest entry
+                oldest_key = next(iter(self._dna_mesh_cache))
+                del self._dna_mesh_cache[oldest_key]
+            
+            self._dna_mesh_cache[species_id] = (verts, norms, colors)
+        
+        # Use species_id as mesh type key
+        mesh_key = f"dna_{species_id}"
+        
+        # Add to mesh templates if not already there
+        if mesh_key not in self.mesh_templates:
+            self.mesh_templates[mesh_key] = self._dna_mesh_cache[species_id]
+        
+        # Ensure pending instances list exists
+        if mesh_key not in self.pending_instances:
+            self.pending_instances[mesh_key] = []
+        
+        # Get DNA colors
+        if hasattr(dna, 'leaf_color'):
+            color_r = dna.leaf_color.r
+            color_g = dna.leaf_color.g
+            color_b = dna.leaf_color.b
+        elif isinstance(dna, dict):
+            lc = dna.get('leaf_color', {})
+            if isinstance(lc, dict):
+                color_r = float(lc.get('r', 0.3))
+                color_g = float(lc.get('g', 0.6))
+                color_b = float(lc.get('b', 0.2))
+            else:
+                color_r, color_g, color_b = 0.3, 0.6, 0.2
+        else:
+            color_r, color_g, color_b = 0.3, 0.6, 0.2
+        
+        self.pending_instances[mesh_key].append(
             (x, y, z, scale, rotation, color_r, color_g, color_b)
         )
     
