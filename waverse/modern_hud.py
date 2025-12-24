@@ -1254,7 +1254,7 @@ class ModernHUDRenderer:
         tools_rows = (len(self.TOOLS) + cols - 1) // cols
         resources_y = content_y + tools_rows * (slot_size + padding) + 15
         
-        self._draw_text(vertices, "RESOURCES", menu_x + 20, resources_y, 2.0, 0.8, 0.6, 0.3, 1.0)
+        self._draw_text(vertices, "ITEMS", menu_x + 20, resources_y, 2.0, 0.8, 0.6, 0.3, 1.0)
         resources_y += 28
         
         # Get actual inventory items (excluding tools)
@@ -1389,6 +1389,11 @@ class ModernHUDRenderer:
         # Sync actual inventory items
         if hasattr(camera, 'inventory'):
             self.inventory_items = list(camera.inventory)
+            # Debug: print inventory on menu open
+            if self.menu_open and self.menu_tab == 0:
+                non_tools = [i for i in self.inventory_items if not i.item_type.startswith('tool:')]
+                if non_tools:
+                    print(f"  [HUD] Synced {len(non_tools)} non-tool items: {[(i.name, i.count) for i in non_tools]}")
         else:
             self.inventory_items = []
     

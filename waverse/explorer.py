@@ -1104,25 +1104,11 @@ def cut_tree_at_cursor(camera, flora_manager, chunk_manager, dropped_items_list,
     # Bigger trees give more wood (1-5 logs)
     wood_count = min(5, max(1, int(height * 1.5)))
     
-    # Create dropped wood items at the plant location (center of explosion)
-    for i in range(wood_count):
-        # Offset slightly with random scatter
-        offset_x = (np.random.random() - 0.5) * 2.0
-        offset_z = (np.random.random() - 0.5) * 2.0
-        offset_y = np.random.random() * 1.0 + i * 0.3  # Stack upward
-        
-        wood_item = Item("wood", "Wood", count=1, max_stack=99,
-                        description="Wood from a tree. Used for crafting.")
-        
-        dropped = DroppedItem(
-            best_plant.x + offset_x,
-            best_plant.y + 1.0,  # Start just above ground
-            best_plant.z + offset_z,
-            wood_item
-        )
-        dropped.scale = 0.6 + np.random.random() * 0.3  # Bigger, more visible
-        dropped.velocity_y = np.random.random() * 2.0 + 1.0  # Slight pop upward
-        dropped_items_list.append(dropped)
+    # Add wood directly to inventory (simpler UX for now)
+    wood_item = Item("wood", "Wood", count=wood_count, max_stack=99,
+                    description="Wood from a tree. Used for crafting.")
+    camera.add_item(wood_item)
+    print(f"        Added {wood_count} wood to inventory. Inventory now has {len(camera.inventory)} items.")
     
     # Create fallen tree trunk effect
     if fallen_trees_list is not None:
@@ -1896,17 +1882,25 @@ class Camera:
         Add an item to inventory. Stacks with existing items if possible.
         Returns True if item was added, False if inventory full.
         """
+        print(f"  [INVENTORY] Adding {item.count}x {item.name} (type: {item.item_type})")
+        
         # Try to stack with existing items first
         if item.is_stackable():
             for inv_item in self.inventory:
                 if inv_item.can_stack_with(item):
                     overflow = inv_item.add_count(item.count)
+                    print(f"  [INVENTORY] Stacked with existing. Now: {inv_item.count}x")
                     if overflow == 0:
                         return True
                     item.count = overflow  # Continue with remainder
         
         # Add as new slot (no limit for now, could add max inventory size later)
         self.inventory.append(item)
+        print(f"  [INVENTORY] Added new slot. Total items: {len(self.inventory)}")
+        
+        # Debug: print all non-tool items
+        non_tools = [i for i in self.inventory if not i.item_type.startswith('tool:')]
+        print(f"  [INVENTORY] Non-tool items: {[(i.name, i.count) for i in non_tools]}")
         return True
     
     def get_item_count(self, item_type: str) -> int:
