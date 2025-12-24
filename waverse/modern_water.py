@@ -104,39 +104,53 @@ uniform vec3 u_camera_pos;
 uniform vec2 u_wind_dir;
 uniform float u_wind_strength;
 
-// Wave parameters - very slow, peaceful, chunky waves
-const float WAVE_SPEED = 0.008;       // EXTREMELY slow wave animation  
-const float BASE_WAVE_HEIGHT = 0.6;   // Gentle wave height
-const float WAVE_LENGTH = 80.0;       // Long gentle swells
+// Wave parameters - traveling waves with wind direction
+const float BASE_WAVE_HEIGHT = 0.8;   // Wave height
+const float WAVE_SPEED = 0.4;         // Visible wave travel speed
 
 // Stepped/quantized function for chunky waves
 float step_wave(float x, float steps) {
     return floor(x * steps + 0.5) / steps;
 }
 
+// Gerstner-style traveling wave (actually propagates!)
+float traveling_wave(vec2 pos, float time, vec2 dir, float freq, float speed, float amp) {
+    // Wave travels in direction 'dir'
+    float phase = dot(pos, dir) * freq - time * speed;
+    return sin(phase) * amp;
+}
+
 float chunky_wave(vec2 pos, float time, vec2 wind_dir, float wind_str) {
     // Use RELATIVE position (mod to avoid huge numbers at far coords)
-    // This prevents jittering at large world coordinates
     vec2 local_pos = mod(pos, 500.0);
     
-    // Primary swell - big, slow, chunky
-    float swell = sin(local_pos.x * 0.012 + local_pos.y * 0.008 + time * WAVE_SPEED);
-    swell = step_wave(swell, 3.0);  // 3 discrete levels for chunky look
+    // === TRAVELING WAVES (move in wind direction!) ===
+    // Primary swell - large waves traveling with wind
+    float swell = traveling_wave(local_pos, time, wind_dir, 0.015, WAVE_SPEED, 1.0);
+    swell = step_wave(swell, 4.0);  // Chunky
     
-    // Secondary cross-wave  
-    float cross = sin(local_pos.x * 0.018 - local_pos.y * 0.02 + time * WAVE_SPEED * 0.7);
-    cross = step_wave(cross, 4.0);
+    // Secondary swell - slightly offset angle
+    vec2 cross_dir = vec2(wind_dir.y * 0.7 - wind_dir.x * 0.3, -wind_dir.x * 0.7 - wind_dir.y * 0.3);
+    float cross = traveling_wave(local_pos, time, cross_dir, 0.022, WAVE_SPEED * 0.7, 0.5);
+    cross = step_wave(cross, 5.0);
     
-    // Small choppy detail waves (slow, subtle)
-    float chop1 = sin(local_pos.x * 0.05 + local_pos.y * 0.04 + time * 0.015) * 0.12;
-    float chop2 = sin(local_pos.x * 0.07 - local_pos.y * 0.06 + time * 0.012) * 0.08;
-    float chop3 = sin(local_pos.x * 0.09 + local_pos.y * 0.11 + time * 0.018) * 0.06;
-    float chop4 = sin(local_pos.x * 0.14 - local_pos.y * 0.08 + time * 0.02) * 0.04;
+    // Interference pattern - creates ripple intersection effects
+    float interference = traveling_wave(local_pos, time, -wind_dir, 0.03, WAVE_SPEED * 0.5, 0.3);
+    
+    // Choppy detail waves - smaller, faster
+    float chop1 = traveling_wave(local_pos, time, wind_dir, 0.06, WAVE_SPEED * 1.5, 0.15);
+    float chop2 = traveling_wave(local_pos, time, cross_dir, 0.08, WAVE_SPEED * 1.2, 0.1);
+    
+    // Random-looking ripples (circular interference simulation)
+    float ripple1 = sin(length(local_pos - vec2(100, 100)) * 0.1 - time * 0.3) * 0.08;
+    float ripple2 = sin(length(local_pos - vec2(250, 180)) * 0.12 - time * 0.25) * 0.06;
     
     // Combine - wind strength affects height
-    float height_mult = BASE_WAVE_HEIGHT * (0.3 + wind_str * 0.5);
-    float total = swell * height_mult + cross * height_mult * 0.3;
-    total += (chop1 + chop2 + chop3 + chop4) * (0.4 + wind_str * 0.4);
+    float height_mult = BASE_WAVE_HEIGHT * (0.4 + wind_str * 0.6);
+    float total = swell * height_mult + cross * height_mult * 0.4;
+    total += interference * height_mult * 0.3;
+    total += (chop1 + chop2) * (0.5 + wind_str * 0.5);
+    total += (ripple1 + ripple2) * (0.3 + wind_str * 0.3);
     
     return total;
 }

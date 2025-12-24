@@ -74,9 +74,12 @@ class WindManager:
         
         # Tornado
         self.tornado: Optional[TornadoState] = None
-        self._tornado_check_interval = 5.0  # Seconds between checks
+        self._tornado_check_interval = 3.0  # Faster checks
         self._last_tornado_check = 0.0
-        self._tornado_chance = 0.3  # 30% per check during storms (high for testing!)
+        self._tornado_chance = 0.5  # 50% per check during storms - more tornadoes!
+        
+        # Also spawn tornadoes in windy non-storm weather occasionally
+        self._calm_tornado_chance = 0.05  # 5% chance even without storm
         
         # Tide
         self._tide_phase = 0.0
@@ -104,12 +107,14 @@ class WindManager:
         # Update tide
         self._tide_phase += dt / self._tide_period * math.pi * 2
         
-        # Check for tornado spawn during storms
-        if is_stormy:
-            self._last_tornado_check += dt
-            if self._last_tornado_check >= self._tornado_check_interval:
-                self._last_tornado_check = 0.0
-                if self.tornado is None and self.rng.random() < self._tornado_chance:
+        # Check for tornado spawn
+        self._last_tornado_check += dt
+        if self._last_tornado_check >= self._tornado_check_interval:
+            self._last_tornado_check = 0.0
+            if self.tornado is None:
+                # Higher chance during storms, lower chance otherwise
+                chance = self._tornado_chance if is_stormy else self._calm_tornado_chance
+                if self.rng.random() < chance:
                     self._spawn_tornado()
         
         # Update/expire tornado

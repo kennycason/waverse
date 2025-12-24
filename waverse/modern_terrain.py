@@ -181,14 +181,30 @@ def get_terrain_color(height: float, biome: str = 'grassland',
     biome_lower = biome.lower() if biome else 'grassland'
     
     if biome_lower == 'psychedelic':
-        # RAINBOW CYCLING based on position! Trippy as fuck!
-        # Use position to create rainbow waves
-        phase = (world_x * 0.02 + world_z * 0.02 + height * 0.1) % (2 * math.pi * 3)
-        r = 0.5 + 0.5 * math.sin(phase)
-        g = 0.5 + 0.5 * math.sin(phase + 2.09)  # 120 degrees offset
-        b = 0.5 + 0.5 * math.sin(phase + 4.19)  # 240 degrees offset
-        # Boost saturation
-        return (min(1.0, r * 1.2), min(1.0, g * 1.2), min(1.0, b * 1.2))
+        # TRIPPY MULTI-SCHEME - not just rainbow!
+        zone_x = world_x * 0.005
+        zone_z = world_z * 0.005
+        zone_phase = math.sin(zone_x) * math.cos(zone_z) * 3.0
+        swirl = math.sin(zone_x * 3 + zone_z * 2) + math.cos(zone_x * 2 - zone_z * 3)
+        height_band = (height * 0.05) % 6.0
+        tile_hue = ((world_x * 0.02 + world_z * 0.02 * 1.618) * 2.399) % (2 * math.pi)
+        
+        phase1 = zone_phase + swirl * 0.5 + height_band
+        phase2 = zone_phase * 1.3 - swirl * 0.7 + height_band * 0.5 + 2.1
+        phase3 = zone_phase * 0.7 + swirl * 0.3 - height_band * 0.3 + 4.2
+        
+        scheme_blend = (math.sin(zone_x * 0.7) + 1) * 0.5
+        r1 = 0.5 + 0.5 * math.sin(phase1 + tile_hue)
+        g1 = 0.3 + 0.4 * math.sin(phase2 + tile_hue + 1.5)
+        b1 = 0.5 + 0.5 * math.sin(phase3 + tile_hue + 3.0)
+        r2 = 0.4 + 0.4 * math.sin(phase2 - tile_hue + 1.0)
+        g2 = 0.5 + 0.5 * math.sin(phase1 + tile_hue * 0.7)
+        b2 = 0.6 + 0.4 * math.sin(phase3 - tile_hue * 0.5)
+        
+        r = max(0.1, min(1.0, r1 * scheme_blend + r2 * (1 - scheme_blend)))
+        g = max(0.1, min(1.0, g1 * scheme_blend + g2 * (1 - scheme_blend)))
+        b = max(0.1, min(1.0, b1 * scheme_blend + b2 * (1 - scheme_blend)))
+        return (r, g, b)
     
     elif biome_lower == 'hellfire':
         # VOLCANIC - reds, oranges, blacks with lava streaks
@@ -434,11 +450,53 @@ class ModernTerrainRenderer:
             result = np.zeros((n, 3), dtype='f4')
             
             if biome_lower == 'psychedelic':
-                # RAINBOW CYCLING!
-                phase = (all_wx * 0.02 + all_wz * 0.02 + all_heights * 0.1) % (2 * np.pi * 3)
-                result[:, 0] = np.clip(0.5 + 0.5 * np.sin(phase) * 1.2, 0, 1)
-                result[:, 1] = np.clip(0.5 + 0.5 * np.sin(phase + 2.09) * 1.2, 0, 1)
-                result[:, 2] = np.clip(0.5 + 0.5 * np.sin(phase + 4.19) * 1.2, 0, 1)
+                # TRIPPY MULTI-SCHEME COLORING - not just rainbow!
+                # Use multiple layered patterns for true psychedelic effect
+                
+                # Base pattern - slower, larger color zones
+                zone_x = all_wx * 0.005
+                zone_z = all_wz * 0.005
+                zone_phase = np.sin(zone_x) * np.cos(zone_z) * 3.0
+                
+                # Medium detail - swirling patterns
+                swirl = np.sin(zone_x * 3 + zone_z * 2) + np.cos(zone_x * 2 - zone_z * 3)
+                
+                # Fine detail - tile-to-tile variation
+                tile_noise = np.sin(all_wx * 0.1) * np.sin(all_wz * 0.1) * 0.5
+                
+                # Height influence - different colors at different elevations
+                height_band = (all_heights * 0.05) % 6.0
+                
+                # Combine into final phase with multiple harmonics
+                phase1 = zone_phase + swirl * 0.5 + height_band
+                phase2 = zone_phase * 1.3 - swirl * 0.7 + height_band * 0.5 + 2.1
+                phase3 = zone_phase * 0.7 + swirl * 0.3 - height_band * 0.3 + 4.2
+                
+                # Add tile-level chaos for sharp transitions
+                tile_shift = np.floor(all_wx * 0.02) + np.floor(all_wz * 0.02) * 1.618
+                tile_hue = (tile_shift * 2.399) % (2 * np.pi)  # Golden angle
+                
+                # Mix schemes based on position
+                scheme_blend = (np.sin(zone_x * 0.7) + 1) * 0.5  # 0-1
+                
+                # Scheme 1: Warm psychedelic (magentas, oranges, cyans)
+                r1 = 0.5 + 0.5 * np.sin(phase1 + tile_hue)
+                g1 = 0.3 + 0.4 * np.sin(phase2 + tile_hue + 1.5)
+                b1 = 0.5 + 0.5 * np.sin(phase3 + tile_hue + 3.0)
+                
+                # Scheme 2: Cool psychedelic (teals, purples, greens)
+                r2 = 0.4 + 0.4 * np.sin(phase2 - tile_hue + 1.0)
+                g2 = 0.5 + 0.5 * np.sin(phase1 + tile_hue * 0.7)
+                b2 = 0.6 + 0.4 * np.sin(phase3 - tile_hue * 0.5)
+                
+                # Blend schemes
+                result[:, 0] = np.clip(r1 * scheme_blend + r2 * (1 - scheme_blend) + tile_noise, 0.1, 1.0)
+                result[:, 1] = np.clip(g1 * scheme_blend + g2 * (1 - scheme_blend) + tile_noise * 0.5, 0.1, 1.0)
+                result[:, 2] = np.clip(b1 * scheme_blend + b2 * (1 - scheme_blend) - tile_noise * 0.3, 0.1, 1.0)
+                
+                # Occasional color inversion zones for extra trippiness
+                invert_zone = np.sin(all_wx * 0.008 + all_wz * 0.012) > 0.7
+                result[invert_zone, 0], result[invert_zone, 2] = result[invert_zone, 2].copy(), result[invert_zone, 0].copy()
             
             elif biome_lower == 'hellfire':
                 # VOLCANIC - lava in low areas, dark rock high
