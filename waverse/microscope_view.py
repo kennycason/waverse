@@ -450,37 +450,86 @@ class MicroscopeView:
         
         hud_vertices = []
         
-        # --- Crosshair in center (draw first, most important) ---
-        cx, cy = self.width / 2, self.height / 2
-        crosshair_size = 20
-        crosshair_thick = 3
-        crosshair_color = (1.0, 1.0, 1.0, 0.9)
+        # Check if there's an organism under the cursor
+        org_at_cursor = self.get_organism_at_cursor()
         
-        # Horizontal line
+        # --- Crosshair in center ---
+        cx, cy = self.width / 2, self.height / 2
+        crosshair_size = 22
+        crosshair_thick = 2
+        gap_size = 6  # Gap in the center
+        
+        # Color changes when over an organism (green = scannable)
+        if org_at_cursor:
+            crosshair_color = (0.3, 1.0, 0.4, 0.95)  # Green when over organism
+            dot_color = (0.2, 1.0, 0.3, 1.0)
+        else:
+            crosshair_color = (1.0, 1.0, 1.0, 0.85)  # White normally
+            dot_color = (1.0, 0.6, 0.2, 1.0)  # Orange center
+        
+        # Horizontal lines (with gap in center)
+        # Left segment
         hud_vertices.extend([cx - crosshair_size, cy - crosshair_thick/2, *crosshair_color])
+        hud_vertices.extend([cx - gap_size, cy - crosshair_thick/2, *crosshair_color])
+        hud_vertices.extend([cx - gap_size, cy + crosshair_thick/2, *crosshair_color])
+        hud_vertices.extend([cx - crosshair_size, cy - crosshair_thick/2, *crosshair_color])
+        hud_vertices.extend([cx - gap_size, cy + crosshair_thick/2, *crosshair_color])
+        hud_vertices.extend([cx - crosshair_size, cy + crosshair_thick/2, *crosshair_color])
+        # Right segment
+        hud_vertices.extend([cx + gap_size, cy - crosshair_thick/2, *crosshair_color])
         hud_vertices.extend([cx + crosshair_size, cy - crosshair_thick/2, *crosshair_color])
         hud_vertices.extend([cx + crosshair_size, cy + crosshair_thick/2, *crosshair_color])
-        hud_vertices.extend([cx - crosshair_size, cy - crosshair_thick/2, *crosshair_color])
+        hud_vertices.extend([cx + gap_size, cy - crosshair_thick/2, *crosshair_color])
         hud_vertices.extend([cx + crosshair_size, cy + crosshair_thick/2, *crosshair_color])
-        hud_vertices.extend([cx - crosshair_size, cy + crosshair_thick/2, *crosshair_color])
+        hud_vertices.extend([cx + gap_size, cy + crosshair_thick/2, *crosshair_color])
         
-        # Vertical line
+        # Vertical lines (with gap in center)
+        # Bottom segment
         hud_vertices.extend([cx - crosshair_thick/2, cy - crosshair_size, *crosshair_color])
         hud_vertices.extend([cx + crosshair_thick/2, cy - crosshair_size, *crosshair_color])
-        hud_vertices.extend([cx + crosshair_thick/2, cy + crosshair_size, *crosshair_color])
+        hud_vertices.extend([cx + crosshair_thick/2, cy - gap_size, *crosshair_color])
         hud_vertices.extend([cx - crosshair_thick/2, cy - crosshair_size, *crosshair_color])
+        hud_vertices.extend([cx + crosshair_thick/2, cy - gap_size, *crosshair_color])
+        hud_vertices.extend([cx - crosshair_thick/2, cy - gap_size, *crosshair_color])
+        # Top segment
+        hud_vertices.extend([cx - crosshair_thick/2, cy + gap_size, *crosshair_color])
+        hud_vertices.extend([cx + crosshair_thick/2, cy + gap_size, *crosshair_color])
+        hud_vertices.extend([cx + crosshair_thick/2, cy + crosshair_size, *crosshair_color])
+        hud_vertices.extend([cx - crosshair_thick/2, cy + gap_size, *crosshair_color])
         hud_vertices.extend([cx + crosshair_thick/2, cy + crosshair_size, *crosshair_color])
         hud_vertices.extend([cx - crosshair_thick/2, cy + crosshair_size, *crosshair_color])
         
-        # Center dot (orange, visible)
-        dot_size = 5
-        dot_color = (1.0, 0.5, 0.2, 1.0)
+        # Center dot
+        dot_size = 4
         hud_vertices.extend([cx - dot_size, cy - dot_size, *dot_color])
         hud_vertices.extend([cx + dot_size, cy - dot_size, *dot_color])
         hud_vertices.extend([cx + dot_size, cy + dot_size, *dot_color])
         hud_vertices.extend([cx - dot_size, cy - dot_size, *dot_color])
         hud_vertices.extend([cx + dot_size, cy + dot_size, *dot_color])
         hud_vertices.extend([cx - dot_size, cy + dot_size, *dot_color])
+        
+        # Add pulsing ring when over an organism
+        if org_at_cursor:
+            pulse = 0.5 + 0.5 * math.sin(self.time * 5)
+            ring_size = 35 + pulse * 8
+            ring_color = (0.3, 1.0, 0.4, 0.4 + pulse * 0.2)
+            ring_thick = 2
+            segments = 20
+            for i in range(segments):
+                angle1 = (i / segments) * 2 * math.pi
+                angle2 = ((i + 1) / segments) * 2 * math.pi
+                inner_r = ring_size
+                outer_r = ring_size + ring_thick
+                inner1 = (cx + math.cos(angle1) * inner_r, cy + math.sin(angle1) * inner_r)
+                inner2 = (cx + math.cos(angle2) * inner_r, cy + math.sin(angle2) * inner_r)
+                outer1 = (cx + math.cos(angle1) * outer_r, cy + math.sin(angle1) * outer_r)
+                outer2 = (cx + math.cos(angle2) * outer_r, cy + math.sin(angle2) * outer_r)
+                hud_vertices.extend([*inner1, *ring_color])
+                hud_vertices.extend([*outer1, *ring_color])
+                hud_vertices.extend([*inner2, *ring_color])
+                hud_vertices.extend([*inner2, *ring_color])
+                hud_vertices.extend([*outer1, *ring_color])
+                hud_vertices.extend([*outer2, *ring_color])
         
         # --- Mini-map in top-right corner ---
         map_size = 60  # Smaller minimap
