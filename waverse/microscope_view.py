@@ -431,12 +431,17 @@ class MicroscopeView:
     
     def _render_hud(self):
         """Render HUD elements: minimap, crosshair, terrain tint."""
-        # Switch to screen-space projection
+        # Switch to screen-space projection (0,0 = bottom-left, width,height = top-right)
+        # Standard orthographic projection matrix
+        left, right = 0, self.width
+        bottom, top = 0, self.height
+        near, far = -1, 1
+        
         screen_proj = np.array([
-            [2.0 / self.width, 0, 0, -1],
-            [0, 2.0 / self.height, 0, -1],
-            [0, 0, -1, 0],
-            [0, 0, 0, 1],
+            [2.0 / (right - left), 0, 0, 0],
+            [0, 2.0 / (top - bottom), 0, 0],
+            [0, 0, -2.0 / (far - near), 0],
+            [-(right + left) / (right - left), -(top + bottom) / (top - bottom), -(far + near) / (far - near), 1],
         ], dtype='f4')
         
         self.program['u_projection'].write(screen_proj.tobytes())
@@ -445,21 +450,11 @@ class MicroscopeView:
         
         hud_vertices = []
         
-        # --- Terrain tint overlay (very subtle) ---
-        tint = self.terrain_tint
-        # Full screen quad with low alpha
-        hud_vertices.extend([0, 0, *tint])
-        hud_vertices.extend([self.width, 0, *tint])
-        hud_vertices.extend([self.width, self.height, *tint])
-        hud_vertices.extend([0, 0, *tint])
-        hud_vertices.extend([self.width, self.height, *tint])
-        hud_vertices.extend([0, self.height, *tint])
-        
-        # --- Crosshair in center ---
+        # --- Crosshair in center (draw first, most important) ---
         cx, cy = self.width / 2, self.height / 2
-        crosshair_size = 15
-        crosshair_thick = 2
-        crosshair_color = (1.0, 1.0, 1.0, 0.7)
+        crosshair_size = 20
+        crosshair_thick = 3
+        crosshair_color = (1.0, 1.0, 1.0, 0.9)
         
         # Horizontal line
         hud_vertices.extend([cx - crosshair_size, cy - crosshair_thick/2, *crosshair_color])
@@ -477,15 +472,15 @@ class MicroscopeView:
         hud_vertices.extend([cx + crosshair_thick/2, cy + crosshair_size, *crosshair_color])
         hud_vertices.extend([cx - crosshair_thick/2, cy + crosshair_size, *crosshair_color])
         
-        # Center gap (dark)
-        gap_size = 4
-        gap_color = (0.0, 0.0, 0.0, 0.5)
-        hud_vertices.extend([cx - gap_size, cy - gap_size, *gap_color])
-        hud_vertices.extend([cx + gap_size, cy - gap_size, *gap_color])
-        hud_vertices.extend([cx + gap_size, cy + gap_size, *gap_color])
-        hud_vertices.extend([cx - gap_size, cy - gap_size, *gap_color])
-        hud_vertices.extend([cx + gap_size, cy + gap_size, *gap_color])
-        hud_vertices.extend([cx - gap_size, cy + gap_size, *gap_color])
+        # Center dot (orange, visible)
+        dot_size = 5
+        dot_color = (1.0, 0.5, 0.2, 1.0)
+        hud_vertices.extend([cx - dot_size, cy - dot_size, *dot_color])
+        hud_vertices.extend([cx + dot_size, cy - dot_size, *dot_color])
+        hud_vertices.extend([cx + dot_size, cy + dot_size, *dot_color])
+        hud_vertices.extend([cx - dot_size, cy - dot_size, *dot_color])
+        hud_vertices.extend([cx + dot_size, cy + dot_size, *dot_color])
+        hud_vertices.extend([cx - dot_size, cy + dot_size, *dot_color])
         
         # --- Mini-map in top-right corner ---
         map_size = 60  # Smaller minimap
