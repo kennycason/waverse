@@ -4,11 +4,13 @@ DNA Flora Test Grid - Visualize DNA-driven plant variety
 
 Run: python -m waverse.dna_flora_test
      python -m waverse.dna_flora_test --evolve
+     python -m waverse.dna_flora_test --evolve --continuous
 
 Shows a grid of plants with varying DNA parameters to test
 the vertex shader deformation system. Goal: match V1 quality!
 
---evolve mode: Watch two populations grow and merge with crossover!
+--evolve mode: Watch 4 populations grow from corners and merge with crossover!
+--continuous: Plants die after ~15 generations, ecosystem constantly evolves
 """
 
 import pygame
@@ -2104,15 +2106,27 @@ def run_evolution_mode():
     GENERATION_TIME = 1.5  # Faster generations to see convergence
     MAX_PLANTS = 3000
     
+    # Continuous mode settings
+    continuous_mode = '--continuous' in sys.argv
+    PLANT_LIFESPAN = 15  # Generations before a plant can die
+    DEATH_CHANCE = 0.15  # Chance of dying after lifespan
+    
     print("=" * 60)
-    print("EVOLUTION MODE - 4 POPULATIONS")
+    if continuous_mode:
+        print("EVOLUTION MODE - 4 POPULATIONS [CONTINUOUS]")
+    else:
+        print("EVOLUTION MODE - 4 POPULATIONS")
     print("=" * 60)
     print("A (Cyan/Teal):   Bottom-left  - Oak trees")
     print("B (Red/Orange):  Bottom-right - Pine trees")  
     print("C (Yellow/Gold): Top-left     - Willow trees")
     print("D (Purple):      Top-right    - Baobab trees")
     print("")
-    print("Watch them grow toward center and CROSSOVER!")
+    if continuous_mode:
+        print("CONTINUOUS: Plants die after ~15 generations")
+        print("Watch the ecosystem constantly evolve and shift!")
+    else:
+        print("Watch them grow toward center and CROSSOVER!")
     print("=" * 60)
     print("Controls: WASD move, IJKL look, P screenshot, Q quit")
     print("=" * 60)
@@ -2289,6 +2303,30 @@ def run_evolution_mode():
             
             plants.extend(new_plants)
             
+            # CONTINUOUS MODE: Old plants die to make room for new ones
+            if continuous_mode:
+                deaths = 0
+                surviving_plants = []
+                for plant in plants:
+                    age = generation - plant['generation']
+                    # Plants can die after PLANT_LIFESPAN generations
+                    if age > PLANT_LIFESPAN and rng.random() < DEATH_CHANCE:
+                        deaths += 1
+                    else:
+                        surviving_plants.append(plant)
+                
+                # Also randomly cull if over max to keep performance good
+                if len(surviving_plants) > MAX_PLANTS:
+                    # Kill oldest plants first
+                    surviving_plants.sort(key=lambda p: p['generation'], reverse=True)
+                    surviving_plants = surviving_plants[:MAX_PLANTS]
+                    deaths += len(plants) - MAX_PLANTS
+                
+                plants = surviving_plants
+                
+                if deaths > 0:
+                    print(f"  💀 {deaths} plants died of old age")
+            
             # Count populations
             pop_counts = {}
             for p in plants:
@@ -2298,7 +2336,8 @@ def run_evolution_mode():
             # Format: A=X B=X C=X D=X | Hybrids=X
             pure = ' '.join(f"{k}={v}" for k, v in sorted(pop_counts.items()) if len(k) == 1)
             hybrids = sum(v for k, v in pop_counts.items() if len(k) > 1)
-            print(f"Gen {generation}: {pure} | Hybrids={hybrids} | Total={len(plants)}")
+            mode_str = " [CONTINUOUS]" if continuous_mode else ""
+            print(f"Gen {generation}: {pure} | Hybrids={hybrids} | Total={len(plants)}{mode_str}")
         
         # Build camera
         pitch_rad = math.radians(cam_pitch)
@@ -2346,7 +2385,7 @@ def run_evolution_mode():
 
 
 if __name__ == '__main__':
-    if '--evolve' in sys.argv:
+    if '--evolve' in sys.argv or '--continuous' in sys.argv:
         run_evolution_mode()
     else:
         run_test_grid()
