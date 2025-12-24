@@ -5838,7 +5838,9 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
             modern_renderer.set_fallen_trees(fallen_trees)
             
             # Render everything via modern renderer (or microscope if active)
-            modern_renderer.render(dt=dt, microscope_active=camera.microscope_active)
+            # Convert normalized dt (1.0 = 60fps) to seconds for renderer
+            dt_seconds = dt * 0.01667  # dt * (1/60)
+            modern_renderer.render(dt=dt_seconds, microscope_active=camera.microscope_active)
             
             # Render entity preview in menu (uses legacy GL after modern render)
             preview_info = modern_renderer.get_menu_preview_info()
