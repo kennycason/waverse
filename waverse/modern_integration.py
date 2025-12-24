@@ -139,14 +139,34 @@ class ModernWorldRenderer:
         yaw_rad = math.radians(yaw)
         pitch_rad = math.radians(pitch)
         
+        # Forward direction
         dir_x = -math.sin(yaw_rad) * math.cos(pitch_rad)
         dir_y = math.sin(pitch_rad)
         dir_z = -math.cos(yaw_rad) * math.cos(pitch_rad)
         
+        # For full 3D flight, calculate proper up vector
+        # When upside down (|pitch| > 90), flip the up vector
+        upside_down = abs(pitch) > 90
+        up_flip = -1.0 if upside_down else 1.0
+        
+        # The "up" vector should be perpendicular to forward and in the vertical plane
+        # For smooth flight: up = cross(right, forward), where right is in XZ plane
+        right_x = math.cos(yaw_rad) * up_flip
+        right_z = -math.sin(yaw_rad) * up_flip
+        
+        # Up vector: perpendicular to forward in the camera's vertical plane
+        # Simplified: when pitch is 0, up is (0, 1, 0)
+        # When pitch is 90 (looking up), up is (sin(yaw), 0, cos(yaw)) * -1
+        # When pitch is -90 (looking down), up is (sin(yaw), 0, cos(yaw)) * 1
+        up_x = math.sin(yaw_rad) * math.sin(pitch_rad) * up_flip
+        up_y = math.cos(pitch_rad) * up_flip
+        up_z = math.cos(yaw_rad) * math.sin(pitch_rad) * up_flip
+        
         projection = glm.perspective(glm.radians(fov), aspect, 0.5, 8000.0)
         cam_pos = glm.vec3(x, y, z)
         target = cam_pos + glm.vec3(dir_x, dir_y, dir_z)
-        view = glm.lookAt(cam_pos, target, glm.vec3(0, 1, 0))
+        up_vec = glm.vec3(up_x, up_y, up_z)
+        view = glm.lookAt(cam_pos, target, up_vec)
         
         self.sky.set_camera(projection, view, cam_pos)
         self.clouds.set_camera(projection, view, cam_pos)

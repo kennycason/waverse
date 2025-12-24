@@ -340,8 +340,19 @@ class ModernTerrainRenderer:
         dir_y = np.sin(pitch_rad)
         dir_z = -np.cos(yaw_rad) * np.cos(pitch_rad)
         
+        # For full 3D flight, calculate proper up vector
+        # When upside down (|pitch| > 90), flip the up vector
+        upside_down = abs(pitch) > 90
+        up_flip = -1.0 if upside_down else 1.0
+        
+        # Up vector perpendicular to forward in the camera's vertical plane
+        up_x = np.sin(yaw_rad) * np.sin(pitch_rad) * up_flip
+        up_y = np.cos(pitch_rad) * up_flip
+        up_z = np.cos(yaw_rad) * np.sin(pitch_rad) * up_flip
+        
         target = self.camera_pos + glm.vec3(dir_x, dir_y, dir_z)
-        self.view = glm.lookAt(self.camera_pos, target, glm.vec3(0, 1, 0))
+        up_vec = glm.vec3(up_x, up_y, up_z)
+        self.view = glm.lookAt(self.camera_pos, target, up_vec)
         
         # Projection
         self.projection = glm.perspective(glm.radians(fov), aspect, near, far)

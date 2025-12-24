@@ -1745,22 +1745,48 @@ class Camera:
         pitch_rad = math.radians(self.pitch)
         
         if self.flying or self.swimming:
-            # Flying/swimming: move in look direction
+            # Flying/swimming: full 3D movement like a fighter jet
+            # Forward vector based on yaw AND pitch
             forward_x = -math.sin(yaw_rad) * math.cos(pitch_rad)
             forward_y = math.sin(pitch_rad)
             forward_z = -math.cos(yaw_rad) * math.cos(pitch_rad)
+            
+            # Right vector is perpendicular to forward in XZ plane
+            # When upside down (|pitch| > 90), the right direction should flip
+            # to maintain intuitive controls (push stick right = roll right)
+            cos_pitch = math.cos(pitch_rad)
+            # Determine if we're "upside down" - when looking more than 90 deg up or down
+            upside_down = abs(self.pitch) > 90
+            right_flip = -1.0 if upside_down else 1.0
+            
+            right_x = math.cos(yaw_rad) * right_flip
+            right_z = -math.sin(yaw_rad) * right_flip
+            
+            # Up vector for the camera (perpendicular to both forward and right)
+            # This determines which way is "up" when we press the up button
+            # cross(right, forward) = up
+            up_x = right_z * forward_y - 0 * forward_z  # right.z * forward.y - right.y * forward.z
+            up_y = 0 * forward_z - right_x * forward_x + right_z * forward_z + right_x * forward_z  # Simplified to cos(pitch)
+            up_y = math.cos(pitch_rad) * right_flip  # Vertical component of up
+            up_z = right_x * forward_y - 0 * forward_x  # right.x * forward.y - right.y * forward.x
         else:
             # Walking: move along ground plane only
             forward_x = -math.sin(yaw_rad)
             forward_y = 0
             forward_z = -math.cos(yaw_rad)
-        
-        right_x = math.cos(yaw_rad)
-        right_z = -math.sin(yaw_rad)
+            
+            right_x = math.cos(yaw_rad)
+            right_z = -math.sin(yaw_rad)
+            up_x, up_y, up_z = 0, 1, 0  # Walking - up is always world up
         
         # Calculate new position
-        new_x = self.x + (forward * forward_x + right * right_x) * speed
-        new_z = self.z + (forward * forward_z + right * right_z) * speed
+        # Include up vector's XZ components for full 3D flight
+        if self.flying or self.swimming:
+            new_x = self.x + (forward * forward_x + right * right_x + up * up_x) * speed
+            new_z = self.z + (forward * forward_z + right * right_z + up * up_z) * speed
+        else:
+            new_x = self.x + (forward * forward_x + right * right_x) * speed
+            new_z = self.z + (forward * forward_z + right * right_z) * speed
         
         # Player collision box: ~1m wide, PLAYER_HEIGHT tall (like a rod)
         PLAYER_RADIUS = 1.0  # ~2ft wide collision box
@@ -1806,8 +1832,9 @@ class Camera:
                     self.swimming = False
         
         if self.flying or self.swimming:
-            # Calculate new Y position
-            new_y = self.y + forward * forward_y * speed + up * speed
+            # Calculate new Y position - use the up vector for proper 3D flight
+            # When flying, "up" input moves you perpendicular to your look direction
+            new_y = self.y + forward * forward_y * speed + up * up_y * speed
             
             # Swimming: cap at water surface
             if self.swimming and new_y > water_surface:
