@@ -52,11 +52,20 @@ class BiomeDNA:
         # Check for debug mode (more frequent biome changes for testing)
         import os
         debug_biomes = os.environ.get('WAVERSE_DEBUG_BIOMES', '0') == '1'
+        demo_mode = os.environ.get('WAVERSE_DEMO_BIOMES', '0') == '1'
         
         # Chance to exit or enter a special biome
+        # Demo mode: VERY high chance for showing friends!
         # Debug mode: 10% chance, Normal mode: 0.5% chance
-        change_chance = 0.10 if debug_biomes else 0.005
-        enter_chance = 0.50 if debug_biomes else 0.02  # Debug: 50% to enter, Normal: 2%
+        if demo_mode:
+            change_chance = 0.25  # 25% chance to change biome type
+            enter_chance = 0.85   # 85% chance the new biome is exotic!
+        elif debug_biomes:
+            change_chance = 0.10
+            enter_chance = 0.50
+        else:
+            change_chance = 0.005
+            enter_chance = 0.02
         
         if rng.random() < change_chance:
             if self.special_biome:
