@@ -1231,8 +1231,8 @@ def get_terrain_type_at_cursor(camera, chunk_manager, flora_manager):
     check_x = camera.x + look_x * check_dist
     check_z = camera.z + look_z * check_dist
     
-    # Get terrain height at that point
-    terrain_height = get_height(check_x, check_z, chunk_manager)
+    # Get terrain height at that point using ChunkManager
+    terrain_height = chunk_manager.get_height_at(check_x, check_z)
     
     # Check if water (terrain height at or below sea level)
     SEA_LEVEL = 0.0  # Adjust if your sea level is different
