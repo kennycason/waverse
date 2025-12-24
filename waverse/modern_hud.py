@@ -99,7 +99,6 @@ out vec4 fragColor;
 
 uniform vec3 u_light_dir;
 uniform vec3 u_ambient;
-uniform vec3 u_bg_color;
 
 void main() {
     vec3 norm = normalize(v_normal);
@@ -1588,7 +1587,6 @@ class ModernHUDRenderer:
         self._preview_program['u_view'].write(view)
         self._preview_program['u_light_dir'].value = (0.5, 1.0, 0.3)
         self._preview_program['u_ambient'].value = (0.4, 0.4, 0.5)
-        self._preview_program['u_bg_color'].value = (0.15, 0.15, 0.2)
         self._preview_program['u_time'].value = self._preview_rotation
         
         if is_plant:
