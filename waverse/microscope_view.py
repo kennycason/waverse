@@ -103,8 +103,9 @@ class MicroscopeView:
             fragment_shader=MICRO_FRAGMENT_SHADER,
         )
         
-        # Dynamic vertex buffer
-        self.vbo = ctx.buffer(reserve=1024 * 1024)  # 1MB reserve
+        # Dynamic vertex buffer - start with 4MB, will grow if needed
+        self._vbo_size = 4 * 1024 * 1024
+        self.vbo = ctx.buffer(reserve=self._vbo_size)
         self.vao = ctx.vertex_array(
             self.program,
             [(self.vbo, '2f 4f', 'in_position', 'in_color')],
@@ -229,6 +230,18 @@ class MicroscopeView:
         # Upload and render
         if vertices:
             data = np.array(vertices, dtype='f4').tobytes()
+            
+            # Grow buffer if needed
+            if len(data) > self._vbo_size:
+                self.vbo.release()
+                self._vbo_size = len(data) * 2  # Double for headroom
+                self.vbo = self.ctx.buffer(reserve=self._vbo_size)
+                self.vao.release()
+                self.vao = self.ctx.vertex_array(
+                    self.program,
+                    [(self.vbo, '2f 4f', 'in_position', 'in_color')],
+                )
+            
             self.vbo.write(data)
             self.vao.render(moderngl.TRIANGLES, vertices=len(vertices) // 6)
     
