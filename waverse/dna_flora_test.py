@@ -3,9 +3,12 @@
 DNA Flora Test Grid - Visualize DNA-driven plant variety
 
 Run: python -m waverse.dna_flora_test
+     python -m waverse.dna_flora_test --evolve
 
 Shows a grid of plants with varying DNA parameters to test
 the vertex shader deformation system. Goal: match V1 quality!
+
+--evolve mode: Watch two populations grow and merge with crossover!
 """
 
 import pygame
@@ -1357,6 +1360,299 @@ def run_test_grid():
     pygame.quit()
 
 
+def run_evolution_mode():
+    """
+    Evolution mode: Watch two populations grow and merge!
+    
+    - Two populations start in opposite corners
+    - Each generation, plants spread and mutate
+    - When populations meet, crossover occurs
+    """
+    pygame.init()
+    
+    WIDTH, HEIGHT = 1280, 720
+    
+    pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MAJOR_VERSION, 4)
+    pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MINOR_VERSION, 1)
+    pygame.display.gl_set_attribute(pygame.GL_CONTEXT_PROFILE_MASK, pygame.GL_CONTEXT_PROFILE_CORE)
+    pygame.display.gl_set_attribute(pygame.GL_CONTEXT_FORWARD_COMPATIBLE_FLAG, True)
+    
+    pygame.display.set_mode((WIDTH, HEIGHT), DOUBLEBUF | OPENGL)
+    pygame.display.set_caption("DNA Flora Evolution - Watch populations grow and merge!")
+    
+    ctx = moderngl.create_context(require=410)
+    ctx.enable(moderngl.DEPTH_TEST)
+    ctx.enable(moderngl.CULL_FACE)
+    
+    renderer = DNAFloraRenderer(ctx)
+    
+    # Camera
+    cam_x, cam_y, cam_z = 0, 30, 50
+    cam_yaw, cam_pitch = 0, -25
+    
+    # Evolution state
+    rng = np.random.default_rng(42)
+    
+    # Two starting populations with distinct DNA
+    WORLD_SIZE = 60  # World is -60 to +60
+    
+    # Population A: Bottom-left corner - TALL CONE TREES (blue-green)
+    pop_a_center = (-40, -40)
+    pop_a_dna = PlantDNA.create_random(PlantType.TREE, 1111)
+    pop_a_dna.leaf_color.r = 0.2
+    pop_a_dna.leaf_color.g = 0.7
+    pop_a_dna.leaf_color.b = 0.5
+    pop_a_dna.height_gene.value = 2.0
+    if pop_a_dna.trunk_segments:
+        pop_a_dna.trunk_segments[0].curve = 0.3
+    
+    # Population B: Top-right corner - SHORT DOME BUSHES (yellow-green)
+    pop_b_center = (40, 40)
+    pop_b_dna = PlantDNA.create_random(PlantType.BUSH, 2222)
+    pop_b_dna.leaf_color.r = 0.6
+    pop_b_dna.leaf_color.g = 0.8
+    pop_b_dna.leaf_color.b = 0.2
+    pop_b_dna.height_gene.value = 0.8
+    if pop_b_dna.trunk_segments:
+        pop_b_dna.trunk_segments[0].twist = 0.5
+    
+    # Living plants: list of (x, z, dna, mesh_type, generation, population)
+    plants = []
+    
+    # Seed initial populations (3x3 tiles each)
+    for dx in range(-1, 2):
+        for dz in range(-1, 2):
+            # Population A
+            x = pop_a_center[0] + dx * 4
+            z = pop_a_center[1] + dz * 4
+            dna = pop_a_dna.mutate(rng, strength=0.1)
+            plants.append({
+                'x': x, 'z': z, 'y': 0,
+                'dna': dna,
+                'mesh_type': 'tree_cone',
+                'generation': 0,
+                'population': 'A',
+                'scale': 2.0 + rng.random() * 0.5,
+                'rotation': rng.random() * math.pi * 2,
+            })
+            
+            # Population B
+            x = pop_b_center[0] + dx * 4
+            z = pop_b_center[1] + dz * 4
+            dna = pop_b_dna.mutate(rng, strength=0.1)
+            plants.append({
+                'x': x, 'z': z, 'y': 0,
+                'dna': dna,
+                'mesh_type': 'bush',
+                'generation': 0,
+                'population': 'B',
+                'scale': 2.0 + rng.random() * 0.5,
+                'rotation': rng.random() * math.pi * 2,
+            })
+    
+    # Evolution timing
+    generation = 0
+    time_since_generation = 0.0
+    GENERATION_TIME = 2.0  # Seconds between generations
+    MAX_PLANTS = 2000
+    
+    print("=" * 60)
+    print("EVOLUTION MODE")
+    print("=" * 60)
+    print("Population A (blue-green): Bottom-left - tall cone trees")
+    print("Population B (yellow-green): Top-right - short dome bushes")
+    print("")
+    print("Watch them grow, spread, and MERGE with crossover!")
+    print("=" * 60)
+    print("Controls: WASD move, IJKL look, P screenshot, Q quit")
+    print("=" * 60)
+    
+    clock = pygame.time.Clock()
+    running = True
+    fps_history = []
+    last_fps_print = 0
+    screenshot_count = 0
+    
+    while running:
+        dt = clock.tick(60) / 1000.0
+        
+        for event in pygame.event.get():
+            if event.type == QUIT:
+                running = False
+            elif event.type == KEYDOWN:
+                if event.key == K_q or event.key == K_ESCAPE:
+                    running = False
+                elif event.key == K_p:
+                    import os
+                    from datetime import datetime
+                    from PIL import Image
+                    
+                    screenshot_dir = os.path.expanduser("~/.waverse/screenshots")
+                    os.makedirs(screenshot_dir, exist_ok=True)
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    filename = f"{screenshot_dir}/evolution_{timestamp}.png"
+                    
+                    pixels = ctx.fbo.read(components=3)
+                    img = Image.frombytes('RGB', (WIDTH, HEIGHT), pixels)
+                    img = img.transpose(Image.FLIP_TOP_BOTTOM)
+                    img.save(filename)
+                    screenshot_count += 1
+                    print(f"Saved: {filename}")
+        
+        # Keyboard input
+        keys = pygame.key.get_pressed()
+        
+        # Look
+        look_speed = 80 * dt
+        if keys[K_i]: cam_pitch += look_speed
+        if keys[K_k]: cam_pitch -= look_speed
+        if keys[K_j]: cam_yaw += look_speed
+        if keys[K_l]: cam_yaw -= look_speed
+        cam_pitch = max(-89, min(89, cam_pitch))
+        
+        # Move
+        move_speed = 20 * dt
+        yaw_rad = math.radians(cam_yaw)
+        forward_x = -math.sin(yaw_rad)
+        forward_z = -math.cos(yaw_rad)
+        right_x = math.cos(yaw_rad)
+        right_z = -math.sin(yaw_rad)
+        
+        if keys[K_w]:
+            cam_x += forward_x * move_speed
+            cam_z += forward_z * move_speed
+        if keys[K_s]:
+            cam_x -= forward_x * move_speed
+            cam_z -= forward_z * move_speed
+        if keys[K_a]:
+            cam_x -= right_x * move_speed
+            cam_z -= right_z * move_speed
+        if keys[K_d]:
+            cam_x += right_x * move_speed
+            cam_z += right_z * move_speed
+        if keys[K_SPACE]:
+            cam_y += move_speed
+        if keys[K_LSHIFT]:
+            cam_y -= move_speed
+        
+        # === EVOLUTION STEP ===
+        time_since_generation += dt
+        if time_since_generation >= GENERATION_TIME and len(plants) < MAX_PLANTS:
+            time_since_generation = 0
+            generation += 1
+            
+            new_plants = []
+            
+            for plant in plants:
+                # Each plant has a chance to reproduce
+                if rng.random() < 0.4:  # 40% reproduction chance
+                    # Spread direction (random, but biased toward center)
+                    spread_dist = 3.0 + rng.random() * 2.0
+                    spread_angle = rng.random() * 2 * math.pi
+                    
+                    # Bias toward center (where populations will meet)
+                    bias_x = -plant['x'] * 0.02
+                    bias_z = -plant['z'] * 0.02
+                    
+                    new_x = plant['x'] + math.cos(spread_angle) * spread_dist + bias_x
+                    new_z = plant['z'] + math.sin(spread_angle) * spread_dist + bias_z
+                    
+                    # Keep in bounds
+                    new_x = max(-WORLD_SIZE, min(WORLD_SIZE, new_x))
+                    new_z = max(-WORLD_SIZE, min(WORLD_SIZE, new_z))
+                    
+                    # Check for nearby plants from OTHER population (crossover!)
+                    nearby_other = None
+                    for other in plants:
+                        if other['population'] != plant['population']:
+                            dist = math.sqrt((other['x'] - new_x)**2 + (other['z'] - new_z)**2)
+                            if dist < 8.0:  # Close enough for crossover
+                                nearby_other = other
+                                break
+                    
+                    if nearby_other:
+                        # CROSSOVER! Blend DNA from both populations
+                        child_dna = plant['dna'].crossover(nearby_other['dna'], rng)
+                        child_dna = child_dna.mutate(rng, strength=0.2)  # Extra mutation
+                        
+                        # Hybrid mesh type
+                        mesh_types = ['tree_dome', 'willow', 'spiral', 'palm']
+                        mesh_type = mesh_types[int(rng.integers(0, len(mesh_types)))]
+                        
+                        new_pop = 'AB'  # Hybrid!
+                        print(f"Gen {generation}: CROSSOVER at ({new_x:.0f}, {new_z:.0f})!")
+                    else:
+                        # Normal reproduction with mutation
+                        child_dna = plant['dna'].mutate(rng, strength=0.15)
+                        mesh_type = plant['mesh_type']
+                        new_pop = plant['population']
+                    
+                    new_plants.append({
+                        'x': new_x, 'z': new_z, 'y': 0,
+                        'dna': child_dna,
+                        'mesh_type': mesh_type,
+                        'generation': generation,
+                        'population': new_pop,
+                        'scale': 1.5 + rng.random() * 1.0,
+                        'rotation': rng.random() * math.pi * 2,
+                    })
+            
+            plants.extend(new_plants)
+            
+            # Count populations
+            pop_a = sum(1 for p in plants if p['population'] == 'A')
+            pop_b = sum(1 for p in plants if p['population'] == 'B')
+            pop_ab = sum(1 for p in plants if p['population'] == 'AB')
+            print(f"Gen {generation}: A={pop_a} B={pop_b} Hybrids={pop_ab} Total={len(plants)}")
+        
+        # Build camera
+        pitch_rad = math.radians(cam_pitch)
+        dir_x = -math.sin(yaw_rad) * math.cos(pitch_rad)
+        dir_y = math.sin(pitch_rad)
+        dir_z = -math.cos(yaw_rad) * math.cos(pitch_rad)
+        
+        projection = glm.perspective(glm.radians(60), WIDTH/HEIGHT, 0.1, 1000.0)
+        cam_pos = glm.vec3(cam_x, cam_y, cam_z)
+        target = cam_pos + glm.vec3(dir_x, dir_y, dir_z)
+        view = glm.lookAt(cam_pos, target, glm.vec3(0, 1, 0))
+        
+        renderer.set_camera(projection, view)
+        
+        # Clear and render
+        ctx.clear(0.4, 0.6, 0.8, 1.0)
+        
+        renderer.clear_instances()
+        for plant in plants:
+            color = (plant['dna'].leaf_color.r, plant['dna'].leaf_color.g, plant['dna'].leaf_color.b)
+            renderer.add_instance(
+                plant['mesh_type'],
+                plant['x'], plant['y'], plant['z'],
+                plant['scale'], plant['rotation'],
+                color, plant['dna']
+            )
+        
+        renderer.render()
+        pygame.display.flip()
+        
+        # FPS
+        fps = clock.get_fps()
+        fps_history.append(fps)
+        if len(fps_history) > 60:
+            fps_history.pop(0)
+        
+        import time
+        now = time.time()
+        if now - last_fps_print > 3.0:
+            avg_fps = sum(fps_history) / len(fps_history) if fps_history else 0
+            print(f"FPS: {avg_fps:.1f} | Plants: {len(plants)} | Gen: {generation}")
+            last_fps_print = now
+    
+    pygame.quit()
+
+
 if __name__ == '__main__':
-    run_test_grid()
+    if '--evolve' in sys.argv:
+        run_evolution_mode()
+    else:
+        run_test_grid()
 
