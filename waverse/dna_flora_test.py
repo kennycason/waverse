@@ -1095,8 +1095,8 @@ def run_test_grid():
     renderer = DNAFloraRenderer(ctx)
     
     # Camera state - start further back and higher to see the whole grid
-    cam_x, cam_y, cam_z = 0, 25, 50
-    cam_yaw, cam_pitch = 0, -25
+    cam_x, cam_y, cam_z = 0, 40, 80
+    cam_yaw, cam_pitch = 0, -20
     
     # FPS tracking
     fps_history = []
@@ -1105,8 +1105,8 @@ def run_test_grid():
     # Generate test DNA grid with variety of plant types
     rng = np.random.default_rng(42)  # Fixed seed for reproducibility
     
-    GRID_SIZE = 24  # 24x24 grid = 576 plants!
-    SPACING = 2.5   # 2.5 units between plants (denser)
+    GRID_SIZE = 32  # 32x32 grid = 1024 plants!
+    SPACING = 4.0   # 4 units between plants (more breathing room)
     
     # Load real DNA from backup files if available
     import os
