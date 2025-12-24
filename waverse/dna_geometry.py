@@ -758,12 +758,362 @@ def plant_dna_to_geometry(dna: Any) -> GeometrySegment:
                 size_x=width * 0.06,
                 size_y=width * 0.06,
                 size_z=width * 0.06,
-                color=(flower_color[0] * 1.2, flower_color[1] * 1.2, flower_color[2] * 1.2),
+                color=(min(1.0, flower_color[0] * 1.2), min(1.0, flower_color[1] * 1.2), min(1.0, flower_color[2] * 1.2)),
                 lod=4
             ))
             trunk.children.append(tentacle)
+            
+    elif plant_type == 'willow':
+        # Weeping willow - trunk with drooping branches
+        # Add droopy canopy
+        canopy = GeometrySegment(
+            shape="ellipsoid", size_x=width * 0.6, size_y=height * 0.2, size_z=width * 0.6,
+            color=leaf_color, offset_y=height * 0.1, lod=4
+        )
+        trunk.children.append(canopy)
+        # Drooping tendrils
+        for i in range(min(8, branch_count + 3)):
+            angle = (i / 8) * 2 * math.pi
+            droop_branch = GeometrySegment(
+                shape="cylinder", size_x=width * 0.015, size_y=height * 0.5, size_z=width * 0.015,
+                color=leaf_color,
+                offset_x=math.cos(angle) * width * 0.4, offset_z=math.sin(angle) * width * 0.4,
+                rotation_x=1.2 * math.sin(angle), rotation_z=1.2 * math.cos(angle),  # Hang down
+                lod=4
+            )
+            trunk.children.append(droop_branch)
+            
+    elif plant_type == 'palm':
+        # Palm tree - thin trunk with fronds at top
+        trunk.size_y = height * 0.7
+        # Fronds radiating from top
+        for i in range(min(6, branch_count)):
+            angle = (i / 6) * 2 * math.pi
+            frond = GeometrySegment(
+                shape="cone", size_x=width * 0.08, size_y=height * 0.4, size_z=width * 0.4,
+                color=leaf_color,
+                offset_x=math.cos(angle) * width * 0.1, offset_z=math.sin(angle) * width * 0.1,
+                rotation_x=0.6 * math.sin(angle), rotation_z=0.6 * math.cos(angle),
+                lod=4
+            )
+            trunk.children.append(frond)
+            
+    elif plant_type in ('vine', 'spiny_vine', 'creeper'):
+        # Curving vine
+        trunk.size_y = height * 0.1
+        current = trunk
+        for i in range(min(6, int(height * 3))):
+            seg = GeometrySegment(
+                shape="cylinder", size_x=width * 0.03, size_y=height * 0.2, size_z=width * 0.03,
+                color=trunk_color,
+                rotation_x=(i % 2) * 0.4 - 0.2 + spiral_factor * 0.5,
+                rotation_z=i * 0.3 + spiral_factor,
+                lod=4
+            )
+            # Add leaves along vine
+            if i % 2 == 0:
+                seg.children.append(GeometrySegment(
+                    shape="ellipsoid", size_x=width * 0.15, size_y=width * 0.05, size_z=width * 0.1,
+                    color=leaf_color, offset_x=width * 0.1, lod=4
+                ))
+            current.children.append(seg)
+            current = seg
+            
+    elif plant_type in ('bamboo', 'reed'):
+        # Segmented stalks
+        trunk.size_y = 0.05
+        stalk_count = max(3, branch_count)
+        for s in range(min(4, stalk_count)):
+            stalk_x = (s - stalk_count / 2) * width * 0.1
+            prev = trunk
+            for i in range(min(5, int(height * 2))):
+                seg = GeometrySegment(
+                    shape="cylinder", 
+                    size_x=width * 0.05 * (1 - i * 0.1), 
+                    size_y=height * 0.15,
+                    size_z=width * 0.05 * (1 - i * 0.1),
+                    color=(trunk_color[0] * (0.9 + i * 0.02), trunk_color[1] * (0.9 + i * 0.02), trunk_color[2] * (0.9 + i * 0.02)),
+                    offset_x=stalk_x if i == 0 else 0,
+                    lod=4
+                )
+                # Nodes between segments
+                if i > 0:
+                    seg.children.append(GeometrySegment(
+                        shape="ellipsoid", size_x=width * 0.06, size_y=width * 0.02, size_z=width * 0.06,
+                        color=(0.3, 0.25, 0.15), offset_y=-height * 0.01, lod=4
+                    ))
+                prev.children.append(seg)
+                prev = seg
+                
+    elif plant_type == 'wheat':
+        # Grain stalks with heads
+        trunk.size_y = 0.02
+        for i in range(min(6, branch_count + 3)):
+            angle = i * 0.8
+            stalk = GeometrySegment(
+                shape="cylinder", size_x=width * 0.01, size_y=height * 0.6, size_z=width * 0.01,
+                color=(0.8, 0.7, 0.3),  # Golden wheat
+                offset_x=math.cos(angle) * width * 0.05, offset_z=math.sin(angle) * width * 0.05,
+                rotation_x=0.15 * math.sin(angle), rotation_z=0.15 * math.cos(angle),
+                lod=4
+            )
+            # Wheat head
+            stalk.children.append(GeometrySegment(
+                shape="ellipsoid", size_x=width * 0.04, size_y=height * 0.1, size_z=width * 0.04,
+                color=(0.9, 0.75, 0.25), lod=4
+            ))
+            trunk.children.append(stalk)
+            
+    elif plant_type in ('oak', 'maple', 'birch'):
+        # Deciduous tree - broad canopy
+        # Multiple canopy clusters for fuller look
+        for i in range(3):
+            angle = i * 2 * math.pi / 3
+            c = GeometrySegment(
+                shape="ellipsoid",
+                size_x=width * 0.5, size_y=height * 0.25, size_z=width * 0.5,
+                color=leaf_color,
+                offset_x=math.cos(angle) * width * 0.2,
+                offset_y=height * 0.05 + i * height * 0.08,
+                offset_z=math.sin(angle) * width * 0.2,
+                lod=4
+            )
+            trunk.children.append(c)
+            
+    elif plant_type in ('spruce', 'fir', 'cedar', 'cypress'):
+        # Conifer - layered cones
+        layers = max(4, int(leaf_density * 6))
+        for i in range(layers):
+            layer_y = height * 0.15 + i * height * 0.12
+            layer_w = width * (0.5 - i * 0.06)
+            layer = GeometrySegment(
+                shape="cone", size_x=layer_w, size_y=height * 0.12, size_z=layer_w,
+                color=(leaf_color[0] * (0.85 + i * 0.03), leaf_color[1] * (0.85 + i * 0.03), leaf_color[2] * (0.85 + i * 0.03)),
+                offset_y=layer_y, lod=4
+            )
+            trunk.children.append(layer)
+            
+    elif plant_type == 'baobab':
+        # Thick trunk, sparse top
+        trunk.size_x = width * 0.4
+        trunk.size_z = width * 0.4
+        trunk.size_y = height * 0.5
+        # Sparse branches at top
+        for i in range(min(5, branch_count)):
+            angle = (i / 5) * 2 * math.pi
+            branch = GeometrySegment(
+                shape="cylinder", size_x=width * 0.1, size_y=height * 0.25, size_z=width * 0.1,
+                color=trunk_color,
+                offset_x=math.cos(angle) * width * 0.25, offset_z=math.sin(angle) * width * 0.25,
+                rotation_x=0.4 * math.sin(angle), rotation_z=0.4 * math.cos(angle),
+                lod=4
+            )
+            branch.children.append(GeometrySegment(
+                shape="ellipsoid", size_x=width * 0.2, size_y=height * 0.1, size_z=width * 0.2,
+                color=leaf_color, lod=4
+            ))
+            trunk.children.append(branch)
+            
+    elif plant_type in ('dead_tree', 'snag'):
+        # Bare branches
+        trunk.color = (0.3, 0.25, 0.2)
+        for i in range(min(4, branch_count)):
+            angle = (i / 4) * 2 * math.pi + i * 0.3
+            branch = GeometrySegment(
+                shape="cylinder", size_x=width * 0.04, size_y=height * 0.3, size_z=width * 0.04,
+                color=(0.35, 0.28, 0.22),
+                offset_x=math.cos(angle) * width * 0.08, offset_z=math.sin(angle) * width * 0.08,
+                offset_y=-height * 0.1,
+                rotation_x=0.5 * math.sin(angle), rotation_z=0.5 * math.cos(angle),
+                lod=4
+            )
+            trunk.children.append(branch)
+            
+    elif plant_type == 'stump':
+        # Short wide stump
+        trunk.shape = "cylinder"
+        trunk.size_x = width * 0.3
+        trunk.size_z = width * 0.3
+        trunk.size_y = height * 0.2
+        trunk.color = (0.35, 0.28, 0.2)
+        # Top ring
+        trunk.children.append(GeometrySegment(
+            shape="ellipsoid", size_x=width * 0.32, size_y=width * 0.05, size_z=width * 0.32,
+            color=(0.4, 0.35, 0.25), lod=4
+        ))
+        
+    elif plant_type == 'fallen_log':
+        # Horizontal cylinder
+        trunk.shape = "cylinder"
+        trunk.size_x = width * 0.15
+        trunk.size_z = height * 0.5  # Lying down
+        trunk.size_y = width * 0.15
+        trunk.rotation_x = 1.57  # 90 degrees - horizontal
+        trunk.color = (0.35, 0.28, 0.2)
+        
+    elif plant_type in ('stone', 'boulder', 'mossy_rock', 'rock_cluster', 'flat_rock'):
+        # Rocks - irregular box shapes
+        trunk.shape = "box"
+        trunk.size_x = width * 0.4 * (1 + asymmetry * 0.3)
+        trunk.size_y = height * 0.3 * (1 - asymmetry * 0.2)
+        trunk.size_z = width * 0.35 * (1 + asymmetry * 0.2)
+        trunk.color = (0.45, 0.43, 0.4)  # Gray rock
+        if 'mossy' in plant_type:
+            trunk.children.append(GeometrySegment(
+                shape="ellipsoid", size_x=width * 0.35, size_y=width * 0.1, size_z=width * 0.3,
+                color=(0.2, 0.4, 0.15), offset_y=height * 0.1, lod=4
+            ))
+            
+    elif plant_type in ('groundcover', 'lichen', 'moss_pad'):
+        # Low spreading mat
+        trunk.shape = "ellipsoid"
+        trunk.size_x = width * 0.5
+        trunk.size_y = height * 0.1
+        trunk.size_z = width * 0.5
+        trunk.color = leaf_color
+        # Add some variation bumps
+        for i in range(3):
+            angle = i * 2.1
+            trunk.children.append(GeometrySegment(
+                shape="ellipsoid", 
+                size_x=width * 0.2, size_y=height * 0.08, size_z=width * 0.2,
+                color=(leaf_color[0] * 0.9, leaf_color[1] * 1.1, leaf_color[2] * 0.9),
+                offset_x=math.cos(angle) * width * 0.2, offset_z=math.sin(angle) * width * 0.2,
+                lod=4
+            ))
+            
+    elif plant_type == 'lily_pad':
+        # Flat disc on water
+        trunk.shape = "ellipsoid"
+        trunk.size_x = width * 0.5
+        trunk.size_y = height * 0.03
+        trunk.size_z = width * 0.5
+        trunk.color = (0.15, 0.5, 0.2)
+        # Optional flower
+        if leaf_density > 0.5:
+            trunk.children.append(GeometrySegment(
+                shape="ellipsoid", size_x=width * 0.1, size_y=height * 0.15, size_z=width * 0.1,
+                color=flower_color, lod=4
+            ))
+            
+    elif plant_type == 'seaweed':
+        # Wavy underwater plant
+        trunk.size_y = 0.02
+        current = trunk
+        for i in range(min(8, int(height * 4))):
+            seg = GeometrySegment(
+                shape="ellipsoid", size_x=width * 0.08, size_y=height * 0.1, size_z=width * 0.02,
+                color=(leaf_color[0], leaf_color[1] * (0.8 + i * 0.03), leaf_color[2]),
+                rotation_z=math.sin(i * 0.8) * 0.4,
+                lod=4
+            )
+            current.children.append(seg)
+            current = seg
+            
+    elif plant_type == 'coral':
+        # Branching coral
+        trunk.shape = "ellipsoid"
+        trunk.size_x = width * 0.15
+        trunk.size_y = height * 0.15
+        trunk.size_z = width * 0.15
+        trunk.color = flower_color
+        # Coral branches
+        for i in range(min(5, branch_count)):
+            angle = (i / 5) * 2 * math.pi
+            branch = GeometrySegment(
+                shape="cylinder", size_x=width * 0.05, size_y=height * 0.3, size_z=width * 0.05,
+                color=flower_color,
+                rotation_x=0.5 * math.sin(angle), rotation_z=0.5 * math.cos(angle),
+                lod=4
+            )
+            branch.children.append(GeometrySegment(
+                shape="ellipsoid", size_x=width * 0.08, size_y=width * 0.08, size_z=width * 0.08,
+                color=(min(1.0, flower_color[0] * 1.2), min(1.0, flower_color[1] * 1.2), min(1.0, flower_color[2] * 1.2)), lod=4
+            ))
+            trunk.children.append(branch)
+            
+    elif plant_type in ('banana', 'monstera', 'heliconia'):
+        # Tropical with big leaves
+        trunk.size_y = height * 0.4
+        for i in range(min(5, branch_count)):
+            angle = (i / 5) * 2 * math.pi
+            leaf = GeometrySegment(
+                shape="ellipsoid", size_x=width * 0.15, size_y=width * 0.02, size_z=width * 0.4,
+                color=leaf_color,
+                offset_y=-height * 0.05,
+                rotation_x=0.4 * math.sin(angle) + droop * 0.3, 
+                rotation_z=angle,
+                lod=4
+            )
+            trunk.children.append(leaf)
+            
+    elif plant_type == 'ficus':
+        # Aerial roots
+        trunk.size_y = height * 0.5
+        canopy = GeometrySegment(
+            shape="ellipsoid", size_x=width * 0.6, size_y=height * 0.3, size_z=width * 0.6,
+            color=leaf_color, lod=4
+        )
+        trunk.children.append(canopy)
+        # Aerial roots hanging down
+        for i in range(3):
+            angle = i * 2 * math.pi / 3
+            root = GeometrySegment(
+                shape="cylinder", size_x=width * 0.02, size_y=height * 0.4, size_z=width * 0.02,
+                color=trunk_color,
+                offset_x=math.cos(angle) * width * 0.3, offset_z=math.sin(angle) * width * 0.3,
+                rotation_x=1.4, lod=4  # Hanging down
+            )
+            trunk.children.append(root)
+            
+    elif plant_type in ('blob_tree', 'layered_tree', 'clump_tree'):
+        # Stylized low-poly tree variations
+        if plant_type == 'blob_tree':
+            # Single big blob canopy
+            trunk.children.append(GeometrySegment(
+                shape="ellipsoid", size_x=width * 0.7, size_y=height * 0.4, size_z=width * 0.7,
+                color=leaf_color, lod=4
+            ))
+        elif plant_type == 'layered_tree':
+            # Stacked discs
+            for i in range(4):
+                trunk.children.append(GeometrySegment(
+                    shape="ellipsoid", 
+                    size_x=width * (0.6 - i * 0.1), size_y=height * 0.08, size_z=width * (0.6 - i * 0.1),
+                    color=leaf_color, offset_y=i * height * 0.1, lod=4
+                ))
+        else:  # clump_tree
+            # Multiple overlapping spheres
+            for i in range(4):
+                angle = i * 1.5
+                trunk.children.append(GeometrySegment(
+                    shape="ellipsoid",
+                    size_x=width * 0.35, size_y=height * 0.25, size_z=width * 0.35,
+                    color=leaf_color,
+                    offset_x=math.cos(angle) * width * 0.15, offset_z=math.sin(angle) * width * 0.15,
+                    lod=4
+                ))
+                
+    elif plant_type == 'mangrove':
+        # Exposed root system
+        # Root base
+        for i in range(4):
+            angle = i * math.pi / 2
+            root = GeometrySegment(
+                shape="cylinder", size_x=width * 0.05, size_y=height * 0.25, size_z=width * 0.05,
+                color=trunk_color,
+                offset_x=math.cos(angle) * width * 0.15, offset_z=math.sin(angle) * width * 0.15,
+                rotation_x=-0.5 * math.sin(angle), rotation_z=-0.5 * math.cos(angle),
+                lod=4
+            )
+            trunk.children.append(root)
+        # Canopy
+        trunk.children.append(GeometrySegment(
+            shape="ellipsoid", size_x=width * 0.5, size_y=height * 0.3, size_z=width * 0.5,
+            color=leaf_color, offset_y=height * 0.1, lod=4
+        ))
     else:
-        # Default: simple tree
+        # Default: simple low-poly tree with canopy
         canopy = GeometrySegment(
             shape="ellipsoid",
             size_x=width * 0.5,
