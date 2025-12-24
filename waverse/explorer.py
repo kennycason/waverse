@@ -991,6 +991,148 @@ def log_dna_at_cursor(camera, flora_manager, animal_manager):
         return None
 
 
+def cut_tree_at_cursor(camera, flora_manager, chunk_manager, dropped_items_list):
+    """Cut down the nearest tree at the cursor (camera look direction).
+    
+    Creates dropped items (wood) that can be picked up.
+    Returns the number of items created, or 0 if no tree found.
+    """
+    # Get camera look direction
+    look_x, look_y, look_z = camera.get_forward_vector()
+    
+    # Search for nearest tree/plant in look direction
+    max_dist = 15.0  # Max cutting distance
+    hit_radius = 3.0  # How close the ray must pass
+    
+    best_plant = None
+    best_plant_chunk = None
+    best_dist = float('inf')
+    
+    # Search plants in nearby chunks
+    cam_cx = int(camera.x // 32)
+    cam_cz = int(camera.z // 32)
+    
+    for dcx in range(-1, 2):
+        for dcz in range(-1, 2):
+            cx, cz = cam_cx + dcx, cam_cz + dcz
+            chunk_key = (cx, cz)
+            
+            plants = flora_manager.chunk_plants.get(chunk_key, [])
+            
+            for plant in plants:
+                # Vector from camera to plant
+                dx = plant.x - camera.x
+                dy = plant.y - camera.y
+                dz = plant.z - camera.z
+                
+                # Project onto look direction
+                ray_dist = dx * look_x + dy * look_y + dz * look_z
+                
+                if ray_dist < 1.0 or ray_dist > max_dist:
+                    continue
+                
+                # Closest point on ray to plant
+                closest_x = camera.x + look_x * ray_dist
+                closest_y = camera.y + look_y * ray_dist
+                closest_z = camera.z + look_z * ray_dist
+                
+                # Perpendicular distance
+                perp_dist = math.sqrt(
+                    (plant.x - closest_x)**2 + 
+                    (plant.y - closest_y)**2 + 
+                    (plant.z - closest_z)**2
+                )
+                
+                if perp_dist < hit_radius and ray_dist < best_dist:
+                    best_plant = plant
+                    best_plant_chunk = chunk_key
+                    best_dist = ray_dist
+    
+    if best_plant is None:
+        camera.set_status("No tree in range", 1.5)
+        return 0
+    
+    # Determine wood yield based on plant size/type
+    dna = best_plant.dna
+    plant_height = getattr(dna, 'height_gene', None)
+    if plant_height and hasattr(plant_height, 'value'):
+        height = plant_height.value
+    else:
+        height = 1.0
+    
+    # Bigger trees give more wood (1-5 logs)
+    wood_count = min(5, max(1, int(height * 1.5)))
+    
+    # Create dropped wood items at the plant location
+    for i in range(wood_count):
+        # Offset slightly with random scatter
+        offset_x = (np.random.random() - 0.5) * 2.0
+        offset_z = (np.random.random() - 0.5) * 2.0
+        offset_y = np.random.random() * 2.0 + i * 0.5  # Stack upward
+        
+        wood_item = Item("wood", "Wood", count=1, max_stack=99,
+                        description="Wood from a tree. Used for crafting.")
+        
+        dropped = DroppedItem(
+            best_plant.x + offset_x,
+            best_plant.y + offset_y + height,  # Start at tree top
+            best_plant.z + offset_z,
+            wood_item
+        )
+        dropped.velocity_y = np.random.random() * 3.0  # Slight upward velocity
+        dropped_items_list.append(dropped)
+    
+    # Remove the plant from flora manager
+    if best_plant_chunk in flora_manager.chunk_plants:
+        flora_manager.chunk_plants[best_plant_chunk] = [
+            p for p in flora_manager.chunk_plants[best_plant_chunk] 
+            if p is not best_plant
+        ]
+        # Invalidate display list so it re-renders
+        if best_plant_chunk in flora_manager.display_lists:
+            del flora_manager.display_lists[best_plant_chunk]
+    
+    plant_type = getattr(dna, 'plant_type', 'plant')
+    if hasattr(plant_type, 'name'):
+        plant_type = plant_type.name
+    
+    camera.set_status(f"CUT {plant_type} - {wood_count} logs dropped!", 2.0)
+    print(f"  [CUT] Cut {plant_type} at ({best_plant.x:.1f}, {best_plant.z:.1f}) - {wood_count} logs")
+    
+    return wood_count
+
+
+def pickup_nearby_items(camera, dropped_items_list, pickup_radius: float = 3.0):
+    """Pick up dropped items near the camera and add to inventory.
+    
+    Returns dict of item_type -> count picked up.
+    """
+    picked_up = {}
+    remaining = []
+    
+    for dropped in dropped_items_list:
+        dist = dropped.distance_to(camera.x, camera.y, camera.z)
+        if dist < pickup_radius and dropped.on_ground:
+            item = dropped.item
+            # Add to inventory
+            camera.add_item(Item(item.item_type, item.name, item.count, 
+                                item.max_stack, item.description, item.properties.copy()))
+            # Track what we picked up
+            picked_up[item.item_type] = picked_up.get(item.item_type, 0) + item.count
+        else:
+            remaining.append(dropped)
+    
+    dropped_items_list.clear()
+    dropped_items_list.extend(remaining)
+    
+    if picked_up:
+        items_str = ", ".join(f"{count} {itype}" for itype, count in picked_up.items())
+        camera.set_status(f"Picked up {items_str}!", 1.5)
+        print(f"  [PICKUP] Collected: {picked_up}")
+    
+    return picked_up
+
+
 def _set_terrain_height_at_world_pos(chunk_manager, world_x, world_z, delta, modified_chunks):
     """Set terrain height at a world position, updating ALL chunks that share this vertex.
     
@@ -1360,8 +1502,93 @@ class ToolType:
     SCAN = "SCAN"   # Scan/log DNA of plants and animals
     MINE = "MINE"   # Mine/lower terrain (L1 = single point)
     FILL = "FILL"   # Fill/raise terrain (inverse of MINE)
+    CUT = "CUT"     # Cut down trees for wood
     
-    ALL_TOOLS = [SCAN, MINE, FILL]
+    ALL_TOOLS = [SCAN, MINE, FILL, CUT]
+
+
+class Item:
+    """
+    A generic item that can be in inventory or dropped in the world.
+    
+    Items can be:
+    - Stackable resources (wood, stone, fiber)
+    - Tools with durability (pickaxe, axe)
+    - Special items (genetic sequencer, DNA samples)
+    - Consumables
+    """
+    
+    def __init__(self, 
+                 item_type: str,
+                 name: str = None,
+                 count: int = 1,
+                 max_stack: int = 99,
+                 description: str = "",
+                 properties: dict = None):
+        self.item_type = item_type  # e.g., "wood", "tool:scan", "dna_sample"
+        self.name = name or item_type.replace("_", " ").title()
+        self.count = count
+        self.max_stack = max_stack
+        self.description = description
+        self.properties = properties or {}  # Extra data (durability, dna, color, etc.)
+    
+    def is_stackable(self) -> bool:
+        """Check if this item can stack with others of same type."""
+        return self.max_stack > 1
+    
+    def can_stack_with(self, other: 'Item') -> bool:
+        """Check if this item can stack with another item."""
+        if not self.is_stackable() or not other.is_stackable():
+            return False
+        return self.item_type == other.item_type
+    
+    def add_count(self, amount: int) -> int:
+        """Add to stack, returns overflow (amount that didn't fit)."""
+        space = self.max_stack - self.count
+        to_add = min(amount, space)
+        self.count += to_add
+        return amount - to_add
+    
+    def __repr__(self):
+        return f"Item({self.item_type}, x{self.count})"
+
+
+class DroppedItem:
+    """An item dropped in the world that can be picked up."""
+    
+    def __init__(self, x: float, y: float, z: float, item: Item):
+        self.x = x
+        self.y = y
+        self.z = z
+        self.item = item  # The Item object this drop contains
+        self.velocity_y = 0.0  # For falling/bouncing
+        self.on_ground = False
+        self.lifetime = 300.0  # Seconds before despawning
+        self.rotation = np.random.random() * 360  # Random rotation
+        self.scale = 0.3 + np.random.random() * 0.2  # Slight size variation
+    
+    def update(self, dt: float, terrain_height: float):
+        """Update physics (falling, bouncing)."""
+        self.lifetime -= dt
+        
+        if not self.on_ground:
+            # Gravity
+            self.velocity_y -= 20.0 * dt
+            self.y += self.velocity_y * dt
+            
+            # Ground collision
+            ground_y = terrain_height + 0.3  # Slight offset so it sits on ground
+            if self.y <= ground_y:
+                self.y = ground_y
+                if abs(self.velocity_y) > 2.0:
+                    self.velocity_y *= -0.3  # Bounce
+                else:
+                    self.velocity_y = 0
+                    self.on_ground = True
+    
+    def distance_to(self, x: float, y: float, z: float) -> float:
+        """Distance from a point."""
+        return math.sqrt((self.x - x)**2 + (self.y - y)**2 + (self.z - z)**2)
 
 
 class Camera:
@@ -1463,7 +1690,12 @@ class Camera:
         self.log_filter_names = ["ALL", "PLANTS", "ANIMALS"]
         self.inventory_index = 0  # Selected item in inventory grid
         self.inventory_cols = 2   # Columns in inventory grid
-        self.inventory_count = 6  # Total inventory items
+        self.inventory_count = 6  # Total inventory items (tools count)
+        
+        # Inventory: list of Item objects
+        # Starts with default tools (non-stackable, always present)
+        self.inventory: list = []
+        self._init_default_inventory()
         
         # Scroll acceleration state
         self.scroll_hold_time = 0.0  # How long scroll direction held
@@ -1471,6 +1703,63 @@ class Camera:
         self.scroll_cooldown = 0.0   # Time until next scroll step
         self.favorites = set()  # Set of favorite log filenames
         self._load_favorites()
+    
+    def _init_default_inventory(self):
+        """Initialize inventory with default tools."""
+        self.inventory = [
+            Item("tool:scan", "Scanner", max_stack=1, 
+                 description="Scan plants and animals to log their DNA"),
+            Item("tool:mine", "Mining Tool", max_stack=1,
+                 description="Lower terrain by mining"),
+            Item("tool:fill", "Fill Tool", max_stack=1,
+                 description="Raise terrain by filling"),
+            Item("tool:cut", "Axe", max_stack=1,
+                 description="Cut trees for wood"),
+        ]
+    
+    def add_item(self, item: 'Item') -> bool:
+        """
+        Add an item to inventory. Stacks with existing items if possible.
+        Returns True if item was added, False if inventory full.
+        """
+        # Try to stack with existing items first
+        if item.is_stackable():
+            for inv_item in self.inventory:
+                if inv_item.can_stack_with(item):
+                    overflow = inv_item.add_count(item.count)
+                    if overflow == 0:
+                        return True
+                    item.count = overflow  # Continue with remainder
+        
+        # Add as new slot (no limit for now, could add max inventory size later)
+        self.inventory.append(item)
+        return True
+    
+    def get_item_count(self, item_type: str) -> int:
+        """Get total count of an item type in inventory."""
+        total = 0
+        for item in self.inventory:
+            if item.item_type == item_type:
+                total += item.count
+        return total
+    
+    def remove_item(self, item_type: str, count: int = 1) -> int:
+        """Remove items from inventory. Returns amount actually removed."""
+        removed = 0
+        to_remove = []
+        
+        for item in self.inventory:
+            if item.item_type == item_type and removed < count:
+                take = min(item.count, count - removed)
+                item.count -= take
+                removed += take
+                if item.count <= 0:
+                    to_remove.append(item)
+        
+        for item in to_remove:
+            self.inventory.remove(item)
+        
+        return removed
     
     def set_status(self, message: str, duration: float = 3.0):
         """Set a status message to display at bottom of screen."""
@@ -2767,6 +3056,115 @@ class Minimap:
         glMatrixMode(GL_PROJECTION)
         glPopMatrix()
         glMatrixMode(GL_MODELVIEW)
+
+
+def render_dropped_items(dropped_items: list, camera_x: float, camera_y: float, camera_z: float):
+    """Render dropped items as small cylinder logs (for wood) or other shapes."""
+    if not dropped_items:
+        return
+    
+    # Culling distance
+    max_render_dist = 100.0
+    
+    glEnable(GL_LIGHTING)
+    glEnable(GL_COLOR_MATERIAL)
+    glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE)
+    
+    for dropped in dropped_items:
+        dx = dropped.x - camera_x
+        dy = dropped.y - camera_y
+        dz = dropped.z - camera_z
+        dist_sq = dx*dx + dy*dy + dz*dz
+        
+        if dist_sq > max_render_dist * max_render_dist:
+            continue
+        
+        glPushMatrix()
+        glTranslatef(dropped.x, dropped.y, dropped.z)
+        glRotatef(dropped.rotation, 0, 1, 0)  # Random rotation
+        glRotatef(90, 0, 0, 1)  # Lay flat horizontally
+        
+        # Draw based on item type
+        item_type = dropped.item.item_type
+        
+        if item_type == "wood":
+            # Draw 3 small cylinder logs
+            log_radius = 0.15 * dropped.scale
+            log_length = 0.5 * dropped.scale
+            
+            # Brown wood color
+            glColor3f(0.55, 0.35, 0.15)
+            
+            for i, offset in enumerate([(-0.2, 0), (0.15, 0.1), (0, -0.15)]):
+                glPushMatrix()
+                glTranslatef(offset[0] * dropped.scale, offset[1] * dropped.scale, 0)
+                
+                # Draw cylinder using quads
+                segments = 8
+                for j in range(segments):
+                    angle1 = (j / segments) * 2 * math.pi
+                    angle2 = ((j + 1) / segments) * 2 * math.pi
+                    
+                    x1, y1 = math.cos(angle1) * log_radius, math.sin(angle1) * log_radius
+                    x2, y2 = math.cos(angle2) * log_radius, math.sin(angle2) * log_radius
+                    
+                    # Cylinder side
+                    glBegin(GL_QUADS)
+                    glNormal3f(math.cos(angle1), math.sin(angle1), 0)
+                    glVertex3f(x1, y1, -log_length/2)
+                    glVertex3f(x1, y1, log_length/2)
+                    glNormal3f(math.cos(angle2), math.sin(angle2), 0)
+                    glVertex3f(x2, y2, log_length/2)
+                    glVertex3f(x2, y2, -log_length/2)
+                    glEnd()
+                
+                # Draw end caps (lighter wood color for cross-section)
+                glColor3f(0.75, 0.55, 0.35)
+                for z_end in [-log_length/2, log_length/2]:
+                    glBegin(GL_TRIANGLE_FAN)
+                    glNormal3f(0, 0, 1 if z_end > 0 else -1)
+                    glVertex3f(0, 0, z_end)
+                    for j in range(segments + 1):
+                        angle = (j / segments) * 2 * math.pi
+                        glVertex3f(math.cos(angle) * log_radius, math.sin(angle) * log_radius, z_end)
+                    glEnd()
+                glColor3f(0.55, 0.35, 0.15)  # Reset to bark color
+                
+                glPopMatrix()
+        else:
+            # Generic item: draw a small glowing cube
+            size = 0.3 * dropped.scale
+            glColor3f(0.8, 0.8, 0.2)  # Yellow glow
+            glBegin(GL_QUADS)
+            # Front
+            glNormal3f(0, 0, 1)
+            glVertex3f(-size, -size, size)
+            glVertex3f(size, -size, size)
+            glVertex3f(size, size, size)
+            glVertex3f(-size, size, size)
+            # Back
+            glNormal3f(0, 0, -1)
+            glVertex3f(-size, -size, -size)
+            glVertex3f(-size, size, -size)
+            glVertex3f(size, size, -size)
+            glVertex3f(size, -size, -size)
+            # Top
+            glNormal3f(0, 1, 0)
+            glVertex3f(-size, size, -size)
+            glVertex3f(-size, size, size)
+            glVertex3f(size, size, size)
+            glVertex3f(size, size, -size)
+            # Bottom
+            glNormal3f(0, -1, 0)
+            glVertex3f(-size, -size, -size)
+            glVertex3f(size, -size, -size)
+            glVertex3f(size, -size, size)
+            glVertex3f(-size, -size, size)
+            glEnd()
+        
+        glPopMatrix()
+    
+    glDisable(GL_COLOR_MATERIAL)
 
 
 def render_water(camera_x: float, camera_z: float, water_level: float = 0.0):
@@ -4223,6 +4621,9 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
     if MAX_FLORA is not None:
         flora_manager.MAX_TOTAL_PLANTS = MAX_FLORA
     animal_manager = AnimalManager(config.seed)
+    
+    # Dropped items in the world (wood, stone, etc.)
+    dropped_items: list = []
     sky = SkySystem(chunk_dna_manager)
     water_level = config.water_level
     minimap = Minimap(chunk_manager)
@@ -4439,6 +4840,8 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                                 # Also invalidate modern renderer chunks
                                 if USE_MODERN_RENDERER and modern_renderer:
                                     modern_renderer.invalidate_terrain_chunk(chunk_key[0], chunk_key[1])
+                    elif camera.current_tool == ToolType.CUT:
+                        cut_tree_at_cursor(camera, flora_manager, chunk_manager, dropped_items)
                 elif event.key == pygame.K_t:  # T = cycle tool radius (for MINE/FILL)
                     if camera.current_tool in (ToolType.MINE, ToolType.FILL):
                         camera.cycle_tool_radius()
@@ -4719,7 +5122,7 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
             #     # Future: interact with NPCs, objects, etc.
             #     pass
             
-            # R1 = Use tool (SCAN/MINE/FILL) - only when menu closed
+            # R1 = Use tool (SCAN/MINE/FILL/CUT) - only when menu closed
             if not camera.menu_open and gamepad_speed_cooldown <= 0:
                 if gamepad.get_button(GamepadConfig.R1):
                     if camera.current_tool == ToolType.SCAN:
@@ -4742,6 +5145,8 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                                 # Also invalidate modern renderer chunks
                                 if USE_MODERN_RENDERER and modern_renderer:
                                     modern_renderer.invalidate_terrain_chunk(chunk_key[0], chunk_key[1])
+                    elif camera.current_tool == ToolType.CUT:
+                        cut_tree_at_cursor(camera, flora_manager, chunk_manager, dropped_items)
                     gamepad_speed_cooldown = 15
             
             # DPAD = Tool cycling (left/right) and tool radius (up/down)
@@ -4929,6 +5334,9 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                 camera, chunk_manager, flora_manager, animal_manager, structure_manager, climate_manager
             )
             
+            # Sync dropped items for rendering
+            modern_renderer.set_wood_chunks(dropped_items)
+            
             # Render everything via modern renderer
             modern_renderer.render()
             
@@ -5080,6 +5488,17 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                 return chunk_manager.get_height_at(x, z) * HEIGHT_SCALE
             animal_manager.update(dt, cam_pos, get_ground_height)
         
+        # Update dropped items physics (falling, bouncing)
+        for dropped in dropped_items[:]:
+            terrain_h = chunk_manager.get_height_at(dropped.x, dropped.z) * HEIGHT_SCALE
+            dropped.update(dt, terrain_h)
+            # Remove expired items
+            if dropped.lifetime <= 0:
+                dropped_items.remove(dropped)
+        
+        # Auto-pickup items when walking over them
+        pickup_nearby_items(camera, dropped_items, pickup_radius=2.5)
+        
         # Skip legacy rendering in modern mode (modern renderer handles all of this)
         if not (USE_MODERN_RENDERER and modern_renderer):
             # Render animals (skip when very high up - they're invisible anyway)
@@ -5095,6 +5514,9 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
             
             # Render water plane at water level, centered on camera
             render_water(camera.x, camera.z, water_level)
+            
+            # Render dropped items
+            render_dropped_items(dropped_items, camera.x, camera.y, camera.z)
             
             # Render weather effects (rain/snow particles, lightning)
             weather_renderer.render(cam_pos[0], cam_pos[1], cam_pos[2],

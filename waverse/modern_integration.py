@@ -65,6 +65,11 @@ class ModernWorldRenderer:
         # Wind system
         self.wind = WindManager(seed=42)
         
+        # Wood chunks renderer (uses simple cylinders)
+        self._wood_program = self._create_wood_shader()
+        self._wood_vao, self._wood_vbo = self._create_wood_mesh()
+        self._dropped_items: list = []  # List of DroppedItem objects
+        
         # Integration state
         self.loaded_terrain_chunks: set = set()
         self.loaded_flora_chunks: set = set()
@@ -1007,6 +1012,9 @@ class ModernWorldRenderer:
         # Render animals
         self.animals.render(dt)
         
+        # Render dropped items
+        self._render_dropped_items()
+        
         # Render water (transparent, needs blending)
         # OPTIMIZATION: Skip water if camera is very high above water level
         # Water is irrelevant at high altitudes
@@ -1086,6 +1094,121 @@ class ModernWorldRenderer:
             'tornado_strength': self.wind.tornado.strength if self.wind.tornado else 0,
         }
     
+    def _create_wood_shader(self):
+        """Create shader for wood chunk rendering."""
+        vert = """
+        #version 330
+        uniform mat4 u_mvp;
+        uniform mat4 u_model;
+        in vec3 in_position;
+        in vec3 in_normal;
+        in vec3 in_color;
+        out vec3 v_normal;
+        out vec3 v_color;
+        void main() {
+            gl_Position = u_mvp * u_model * vec4(in_position, 1.0);
+            v_normal = mat3(u_model) * in_normal;
+            v_color = in_color;
+        }
+        """
+        frag = """
+        #version 330
+        in vec3 v_normal;
+        in vec3 v_color;
+        out vec4 fragColor;
+        void main() {
+            vec3 light_dir = normalize(vec3(0.5, 1.0, 0.3));
+            float diffuse = max(dot(normalize(v_normal), light_dir), 0.0) * 0.6 + 0.4;
+            fragColor = vec4(v_color * diffuse, 1.0);
+        }
+        """
+        return self.ctx.program(vertex_shader=vert, fragment_shader=frag)
+    
+    def _create_wood_mesh(self):
+        """Create a cylinder mesh for wood logs (3 logs bundled together)."""
+        vertices = []
+        segments = 8
+        log_radius = 0.15
+        log_length = 0.5
+        bark_color = (0.55, 0.35, 0.15)
+        end_color = (0.75, 0.55, 0.35)
+        
+        # Offsets for 3 logs in a bundle
+        offsets = [(-0.15, 0.0), (0.12, 0.08), (0.0, -0.12)]
+        
+        for ox, oy in offsets:
+            # Cylinder sides
+            for i in range(segments):
+                angle1 = (i / segments) * 2 * 3.14159
+                angle2 = ((i + 1) / segments) * 2 * 3.14159
+                
+                x1, z1 = math.cos(angle1) * log_radius + ox, math.sin(angle1) * log_radius + oy
+                x2, z2 = math.cos(angle2) * log_radius + ox, math.sin(angle2) * log_radius + oy
+                n1 = (math.cos(angle1), 0, math.sin(angle1))
+                n2 = (math.cos(angle2), 0, math.sin(angle2))
+                
+                # Two triangles for quad
+                vertices.extend([
+                    x1, -log_length/2, z1, *n1, *bark_color,
+                    x1,  log_length/2, z1, *n1, *bark_color,
+                    x2,  log_length/2, z2, *n2, *bark_color,
+                    x1, -log_length/2, z1, *n1, *bark_color,
+                    x2,  log_length/2, z2, *n2, *bark_color,
+                    x2, -log_length/2, z2, *n2, *bark_color,
+                ])
+            
+            # End caps (triangle fans as triangles)
+            for y_end, ny in [(-log_length/2, -1), (log_length/2, 1)]:
+                for i in range(segments):
+                    angle1 = (i / segments) * 2 * 3.14159
+                    angle2 = ((i + 1) / segments) * 2 * 3.14159
+                    x1, z1 = math.cos(angle1) * log_radius + ox, math.sin(angle1) * log_radius + oy
+                    x2, z2 = math.cos(angle2) * log_radius + ox, math.sin(angle2) * log_radius + oy
+                    vertices.extend([
+                        ox, y_end, oy, 0, ny, 0, *end_color,
+                        x1, y_end, z1, 0, ny, 0, *end_color,
+                        x2, y_end, z2, 0, ny, 0, *end_color,
+                    ])
+        
+        vbo = self.ctx.buffer(np.array(vertices, dtype='f4').tobytes())
+        vao = self.ctx.vertex_array(self._wood_program, [(vbo, '3f 3f 3f', 'in_position', 'in_normal', 'in_color')])
+        return vao, vbo
+    
+    def set_wood_chunks(self, dropped_items: list):
+        """Set the list of dropped items to render (kept name for compatibility)."""
+        self._dropped_items = dropped_items
+    
+    def _render_dropped_items(self):
+        """Render all dropped items (wood logs, etc.)."""
+        if not self._dropped_items:
+            return
+        
+        cam_pos = self._camera_pos if hasattr(self, '_camera_pos') else (0, 0, 0)
+        max_dist_sq = 100 * 100
+        
+        for dropped in self._dropped_items:
+            dx = dropped.x - cam_pos[0]
+            dy = dropped.y - cam_pos[1]
+            dz = dropped.z - cam_pos[2]
+            if dx*dx + dy*dy + dz*dz > max_dist_sq:
+                continue
+            
+            # Build model matrix
+            model = glm.mat4(1.0)
+            model = glm.translate(model, glm.vec3(dropped.x, dropped.y, dropped.z))
+            model = glm.rotate(model, math.radians(dropped.rotation), glm.vec3(0, 1, 0))
+            model = glm.rotate(model, math.radians(90), glm.vec3(1, 0, 0))  # Lay flat
+            model = glm.scale(model, glm.vec3(dropped.scale))
+            
+            # MVP
+            mvp = self._proj_matrix * self._view_matrix * model
+            
+            self._wood_program['u_mvp'].write(mvp.to_bytes() if hasattr(mvp, 'to_bytes') else bytes(mvp))
+            self._wood_program['u_model'].write(model.to_bytes() if hasattr(model, 'to_bytes') else bytes(model))
+            
+            # For now, all dropped items use the wood mesh (can expand later)
+            self._wood_vao.render()
+    
     def cleanup(self):
         """Release all GPU resources."""
         self.sky.cleanup()
@@ -1098,6 +1221,13 @@ class ModernWorldRenderer:
         self.weather.cleanup()
         self.wind_particles.cleanup()
         self.hud.cleanup()
+        # Wood chunks
+        if self._wood_vao:
+            self._wood_vao.release()
+        if self._wood_vbo:
+            self._wood_vbo.release()
+        if self._wood_program:
+            self._wood_program.release()
         self.loaded_terrain_chunks.clear()
         self.loaded_flora_chunks.clear()
         self._visible_structures.clear()
