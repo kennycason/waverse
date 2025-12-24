@@ -74,6 +74,10 @@ class ModernWorldRenderer:
         self._debris_vao, self._debris_vbo = self._create_debris_mesh()
         self._debris_particles: list = []  # List of Debris objects
         
+        # Fallen trees (tipping over animation)
+        self._fallen_trees: list = []  # List of FallenTree objects
+        self._trunk_vao, self._trunk_vbo = self._create_trunk_mesh()
+        
         # Integration state
         self.loaded_terrain_chunks: set = set()
         self.loaded_flora_chunks: set = set()
@@ -1026,6 +1030,9 @@ class ModernWorldRenderer:
         # Render debris particles (fading effects)
         self._render_debris()
         
+        # Render fallen tree trunks
+        self._render_fallen_trees()
+        
         # Render water (transparent, needs blending)
         # OPTIMIZATION: Skip water if camera is very high above water level
         # Water is irrelevant at high altitudes
@@ -1233,9 +1240,58 @@ class ModernWorldRenderer:
         vao = self.ctx.vertex_array(self._wood_program, [(vbo, '3f 3f 3f', 'in_position', 'in_normal', 'in_color')])
         return vao, vbo
     
+    def _create_trunk_mesh(self):
+        """Create a cylinder mesh for fallen tree trunks."""
+        vertices = []
+        segments = 8
+        radius = 0.3
+        height = 1.0  # Unit height, scaled per instance
+        color = (0.55, 0.35, 0.15)  # Default brown, overridden per instance
+        
+        # Cylinder sides
+        for i in range(segments):
+            angle1 = (i / segments) * 2 * 3.14159
+            angle2 = ((i + 1) / segments) * 2 * 3.14159
+            
+            x1, z1 = math.cos(angle1) * radius, math.sin(angle1) * radius
+            x2, z2 = math.cos(angle2) * radius, math.sin(angle2) * radius
+            n1 = (math.cos(angle1), 0, math.sin(angle1))
+            n2 = (math.cos(angle2), 0, math.sin(angle2))
+            
+            # Two triangles for quad
+            vertices.extend([
+                x1, 0, z1, *n1, *color,
+                x1, height, z1, *n1, *color,
+                x2, height, z2, *n2, *color,
+                x1, 0, z1, *n1, *color,
+                x2, height, z2, *n2, *color,
+                x2, 0, z2, *n2, *color,
+            ])
+        
+        # Top cap
+        cap_color = (0.65, 0.45, 0.25)
+        for i in range(segments):
+            angle1 = (i / segments) * 2 * 3.14159
+            angle2 = ((i + 1) / segments) * 2 * 3.14159
+            x1, z1 = math.cos(angle1) * radius, math.sin(angle1) * radius
+            x2, z2 = math.cos(angle2) * radius, math.sin(angle2) * radius
+            vertices.extend([
+                0, height, 0, 0, 1, 0, *cap_color,
+                x1, height, z1, 0, 1, 0, *cap_color,
+                x2, height, z2, 0, 1, 0, *cap_color,
+            ])
+        
+        vbo = self.ctx.buffer(np.array(vertices, dtype='f4').tobytes())
+        vao = self.ctx.vertex_array(self._wood_program, [(vbo, '3f 3f 3f', 'in_position', 'in_normal', 'in_color')])
+        return vao, vbo
+    
     def set_debris_particles(self, debris: list):
         """Set the list of debris particles to render."""
         self._debris_particles = debris
+    
+    def set_fallen_trees(self, fallen: list):
+        """Set the list of fallen trees to render."""
+        self._fallen_trees = fallen
     
     def set_wood_chunks(self, dropped_items: list):
         """Set the list of dropped items to render (kept name for compatibility)."""
@@ -1319,6 +1375,51 @@ class ModernWorldRenderer:
         
         self.ctx.disable(moderngl.BLEND)
     
+    def _render_fallen_trees(self):
+        """Render fallen tree trunks (tipping over animation)."""
+        if not self._fallen_trees:
+            return
+        
+        # Need matrices to render
+        if not hasattr(self, '_proj_matrix') or not hasattr(self, '_view_matrix'):
+            return
+        
+        cam_pos = self._camera_pos if hasattr(self, '_camera_pos') else (0, 0, 0)
+        max_dist_sq = 100 * 100
+        
+        # Enable blending for alpha fade
+        self.ctx.enable(moderngl.BLEND)
+        
+        for fallen in self._fallen_trees:
+            if fallen.alpha <= 0:
+                continue
+            
+            dx = fallen.x - cam_pos[0]
+            dy = fallen.y - cam_pos[1]
+            dz = fallen.z - cam_pos[2]
+            if dx*dx + dy*dy + dz*dz > max_dist_sq:
+                continue
+            
+            # Build model matrix with tilt animation
+            model = glm.mat4(1.0)
+            model = glm.translate(model, glm.vec3(fallen.x, fallen.y, fallen.z))
+            # Rotate to fall direction
+            model = glm.rotate(model, math.radians(fallen.fall_angle), glm.vec3(0, 1, 0))
+            # Tilt over (fall down)
+            model = glm.rotate(model, math.radians(fallen.tilt), glm.vec3(1, 0, 0))
+            # Scale to tree height
+            model = glm.scale(model, glm.vec3(fallen.radius * 3, fallen.height, fallen.radius * 3))
+            
+            # MVP
+            mvp = self._proj_matrix * self._view_matrix * model
+            
+            self._wood_program['u_mvp'].write(mvp.to_bytes() if hasattr(mvp, 'to_bytes') else bytes(mvp))
+            self._wood_program['u_model'].write(model.to_bytes() if hasattr(model, 'to_bytes') else bytes(model))
+            
+            self._trunk_vao.render()
+        
+        self.ctx.disable(moderngl.BLEND)
+    
     def cleanup(self):
         """Release all GPU resources."""
         self.sky.cleanup()
@@ -1343,6 +1444,11 @@ class ModernWorldRenderer:
             self._debris_vao.release()
         if self._debris_vbo:
             self._debris_vbo.release()
+        # Trunk
+        if self._trunk_vao:
+            self._trunk_vao.release()
+        if self._trunk_vbo:
+            self._trunk_vbo.release()
         self.loaded_terrain_chunks.clear()
         self.loaded_flora_chunks.clear()
         self._visible_structures.clear()

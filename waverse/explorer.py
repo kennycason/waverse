@@ -991,11 +991,12 @@ def log_dna_at_cursor(camera, flora_manager, animal_manager):
         return None
 
 
-def cut_tree_at_cursor(camera, flora_manager, chunk_manager, dropped_items_list, debris_list=None, modern_renderer=None):
+def cut_tree_at_cursor(camera, flora_manager, chunk_manager, dropped_items_list, debris_list=None, modern_renderer=None, fallen_trees_list=None):
     """Cut down the nearest tree at the cursor (camera look direction).
     
     Creates dropped items (wood) that can be picked up.
     Spawns debris particles for visual effect (if debris_list provided).
+    Spawns a fallen tree trunk that tips over (if fallen_trees_list provided).
     Returns the number of items created, or 0 if no tree found.
     """
     # Get camera look direction
@@ -1108,19 +1109,31 @@ def cut_tree_at_cursor(camera, flora_manager, chunk_manager, dropped_items_list,
         # Offset slightly with random scatter
         offset_x = (np.random.random() - 0.5) * 2.0
         offset_z = (np.random.random() - 0.5) * 2.0
-        offset_y = np.random.random() * 2.0 + i * 0.5  # Stack upward
+        offset_y = np.random.random() * 1.0 + i * 0.3  # Stack upward
         
         wood_item = Item("wood", "Wood", count=1, max_stack=99,
                         description="Wood from a tree. Used for crafting.")
         
         dropped = DroppedItem(
             best_plant.x + offset_x,
-            best_plant.y + offset_y + height * 0.5,  # Start mid-height
+            best_plant.y + 1.0,  # Start just above ground
             best_plant.z + offset_z,
             wood_item
         )
-        dropped.velocity_y = np.random.random() * 3.0  # Slight upward velocity
+        dropped.scale = 0.6 + np.random.random() * 0.3  # Bigger, more visible
+        dropped.velocity_y = np.random.random() * 2.0 + 1.0  # Slight pop upward
         dropped_items_list.append(dropped)
+    
+    # Create fallen tree trunk effect
+    if fallen_trees_list is not None:
+        fallen = FallenTree(
+            best_plant.x,
+            best_plant.y,
+            best_plant.z,
+            height=height,
+            trunk_color=trunk_color
+        )
+        fallen_trees_list.append(fallen)
     
     # Remove the plant from flora manager
     if best_plant_chunk in flora_manager.chunk_plants:
@@ -1696,6 +1709,57 @@ class Debris:
             self.vy = 0
             self.vx *= 0.8  # Friction
             self.vz *= 0.8
+    
+    def is_alive(self) -> bool:
+        return self.lifetime > 0
+
+
+class FallenTree:
+    """
+    A fallen tree trunk that tips over and lays on the ground.
+    Visual effect that fades away after a while.
+    """
+    
+    def __init__(self, x: float, y: float, z: float, 
+                 height: float = 3.0,
+                 trunk_color: tuple = (0.55, 0.35, 0.15)):
+        self.x = x
+        self.y = y
+        self.z = z
+        self.height = height
+        self.trunk_color = trunk_color
+        
+        # Fall direction (random)
+        self.fall_angle = np.random.random() * 360
+        
+        # Tilt animation
+        self.tilt = 0.0  # Current tilt (0 = standing, 90 = fallen)
+        self.tilt_speed = 60.0 + np.random.random() * 40.0  # Degrees per second
+        self.fallen = False
+        
+        # Trunk dimensions
+        self.radius = 0.3 + height * 0.05
+        
+        # Lifetime
+        self.lifetime = 8.0  # Fade after 8 seconds
+        self.max_lifetime = self.lifetime
+        self.alpha = 1.0
+    
+    def update(self, dt: float, terrain_height: float):
+        """Update falling animation and fade."""
+        # Tipping over
+        if not self.fallen:
+            self.tilt += self.tilt_speed * dt
+            if self.tilt >= 85:
+                self.tilt = 85
+                self.fallen = True
+        
+        # Start fading after fallen
+        if self.fallen:
+            self.lifetime -= dt
+            # Fade out in last 2 seconds
+            if self.lifetime < 2.0:
+                self.alpha = max(0, self.lifetime / 2.0)
     
     def is_alive(self) -> bool:
         return self.lifetime > 0
@@ -3360,6 +3424,81 @@ def render_debris(debris_particles: list, camera_x: float, camera_y: float, came
     glDisable(GL_BLEND)
 
 
+def render_fallen_trees(fallen_trees: list, camera_x: float, camera_y: float, camera_z: float):
+    """Render fallen tree trunks that tip over after cutting."""
+    if not fallen_trees:
+        return
+    
+    max_render_dist = 100.0
+    
+    glEnable(GL_BLEND)
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+    glEnable(GL_LIGHTING)
+    glEnable(GL_COLOR_MATERIAL)
+    glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE)
+    
+    for fallen in fallen_trees:
+        dx = fallen.x - camera_x
+        dy = fallen.y - camera_y
+        dz = fallen.z - camera_z
+        dist_sq = dx*dx + dy*dy + dz*dz
+        
+        if dist_sq > max_render_dist * max_render_dist:
+            continue
+        
+        if fallen.alpha <= 0:
+            continue
+        
+        glPushMatrix()
+        glTranslatef(fallen.x, fallen.y, fallen.z)
+        
+        # Rotate to fall direction
+        glRotatef(fallen.fall_angle, 0, 1, 0)
+        # Tilt over
+        glRotatef(fallen.tilt, 1, 0, 0)
+        
+        # Trunk color with alpha
+        r, g, b = fallen.trunk_color
+        glColor4f(r, g, b, fallen.alpha)
+        
+        # Draw trunk as a cylinder
+        radius = fallen.radius
+        height = fallen.height
+        segments = 8
+        
+        # Draw cylinder using quads
+        for i in range(segments):
+            angle1 = (i / segments) * 2 * math.pi
+            angle2 = ((i + 1) / segments) * 2 * math.pi
+            
+            x1, z1 = math.cos(angle1) * radius, math.sin(angle1) * radius
+            x2, z2 = math.cos(angle2) * radius, math.sin(angle2) * radius
+            
+            glBegin(GL_QUADS)
+            glNormal3f(math.cos(angle1), 0, math.sin(angle1))
+            glVertex3f(x1, 0, z1)
+            glVertex3f(x1, height, z1)
+            glNormal3f(math.cos(angle2), 0, math.sin(angle2))
+            glVertex3f(x2, height, z2)
+            glVertex3f(x2, 0, z2)
+            glEnd()
+        
+        # Top cap (lighter wood color)
+        glColor4f(r * 1.3, g * 1.3, b * 1.2, fallen.alpha)
+        glBegin(GL_TRIANGLE_FAN)
+        glNormal3f(0, 1, 0)
+        glVertex3f(0, height, 0)
+        for i in range(segments + 1):
+            angle = (i / segments) * 2 * math.pi
+            glVertex3f(math.cos(angle) * radius, height, math.sin(angle) * radius)
+        glEnd()
+        
+        glPopMatrix()
+    
+    glDisable(GL_COLOR_MATERIAL)
+    glDisable(GL_BLEND)
+
+
 def render_water(camera_x: float, camera_z: float, water_level: float = 0.0):
     """Render water plane centered on camera at water level height."""
     size = 2000  # Large enough to cover visible area
@@ -4819,6 +4958,8 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
     dropped_items: list = []
     # Debris particles (visual-only, fading)
     debris_particles: list = []
+    # Fallen trees (visual, fading tree trunks)
+    fallen_trees: list = []
     sky = SkySystem(chunk_dna_manager)
     water_level = config.water_level
     minimap = Minimap(chunk_manager)
@@ -5036,7 +5177,7 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                                 if USE_MODERN_RENDERER and modern_renderer:
                                     modern_renderer.invalidate_terrain_chunk(chunk_key[0], chunk_key[1])
                     elif camera.current_tool == ToolType.CUT:
-                        cut_tree_at_cursor(camera, flora_manager, chunk_manager, dropped_items, debris_particles, modern_renderer)
+                        cut_tree_at_cursor(camera, flora_manager, chunk_manager, dropped_items, debris_particles, modern_renderer, fallen_trees)
                 elif event.key == pygame.K_t:  # T = cycle tool radius (for MINE/FILL)
                     if camera.current_tool in (ToolType.MINE, ToolType.FILL):
                         camera.cycle_tool_radius()
@@ -5341,7 +5482,7 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                                 if USE_MODERN_RENDERER and modern_renderer:
                                     modern_renderer.invalidate_terrain_chunk(chunk_key[0], chunk_key[1])
                     elif camera.current_tool == ToolType.CUT:
-                        cut_tree_at_cursor(camera, flora_manager, chunk_manager, dropped_items, debris_particles, modern_renderer)
+                        cut_tree_at_cursor(camera, flora_manager, chunk_manager, dropped_items, debris_particles, modern_renderer, fallen_trees)
                     gamepad_speed_cooldown = 15
             
             # DPAD = Tool cycling (left/right) and tool radius (up/down)
@@ -5529,9 +5670,10 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                 camera, chunk_manager, flora_manager, animal_manager, structure_manager, climate_manager
             )
             
-            # Sync dropped items and debris for rendering
+            # Sync dropped items, debris, and fallen trees for rendering
             modern_renderer.set_wood_chunks(dropped_items)
             modern_renderer.set_debris_particles(debris_particles)
+            modern_renderer.set_fallen_trees(fallen_trees)
             
             # Render everything via modern renderer
             modern_renderer.render()
@@ -5699,6 +5841,13 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
             if not debris.is_alive():
                 debris_particles.remove(debris)
         
+        # Update fallen trees (tipping animation, fade out)
+        for fallen in fallen_trees[:]:
+            terrain_h = chunk_manager.get_height_at(fallen.x, fallen.z) * HEIGHT_SCALE
+            fallen.update(dt, terrain_h)
+            if not fallen.is_alive():
+                fallen_trees.remove(fallen)
+        
         # Auto-pickup items when walking over them
         pickup_nearby_items(camera, dropped_items, pickup_radius=2.5)
         
@@ -5723,6 +5872,9 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
             
             # Render debris particles (fading visual effects)
             render_debris(debris_particles, camera.x, camera.y, camera.z)
+            
+            # Render fallen tree trunks (tipping over animation)
+            render_fallen_trees(fallen_trees, camera.x, camera.y, camera.z)
             
             # Render weather effects (rain/snow particles, lightning)
             weather_renderer.render(cam_pos[0], cam_pos[1], cam_pos[2],

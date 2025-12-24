@@ -1241,14 +1241,14 @@ class ModernHUDRenderer:
             self._add_quad(vertices, slot_x, slot_y, 2, slot_size, 0, 0, 0, 0, 0.3, 0.3, 0.35, 0.8)
             self._add_quad(vertices, slot_x + slot_size - 2, slot_y, 2, slot_size, 0, 0, 0, 0, 0.3, 0.3, 0.35, 0.8)
             
-            # Tool name (abbreviated to fit square)
+            # Tool name (smaller font to fit square)
             short_label = label[:4]
             name_color = (1.0, 1.0, 1.0) if is_available else (0.4, 0.4, 0.4)
-            self._draw_text(vertices, short_label, slot_x + 6, slot_y + 20, 1.8, *name_color, 1.0)
+            self._draw_text(vertices, short_label, slot_x + 4, slot_y + 18, 1.4, *name_color, 1.0)
             
             # Equipped indicator
             if is_equipped:
-                self._draw_text(vertices, "[E]", slot_x + 6, slot_y + 38, 1.2, 0.4, 0.9, 0.4, 1.0)
+                self._draw_text(vertices, "EQ", slot_x + 4, slot_y + 36, 1.0, 0.4, 0.9, 0.4, 1.0)
         
         # RESOURCES SECTION
         tools_rows = (len(self.TOOLS) + cols - 1) // cols
@@ -1283,10 +1283,10 @@ class ModernHUDRenderer:
                 
                 # Item name
                 short_name = item.name[:5].upper()
-                self._draw_text(vertices, short_name, slot_x + 4, slot_y + 12, 1.5, 0.9, 0.8, 0.6, 1.0)
+                self._draw_text(vertices, short_name, slot_x + 4, slot_y + 12, 1.3, 0.9, 0.8, 0.6, 1.0)
                 
-                # Count
-                if item.count > 1:
+                # Count (always show)
+                if item.count >= 1:
                     count_str = f"x{item.count}"
                     self._draw_text(vertices, count_str, slot_x + 4, slot_y + 32, 1.8, 1.0, 1.0, 0.8, 1.0)
         
