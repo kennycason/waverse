@@ -1744,6 +1744,131 @@ class FloraManager:
                         dna = PlantDNA.create_random(rng.choice([PlantType.MOSS_PAD, PlantType.GROUNDCOVER]), int(rng.integers(0, 2**31)))
                     else:  # 20% from DNA pool
                         dna = rng.choice(chunk_dna_list)
+                        
+                elif biome == 'swamp':
+                    # SWAMP: Mangroves, lily pads, cattails, hanging moss, murky water plants
+                    roll = rng.random()
+                    if roll < 0.20:  # 20% mangrove-like trees
+                        dna = PlantDNA.create_random(PlantType.TREE, int(rng.integers(0, 2**31)))
+                        dna.canopy_shape = 'weeping'  # Hanging style
+                        dna.trunk_color.r = 0.3
+                        dna.trunk_color.g = 0.25
+                        dna.trunk_color.b = 0.15
+                    elif roll < 0.35:  # 15% lily pads
+                        dna = PlantDNA.create_random(PlantType.LILY_PAD, int(rng.integers(0, 2**31)))
+                    elif roll < 0.50:  # 15% cattails/reeds
+                        dna = PlantDNA.create_random(PlantType.REED, int(rng.integers(0, 2**31)))
+                    elif roll < 0.60:  # 10% hanging vines
+                        dna = PlantDNA.create_random(PlantType.VINE, int(rng.integers(0, 2**31)))
+                    elif roll < 0.75:  # 15% mushrooms (swamp mushrooms)
+                        dna = PlantDNA.create_random(PlantType.MUSHROOM, int(rng.integers(0, 2**31)))
+                        dna.has_glow = rng.random() < 0.2  # Some glow in dark swamp
+                    elif roll < 0.85:  # 10% moss/lichen
+                        dna = PlantDNA.create_random(rng.choice([PlantType.MOSS_PAD, PlantType.LICHEN]), int(rng.integers(0, 2**31)))
+                    else:  # 15% algae/seaweed
+                        dna = PlantDNA.create_random(PlantType.SEAWEED, int(rng.integers(0, 2**31)))
+                        dna.leaf_color.r = 0.2
+                        dna.leaf_color.g = 0.4
+                        dna.leaf_color.b = 0.25
+                        
+                elif biome in ('ocean', 'underwater', 'coral_reef'):
+                    # UNDERWATER: Corals, anemones, seaweed, kelp forests
+                    roll = rng.random()
+                    if roll < 0.30:  # 30% coral (many colors!)
+                        dna = PlantDNA.create_random(PlantType.CORAL, int(rng.integers(0, 2**31)))
+                        # Vibrant coral colors
+                        coral_colors = [
+                            (0.95, 0.4, 0.5),   # Pink
+                            (0.9, 0.65, 0.3),   # Orange
+                            (0.5, 0.8, 0.9),    # Light blue
+                            (0.8, 0.4, 0.8),    # Purple
+                            (0.95, 0.9, 0.4),   # Yellow
+                        ]
+                        c = coral_colors[int(rng.integers(0, len(coral_colors)))]
+                        dna.leaf_color.r, dna.leaf_color.g, dna.leaf_color.b = c
+                    elif roll < 0.50:  # 20% seaweed/kelp
+                        dna = PlantDNA.create_random(PlantType.SEAWEED, int(rng.integers(0, 2**31)))
+                    elif roll < 0.65:  # 15% anemones
+                        dna = PlantDNA.create_random(PlantType.TENTACLE, int(rng.integers(0, 2**31)))
+                        # Anemone colors
+                        dna.leaf_color.r = 0.9
+                        dna.leaf_color.g = 0.5 + rng.random() * 0.3
+                        dna.leaf_color.b = 0.6
+                    elif roll < 0.80:  # 15% underwater grass
+                        dna = PlantDNA.create_random(PlantType.GRASS, int(rng.integers(0, 2**31)))
+                        dna.leaf_color.r = 0.3
+                        dna.leaf_color.g = 0.6
+                        dna.leaf_color.b = 0.4
+                    else:  # 20% sponges/sea life
+                        dna = PlantDNA.create_random(PlantType.MUSHROOM, int(rng.integers(0, 2**31)))
+                        dna.leaf_color.r = 0.8
+                        dna.leaf_color.g = 0.7
+                        dna.leaf_color.b = 0.5
+                        
+                elif biome == 'meadow':
+                    # MEADOW: Lots of flowers! Wildflower diversity
+                    roll = rng.random()
+                    if roll < 0.50:  # 50% flowers!
+                        dna = PlantDNA.create_random(PlantType.FLOWER, int(rng.integers(0, 2**31)))
+                        # Random flower colors for meadow variety
+                        flower_phase = rng.random() * 6.28
+                        if rng.random() < 0.3:  # 30% saturated colors
+                            dna.flower_color.r = 0.9 if rng.random() < 0.5 else 0.2
+                            dna.flower_color.g = 0.9 if rng.random() < 0.3 else 0.2
+                            dna.flower_color.b = 0.9 if rng.random() < 0.4 else 0.2
+                        else:  # 70% soft pastels
+                            dna.flower_color.r = 0.6 + 0.4 * np.sin(flower_phase)
+                            dna.flower_color.g = 0.6 + 0.4 * np.sin(flower_phase + 2.0)
+                            dna.flower_color.b = 0.6 + 0.4 * np.sin(flower_phase + 4.0)
+                    elif roll < 0.75:  # 25% grass
+                        dna = PlantDNA.create_random(PlantType.GRASS, int(rng.integers(0, 2**31)))
+                    elif roll < 0.85:  # 10% small bushes
+                        dna = PlantDNA.create_random(PlantType.SHRUB, int(rng.integers(0, 2**31)))
+                    else:  # 15% clover/groundcover
+                        dna = PlantDNA.create_random(PlantType.GROUNDCOVER, int(rng.integers(0, 2**31)))
+                        
+                elif biome in ('forest', 'deciduous'):
+                    # DECIDUOUS FOREST: Oaks, maples, birch, undergrowth
+                    roll = rng.random()
+                    if roll < 0.30:  # 30% oaks
+                        dna = PlantDNA.create_random(PlantType.OAK, int(rng.integers(0, 2**31)))
+                    elif roll < 0.45:  # 15% birch/maple
+                        dna = PlantDNA.create_random(rng.choice([PlantType.BIRCH, PlantType.MAPLE]), int(rng.integers(0, 2**31)))
+                    elif roll < 0.55:  # 10% willow (near water)
+                        dna = PlantDNA.create_random(PlantType.WILLOW, int(rng.integers(0, 2**31)))
+                    elif roll < 0.70:  # 15% ferns
+                        dna = PlantDNA.create_random(PlantType.FERN, int(rng.integers(0, 2**31)))
+                    elif roll < 0.80:  # 10% mushrooms
+                        dna = PlantDNA.create_random(PlantType.MUSHROOM, int(rng.integers(0, 2**31)))
+                    elif roll < 0.90:  # 10% bushes
+                        dna = PlantDNA.create_random(PlantType.BUSH, int(rng.integers(0, 2**31)))
+                    else:  # 10% flowers
+                        dna = PlantDNA.create_random(PlantType.FLOWER, int(rng.integers(0, 2**31)))
+                        
+                elif biome == 'volcanic':
+                    # VOLCANIC: Similar to hellfire but less extreme
+                    roll = rng.random()
+                    if roll < 0.40:  # 40% rocks/crystals
+                        dna = PlantDNA.create_random(PlantType.CRYSTAL, int(rng.integers(0, 2**31)))
+                        dna.trunk_color.r = 0.2
+                        dna.trunk_color.g = 0.15
+                        dna.trunk_color.b = 0.12
+                    elif roll < 0.60:  # 20% hardy lichen
+                        dna = PlantDNA.create_random(PlantType.LICHEN, int(rng.integers(0, 2**31)))
+                        dna.leaf_color.r = 0.4
+                        dna.leaf_color.g = 0.35
+                        dna.leaf_color.b = 0.25
+                    elif roll < 0.75:  # 15% sparse grass
+                        dna = PlantDNA.create_random(PlantType.GRASS, int(rng.integers(0, 2**31)))
+                        dna.leaf_color.r = 0.35
+                        dna.leaf_color.g = 0.4
+                        dna.leaf_color.b = 0.25
+                    else:  # 25% dead trees/stumps
+                        dna = PlantDNA.create_random(PlantType.TREE, int(rng.integers(0, 2**31)))
+                        dna.leaf_color.r = 0.25
+                        dna.leaf_color.g = 0.18
+                        dna.leaf_color.b = 0.12
+                        
                 else:
                     # DEFAULT (Grassland/Temperate): Mixed forest/meadow
                     roll = rng.random()

@@ -1145,6 +1145,93 @@ class AnimalManager:
                         AnimalType.SNAIL, AnimalType.SNAIL,  # Swamp snails
                         AnimalType.MILLIPEDE,  # Swamp millipedes
                     ])
+            elif biome in ('ocean', 'underwater', 'coral_reef'):
+                # Ocean: fish, cephalopods, crustaceans, marine life
+                animal_type = rng.choice([
+                    # Fish - lots of fish!
+                    AnimalType.FISH, AnimalType.FISH, AnimalType.FISH, AnimalType.FISH,
+                    # Cephalopods
+                    AnimalType.OCTOPUS, AnimalType.OCTOPUS,
+                    AnimalType.SQUID, AnimalType.SQUID,
+                    AnimalType.CEPHALOPOD,
+                    AnimalType.NAUTILUS,  # Nautilus!
+                    # Rays and big swimmers
+                    AnimalType.MANTA, AnimalType.MANTA,
+                    # Jellies and weird things
+                    AnimalType.JELLYFISH, AnimalType.JELLYFISH, AnimalType.JELLYFISH,
+                    AnimalType.ANEMONE,
+                    AnimalType.SEASTAR,
+                    AnimalType.NUDIBRANCH, AnimalType.NUDIBRANCH,
+                    # Crustaceans
+                    AnimalType.CRUSTACEAN, AnimalType.CRUSTACEAN,
+                    # Turtles
+                    AnimalType.TURTLE, AnimalType.TURTLE,
+                    # Dangerous
+                    AnimalType.SERPENT,  # Sea serpents!
+                    AnimalType.HYDRA,  # Deep sea horror
+                ])
+            elif biome == 'meadow':
+                # Meadow: butterflies, bees, small mammals, birds
+                if rng.random() < 0.5:
+                    animal_type = rng.choice([
+                        # Lots of flying insects!
+                        AnimalType.INSECT, AnimalType.INSECT, AnimalType.INSECT, AnimalType.INSECT,
+                        AnimalType.MOTH, AnimalType.MOTH, AnimalType.MOTH,  # Butterflies/moths
+                        AnimalType.BEETLE,
+                        # Birds
+                        AnimalType.BIRD, AnimalType.BIRD, AnimalType.BIRD,
+                        # Small mammals - rabbits, mice
+                        AnimalType.HOPPER, AnimalType.HOPPER, AnimalType.HOPPER,  # Rabbits
+                        AnimalType.MAMMAL,
+                        # Others
+                        AnimalType.SERPENT,  # Grass snakes
+                        AnimalType.SNAIL,  # Garden snails
+                    ])
+            elif biome in ('forest', 'deciduous'):
+                # Deciduous forest: deer, birds, foxes, woodland creatures
+                if rng.random() < 0.5:
+                    animal_type = rng.choice([
+                        # Mammals - deer, bears, foxes
+                        AnimalType.MAMMAL, AnimalType.MAMMAL, AnimalType.MAMMAL, AnimalType.MAMMAL,
+                        AnimalType.GORILLA,  # Bears
+                        # Birds - owls, woodpeckers
+                        AnimalType.BIRD, AnimalType.BIRD, AnimalType.BIRD,
+                        AnimalType.BAT,  # Forest bats
+                        # Forest floor creatures
+                        AnimalType.HOPPER, AnimalType.HOPPER,  # Rabbits, squirrels
+                        AnimalType.REPTILE,  # Lizards
+                        AnimalType.SERPENT,  # Forest snakes
+                        AnimalType.INSECT, AnimalType.INSECT,
+                        AnimalType.BEETLE,  # Forest beetles
+                        AnimalType.SNAIL,  # Forest snails
+                        AnimalType.CENTIPEDE,  # Under logs
+                    ])
+            elif biome == 'taiga':
+                # Taiga: wolves, bears, moose, hardy birds
+                if rng.random() < 0.5:
+                    animal_type = rng.choice([
+                        # Big mammals
+                        AnimalType.MAMMAL, AnimalType.MAMMAL, AnimalType.MAMMAL,
+                        AnimalType.GORILLA,  # Bears
+                        # Birds
+                        AnimalType.BIRD, AnimalType.BIRD,
+                        # Forest creatures
+                        AnimalType.HOPPER,  # Rabbits
+                        AnimalType.BAT,  # Bats
+                        AnimalType.SERPENT,  # Cold snakes
+                    ])
+            elif biome == 'volcanic':
+                # Volcanic: fire-adapted creatures, similar to hellfire but less extreme
+                if rng.random() < 0.5:
+                    animal_type = rng.choice([
+                        AnimalType.REPTILE, AnimalType.REPTILE, AnimalType.REPTILE,
+                        AnimalType.INSECT, AnimalType.INSECT,
+                        AnimalType.BEETLE,
+                        AnimalType.SCORPION,
+                        AnimalType.CENTIPEDE,
+                        AnimalType.SPIDER,
+                        AnimalType.BIRD,  # Heat-tolerant birds
+                    ])
             
             # Get template and mutate
             templates = self.species_templates.get(animal_type, self.species_templates[AnimalType.MAMMAL])
