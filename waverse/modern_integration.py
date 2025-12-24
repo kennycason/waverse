@@ -45,7 +45,7 @@ class ModernWorldRenderer:
     - Camera for view state
     """
     
-    def __init__(self, ctx: moderngl.Context, enable_waves: bool = False, use_dna_geometry: bool = True):
+    def __init__(self, ctx: moderngl.Context, enable_waves: bool = False, use_dna_geometry: bool = False):
         self.ctx = ctx
         self.enable_waves = enable_waves
         self.use_dna_geometry = use_dna_geometry  # Use DNA-driven mesh generation
