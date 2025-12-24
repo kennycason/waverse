@@ -77,7 +77,6 @@ out vec3 v_world_pos;
 uniform mat4 u_projection;
 uniform mat4 u_view;
 uniform mat4 u_model;
-uniform float u_time;
 
 void main() {
     vec4 world_pos = u_model * vec4(in_position, 1.0);
@@ -1587,7 +1586,6 @@ class ModernHUDRenderer:
         self._preview_program['u_view'].write(view)
         self._preview_program['u_light_dir'].value = (0.5, 1.0, 0.3)
         self._preview_program['u_ambient'].value = (0.4, 0.4, 0.5)
-        self._preview_program['u_time'].value = self._preview_rotation
         
         if is_plant:
             self._render_plant_3d(entity_dna)
