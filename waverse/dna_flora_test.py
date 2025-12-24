@@ -2233,40 +2233,47 @@ def run_evolution_mode():
                         
                         # Serialize DNA
                         dna = best_plant['dna']
+                        
+                        # Helper to convert numpy types to Python native
+                        def to_native(val):
+                            if hasattr(val, 'item'):  # numpy scalar
+                                return val.item()
+                            return float(val) if isinstance(val, (int, float)) else val
+                        
                         dna_dict = {
                             'mesh_type': best_plant['mesh_type'],
                             'population': best_plant['population'],
-                            'generation': best_plant['generation'],
-                            'scale': best_plant['scale'],
+                            'generation': int(best_plant['generation']),
+                            'scale': to_native(best_plant['scale']),
                             'plant_type': dna.plant_type.name if hasattr(dna.plant_type, 'name') else str(dna.plant_type) if hasattr(dna, 'plant_type') else 'UNKNOWN',
-                            'species_id': dna.species_id,
-                            'height': dna.height_gene.value if hasattr(dna.height_gene, 'value') else 1.0,
-                            'width': dna.width_gene.value if hasattr(dna.width_gene, 'value') else 1.0,
+                            'species_id': int(dna.species_id),
+                            'height': to_native(dna.height_gene.value) if hasattr(dna.height_gene, 'value') else 1.0,
+                            'width': to_native(dna.width_gene.value) if hasattr(dna.width_gene, 'value') else 1.0,
                             'leaf_color': {
-                                'r': dna.leaf_color.r,
-                                'g': dna.leaf_color.g,
-                                'b': dna.leaf_color.b,
+                                'r': to_native(dna.leaf_color.r),
+                                'g': to_native(dna.leaf_color.g),
+                                'b': to_native(dna.leaf_color.b),
                             },
                             'trunk_color': {
-                                'r': dna.trunk_color.r,
-                                'g': dna.trunk_color.g,
-                                'b': dna.trunk_color.b,
+                                'r': to_native(dna.trunk_color.r),
+                                'g': to_native(dna.trunk_color.g),
+                                'b': to_native(dna.trunk_color.b),
                             } if hasattr(dna, 'trunk_color') else None,
                             'trunk_segments': [
                                 {
-                                    'length': seg.length,
-                                    'width': seg.width,
-                                    'curve': seg.curve,
-                                    'twist': seg.twist,
-                                    'taper': seg.taper,
+                                    'length': to_native(seg.length),
+                                    'width': to_native(seg.width),
+                                    'curve': to_native(seg.curve),
+                                    'twist': to_native(seg.twist),
+                                    'taper': to_native(seg.taper),
                                 }
                                 for seg in (dna.trunk_segments or [])
                             ],
-                            'branch_count': getattr(dna, 'branch_count', 0),
-                            'branch_angle': getattr(dna, 'branch_angle', 0),
-                            'droop': getattr(dna, 'droop', 0),
-                            'leaf_size': getattr(dna, 'leaf_size', 1.0),
-                            'canopy_spread': getattr(dna, 'canopy_spread', 1.0),
+                            'branch_count': int(getattr(dna, 'branch_count', 0)),
+                            'branch_angle': to_native(getattr(dna, 'branch_angle', 0)),
+                            'droop': to_native(getattr(dna, 'droop', 0)),
+                            'leaf_size': to_native(getattr(dna, 'leaf_size', 1.0)),
+                            'canopy_spread': to_native(getattr(dna, 'canopy_spread', 1.0)),
                         }
                         
                         with open(seed_file, 'w') as f:
