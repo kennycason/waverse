@@ -334,49 +334,202 @@ def create_layered_canopy(base_y: float, height: float, radius: float, layers: i
     return vertices, normals, colors
 
 
-def create_branches(trunk_height: float, count: int = 6, length: float = 0.3) -> Tuple[List, List, List]:
-    """Create branches extending from trunk."""
+def create_branch_segment(start: Tuple[float, float, float], 
+                          end: Tuple[float, float, float],
+                          width: float) -> Tuple[List, List, List]:
+    """Create a single branch segment as a tapered cylinder."""
     vertices = []
     normals = []
     colors = []
     
-    branch_color = (0.4, 0.25, 0.12)
+    branch_color = (0.45, 0.28, 0.14)
+    segments = 4
     
-    for b in range(count):
-        angle = (b / count) * 2 * math.pi
-        branch_y = trunk_height * (0.4 + (b / count) * 0.4)  # Stagger heights
+    dx = end[0] - start[0]
+    dy = end[1] - start[1]
+    dz = end[2] - start[2]
+    length = math.sqrt(dx*dx + dy*dy + dz*dz)
+    if length < 0.001:
+        return [], [], []
+    
+    # Create orthonormal basis
+    dir_vec = (dx/length, dy/length, dz/length)
+    
+    # Find perpendicular vectors
+    if abs(dir_vec[1]) < 0.9:
+        perp1 = (-dir_vec[2], 0, dir_vec[0])
+    else:
+        perp1 = (1, 0, 0)
+    p_len = math.sqrt(perp1[0]**2 + perp1[1]**2 + perp1[2]**2)
+    if p_len > 0.001:
+        perp1 = (perp1[0]/p_len, perp1[1]/p_len, perp1[2]/p_len)
+    
+    perp2 = (
+        dir_vec[1]*perp1[2] - dir_vec[2]*perp1[1],
+        dir_vec[2]*perp1[0] - dir_vec[0]*perp1[2],
+        dir_vec[0]*perp1[1] - dir_vec[1]*perp1[0]
+    )
+    
+    taper = 0.5  # End is half as wide
+    
+    for seg in range(segments):
+        a1 = (seg / segments) * 2 * math.pi
+        a2 = ((seg + 1) / segments) * 2 * math.pi
         
-        # Branch start at trunk
-        start_x = math.cos(angle) * 0.08
-        start_z = math.sin(angle) * 0.08
+        # Start ring
+        s1_x = start[0] + (math.cos(a1)*perp1[0] + math.sin(a1)*perp2[0]) * width
+        s1_y = start[1] + (math.cos(a1)*perp1[1] + math.sin(a1)*perp2[1]) * width
+        s1_z = start[2] + (math.cos(a1)*perp1[2] + math.sin(a1)*perp2[2]) * width
         
-        # Branch end outward
-        end_x = math.cos(angle) * length
-        end_z = math.sin(angle) * length
-        end_y = branch_y - 0.05  # Slight droop
+        s2_x = start[0] + (math.cos(a2)*perp1[0] + math.sin(a2)*perp2[0]) * width
+        s2_y = start[1] + (math.cos(a2)*perp1[1] + math.sin(a2)*perp2[1]) * width
+        s2_z = start[2] + (math.cos(a2)*perp1[2] + math.sin(a2)*perp2[2]) * width
         
-        # Simple triangular prism
-        up = 0.015
-        side = 0.015
+        # End ring (tapered)
+        e1_x = end[0] + (math.cos(a1)*perp1[0] + math.sin(a1)*perp2[0]) * width * taper
+        e1_y = end[1] + (math.cos(a1)*perp1[1] + math.sin(a1)*perp2[1]) * width * taper
+        e1_z = end[2] + (math.cos(a1)*perp1[2] + math.sin(a1)*perp2[2]) * width * taper
         
-        # Top face
-        vertices.extend([
-            (start_x, branch_y + up, start_z),
-            (end_x, end_y + up, end_z),
-            (start_x + side, branch_y, start_z + side)
-        ])
-        normals.extend([(0, 1, 0)] * 3)
-        colors.extend([branch_color] * 3)
+        e2_x = end[0] + (math.cos(a2)*perp1[0] + math.sin(a2)*perp2[0]) * width * taper
+        e2_y = end[1] + (math.cos(a2)*perp1[1] + math.sin(a2)*perp2[1]) * width * taper
+        e2_z = end[2] + (math.cos(a2)*perp1[2] + math.sin(a2)*perp2[2]) * width * taper
         
-        vertices.extend([
-            (end_x, end_y + up, end_z),
-            (end_x + side, end_y, end_z + side),
-            (start_x + side, branch_y, start_z + side)
-        ])
-        normals.extend([(0, 1, 0)] * 3)
-        colors.extend([branch_color] * 3)
+        n = (math.cos(a1)*perp1[0] + math.sin(a1)*perp2[0],
+             math.cos(a1)*perp1[1] + math.sin(a1)*perp2[1],
+             math.cos(a1)*perp1[2] + math.sin(a1)*perp2[2])
+        
+        vertices.extend([(s1_x, s1_y, s1_z), (s2_x, s2_y, s2_z), (e1_x, e1_y, e1_z)])
+        vertices.extend([(s2_x, s2_y, s2_z), (e2_x, e2_y, e2_z), (e1_x, e1_y, e1_z)])
+        normals.extend([n] * 6)
+        colors.extend([branch_color] * 6)
     
     return vertices, normals, colors
+
+
+def create_leaf_cluster(pos: Tuple[float, float, float], size: float, 
+                        count: int = 5) -> Tuple[List, List, List]:
+    """Create a cluster of leaves at a position."""
+    vertices = []
+    normals = []
+    colors = []
+    
+    leaf_color = (1.0, 1.0, 1.0)  # Will be tinted by instance color
+    
+    for i in range(count):
+        angle = (i / count) * 2 * math.pi + (i * 0.7)  # Golden angle-ish
+        tilt = 0.3 + (i % 3) * 0.2
+        
+        dx = math.cos(angle) * math.cos(tilt) * size
+        dy = math.sin(tilt) * size
+        dz = math.sin(angle) * math.cos(tilt) * size
+        
+        # Diamond-shaped leaf
+        vertices.extend([
+            pos,
+            (pos[0] + dx * 0.3, pos[1] + dy * 0.5, pos[2] + dz * 0.3),
+            (pos[0] + dx, pos[1] + dy, pos[2] + dz)
+        ])
+        vertices.extend([
+            pos,
+            (pos[0] + dx, pos[1] + dy, pos[2] + dz),
+            (pos[0] + dx * 0.3, pos[1] - dy * 0.2, pos[2] + dz * 0.3)
+        ])
+        
+        n = (0, 0.8, 0.2)
+        normals.extend([n] * 6)
+        colors.extend([leaf_color] * 6)
+    
+    return vertices, normals, colors
+
+
+def create_recursive_branches(trunk_height: float, count: int = 6, 
+                              max_depth: int = 2, seed: int = 12345) -> Tuple[List, List, List]:
+    """Create recursive branching structure like legacy PlantRenderer."""
+    vertices = []
+    normals = []
+    colors = []
+    
+    rng = np.random.default_rng(seed)
+    
+    def add_branch(start: Tuple[float, float, float], 
+                   direction: Tuple[float, float, float],
+                   length: float, width: float, depth: int):
+        """Recursively add a branch and its sub-branches."""
+        if depth > max_depth or length < 0.02 or width < 0.003:
+            return
+        
+        # Add some natural curve/randomness
+        curve = (rng.random() - 0.5) * 0.4 * (1 + depth * 0.3)
+        
+        # Calculate end point
+        end = (
+            start[0] + direction[0] * length + curve * length * 0.5,
+            start[1] + direction[1] * length - 0.02 * length,  # Slight droop
+            start[2] + direction[2] * length
+        )
+        
+        # Draw this branch
+        v, n, c = create_branch_segment(start, end, width)
+        vertices.extend(v)
+        normals.extend(n)
+        colors.extend(c)
+        
+        # Add leaves at branch tips and along branches
+        if depth >= max_depth - 1 or rng.random() < 0.4:
+            leaf_size = 0.08 * (1 + rng.random() * 0.5)
+            v, n, c = create_leaf_cluster(end, leaf_size, count=3 + int(rng.random() * 3))
+            vertices.extend(v)
+            normals.extend(n)
+            colors.extend(c)
+        
+        # Spawn sub-branches
+        if depth < max_depth:
+            sub_count = 1 + int(rng.random() * 2)
+            for _ in range(sub_count):
+                if rng.random() < 0.6:  # Sub-branch probability
+                    sub_angle = rng.random() * 2 * math.pi
+                    spread = 0.4 + rng.random() * 0.4
+                    
+                    # New direction
+                    new_dir = (
+                        direction[0] * 0.5 + math.cos(sub_angle) * spread,
+                        direction[1] * 0.6 - 0.1,  # Droop
+                        direction[2] * 0.5 + math.sin(sub_angle) * spread
+                    )
+                    d_len = math.sqrt(new_dir[0]**2 + new_dir[1]**2 + new_dir[2]**2)
+                    if d_len > 0.001:
+                        new_dir = (new_dir[0]/d_len, new_dir[1]/d_len, new_dir[2]/d_len)
+                    
+                    add_branch(
+                        end,
+                        new_dir,
+                        length * (0.5 + rng.random() * 0.3),
+                        width * 0.6,
+                        depth + 1
+                    )
+    
+    # Create main branches from trunk
+    for b in range(count):
+        angle = (b / count) * 2 * math.pi + rng.random() * 0.3
+        branch_y = trunk_height * (0.4 + (b / count) * 0.4)
+        
+        # Direction outward and slightly up
+        spread_angle = 0.3 + rng.random() * 0.4
+        direction = (
+            math.cos(angle) * math.cos(spread_angle),
+            math.sin(spread_angle) * 0.3,
+            math.sin(angle) * math.cos(spread_angle)
+        )
+        
+        start = (math.cos(angle) * 0.05, branch_y, math.sin(angle) * 0.05)
+        add_branch(start, direction, 0.25 + rng.random() * 0.15, 0.02, 0)
+    
+    return vertices, normals, colors
+
+
+def create_branches(trunk_height: float, count: int = 6, length: float = 0.3) -> Tuple[List, List, List]:
+    """Create branches extending from trunk (simple version for basic meshes)."""
+    return create_recursive_branches(trunk_height, count, max_depth=2)
 
 
 def create_tree_base_mesh() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -1419,12 +1572,13 @@ def run_evolution_mode():
     # Living plants: list of (x, z, dna, mesh_type, generation, population)
     plants = []
     
-    # Seed initial populations (3x3 tiles each)
+    # Seed initial populations (3x3 tiles each, grid-spaced)
+    INIT_SPACING = 5.0  # Match MIN_PLANT_SPACING for consistent grid
     for dx in range(-1, 2):
         for dz in range(-1, 2):
             # Population A
-            x = pop_a_center[0] + dx * 4
-            z = pop_a_center[1] + dz * 4
+            x = pop_a_center[0] + dx * INIT_SPACING
+            z = pop_a_center[1] + dz * INIT_SPACING
             dna = pop_a_dna.mutate(rng, strength=0.1)
             plants.append({
                 'x': x, 'z': z, 'y': 0,
@@ -1437,8 +1591,8 @@ def run_evolution_mode():
             })
             
             # Population B
-            x = pop_b_center[0] + dx * 4
-            z = pop_b_center[1] + dz * 4
+            x = pop_b_center[0] + dx * INIT_SPACING
+            z = pop_b_center[1] + dz * INIT_SPACING
             dna = pop_b_dna.mutate(rng, strength=0.1)
             plants.append({
                 'x': x, 'z': z, 'y': 0,
@@ -1536,37 +1690,71 @@ def run_evolution_mode():
             cam_y -= move_speed
         
         # === EVOLUTION STEP ===
+        MIN_PLANT_SPACING = 4.0  # Minimum distance between plants (grid-like)
+        
+        def is_space_available(x: float, z: float, existing: list) -> bool:
+            """Check if position is far enough from all existing plants."""
+            for p in existing:
+                dist = math.sqrt((p['x'] - x)**2 + (p['z'] - z)**2)
+                if dist < MIN_PLANT_SPACING:
+                    return False
+            return True
+        
+        def find_nearest_free_spot(x: float, z: float, existing: list, attempts: int = 8) -> Tuple[float, float]:
+            """Try to find a nearby free spot using grid-aligned search."""
+            # First try the exact spot
+            if is_space_available(x, z, existing):
+                return x, z
+            
+            # Try grid-aligned positions around the target
+            for dist_mult in [1.0, 1.5, 2.0]:
+                for angle_idx in range(attempts):
+                    angle = (angle_idx / attempts) * 2 * math.pi
+                    test_x = x + math.cos(angle) * MIN_PLANT_SPACING * dist_mult
+                    test_z = z + math.sin(angle) * MIN_PLANT_SPACING * dist_mult
+                    if is_space_available(test_x, test_z, existing):
+                        return test_x, test_z
+            
+            return None, None  # No space found
+        
         time_since_generation += dt
         if time_since_generation >= GENERATION_TIME and len(plants) < MAX_PLANTS:
             time_since_generation = 0
             generation += 1
             
             new_plants = []
+            all_plants = plants + new_plants  # Include newly added for spacing check
             
             for plant in plants:
                 # Each plant has a chance to reproduce
-                if rng.random() < 0.4:  # 40% reproduction chance
-                    # Spread direction (random, but biased toward center)
-                    spread_dist = 3.0 + rng.random() * 2.0
+                if rng.random() < 0.35:  # 35% reproduction chance
+                    # Spread direction (prefer outward expansion)
+                    spread_dist = MIN_PLANT_SPACING + rng.random() * 2.0
                     spread_angle = rng.random() * 2 * math.pi
                     
                     # Bias toward center (where populations will meet)
-                    bias_x = -plant['x'] * 0.02
-                    bias_z = -plant['z'] * 0.02
+                    bias_x = -plant['x'] * 0.015
+                    bias_z = -plant['z'] * 0.015
                     
-                    new_x = plant['x'] + math.cos(spread_angle) * spread_dist + bias_x
-                    new_z = plant['z'] + math.sin(spread_angle) * spread_dist + bias_z
+                    target_x = plant['x'] + math.cos(spread_angle) * spread_dist + bias_x
+                    target_z = plant['z'] + math.sin(spread_angle) * spread_dist + bias_z
                     
                     # Keep in bounds
-                    new_x = max(-WORLD_SIZE, min(WORLD_SIZE, new_x))
-                    new_z = max(-WORLD_SIZE, min(WORLD_SIZE, new_z))
+                    target_x = max(-WORLD_SIZE, min(WORLD_SIZE, target_x))
+                    target_z = max(-WORLD_SIZE, min(WORLD_SIZE, target_z))
+                    
+                    # Find a free spot (grid-like spacing)
+                    new_x, new_z = find_nearest_free_spot(target_x, target_z, all_plants)
+                    if new_x is None:
+                        continue  # No space available, skip reproduction
                     
                     # Check for nearby plants from OTHER population (crossover!)
                     nearby_other = None
+                    crossover_dist = MIN_PLANT_SPACING * 2.5  # Must be close for crossover
                     for other in plants:
                         if other['population'] != plant['population']:
                             dist = math.sqrt((other['x'] - new_x)**2 + (other['z'] - new_z)**2)
-                            if dist < 8.0:  # Close enough for crossover
+                            if dist < crossover_dist:
                                 nearby_other = other
                                 break
                     
@@ -1575,8 +1763,8 @@ def run_evolution_mode():
                         child_dna = plant['dna'].crossover(nearby_other['dna'], rng)
                         child_dna = child_dna.mutate(rng, strength=0.2)  # Extra mutation
                         
-                        # Hybrid mesh type
-                        mesh_types = ['tree_dome', 'willow', 'spiral', 'palm']
+                        # Hybrid mesh type - interesting combos
+                        mesh_types = ['tree_dome', 'willow', 'spiral', 'palm', 'fern']
                         mesh_type = mesh_types[int(rng.integers(0, len(mesh_types)))]
                         
                         new_pop = 'AB'  # Hybrid!
@@ -1587,7 +1775,7 @@ def run_evolution_mode():
                         mesh_type = plant['mesh_type']
                         new_pop = plant['population']
                     
-                    new_plants.append({
+                    new_plant = {
                         'x': new_x, 'z': new_z, 'y': 0,
                         'dna': child_dna,
                         'mesh_type': mesh_type,
@@ -1595,7 +1783,9 @@ def run_evolution_mode():
                         'population': new_pop,
                         'scale': 1.5 + rng.random() * 1.0,
                         'rotation': rng.random() * math.pi * 2,
-                    })
+                    }
+                    new_plants.append(new_plant)
+                    all_plants.append(new_plant)  # Update spacing check
             
             plants.extend(new_plants)
             
