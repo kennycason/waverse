@@ -1990,11 +1990,11 @@ def run_test_grid():
 
 def run_evolution_mode():
     """
-    Evolution mode: Watch two populations grow and merge!
+    Evolution mode: Watch FOUR populations grow and merge!
     
-    - Two populations start in opposite corners
+    - Four populations start in four corners
     - Each generation, plants spread and mutate
-    - When populations meet, crossover occurs
+    - When populations meet, crossover occurs creating hybrids
     """
     pygame.init()
     
@@ -2006,7 +2006,7 @@ def run_evolution_mode():
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_FORWARD_COMPATIBLE_FLAG, True)
     
     pygame.display.set_mode((WIDTH, HEIGHT), DOUBLEBUF | OPENGL)
-    pygame.display.set_caption("DNA Flora Evolution - Watch populations grow and merge!")
+    pygame.display.set_caption("DNA Flora Evolution - 4 Populations Converging!")
     
     ctx = moderngl.create_context(require=410)
     ctx.enable(moderngl.DEPTH_TEST)
@@ -2014,84 +2014,105 @@ def run_evolution_mode():
     
     renderer = DNAFloraRenderer(ctx)
     
-    # Camera
-    cam_x, cam_y, cam_z = 0, 30, 50
-    cam_yaw, cam_pitch = 0, -25
+    # Camera - start higher to see all 4 corners
+    cam_x, cam_y, cam_z = 0, 60, 80
+    cam_yaw, cam_pitch = 0, -35
     
     # Evolution state
     rng = np.random.default_rng(42)
     
-    # Two starting populations with distinct DNA
+    # Four corners for four populations
     WORLD_SIZE = 60  # World is -60 to +60
     
-    # Population A: Bottom-left corner - TALL CONE TREES (blue-green)
-    pop_a_center = (-40, -40)
-    pop_a_dna = PlantDNA.create_random(PlantType.TREE, 1111)
-    pop_a_dna.leaf_color.r = 0.2
-    pop_a_dna.leaf_color.g = 0.7
-    pop_a_dna.leaf_color.b = 0.5
-    pop_a_dna.height_gene.value = 2.0
-    if pop_a_dna.trunk_segments:
-        pop_a_dna.trunk_segments[0].curve = 0.3
+    # Define 4 distinct populations with unique colors, shapes, and traits
+    populations = {
+        'A': {
+            'center': (-40, -40),  # Bottom-left
+            'color': (0.2, 0.7, 0.9),  # Cyan/teal
+            'mesh_type': 'oak',
+            'height': 1.8,
+            'curve': 0.2,
+            'twist': 0.0,
+            'seed': 1111,
+        },
+        'B': {
+            'center': (40, -40),   # Bottom-right
+            'color': (0.9, 0.3, 0.2),  # Red/orange
+            'mesh_type': 'pine',
+            'height': 2.2,
+            'curve': 0.0,
+            'twist': 0.3,
+            'seed': 2222,
+        },
+        'C': {
+            'center': (-40, 40),   # Top-left
+            'color': (0.9, 0.8, 0.2),  # Yellow/gold
+            'mesh_type': 'willow',
+            'height': 1.5,
+            'curve': 0.4,
+            'twist': 0.1,
+            'seed': 3333,
+        },
+        'D': {
+            'center': (40, 40),    # Top-right
+            'color': (0.6, 0.2, 0.8),  # Purple/violet
+            'mesh_type': 'baobab',
+            'height': 1.2,
+            'curve': 0.1,
+            'twist': 0.5,
+            'seed': 4444,
+        },
+    }
     
-    # Population B: Top-right corner - SHORT DOME BUSHES (yellow-green)
-    pop_b_center = (40, 40)
-    pop_b_dna = PlantDNA.create_random(PlantType.BUSH, 2222)
-    pop_b_dna.leaf_color.r = 0.6
-    pop_b_dna.leaf_color.g = 0.8
-    pop_b_dna.leaf_color.b = 0.2
-    pop_b_dna.height_gene.value = 0.8
-    if pop_b_dna.trunk_segments:
-        pop_b_dna.trunk_segments[0].twist = 0.5
+    # Create DNA templates for each population
+    pop_dnas = {}
+    for pop_name, pop_info in populations.items():
+        dna = PlantDNA.create_random(PlantType.TREE, pop_info['seed'])
+        dna.leaf_color.r = pop_info['color'][0]
+        dna.leaf_color.g = pop_info['color'][1]
+        dna.leaf_color.b = pop_info['color'][2]
+        dna.height_gene.value = pop_info['height']
+        if dna.trunk_segments:
+            dna.trunk_segments[0].curve = pop_info['curve']
+            dna.trunk_segments[0].twist = pop_info['twist']
+        pop_dnas[pop_name] = dna
     
-    # Living plants: list of (x, z, dna, mesh_type, generation, population)
+    # Living plants
     plants = []
     
     # Seed initial populations (3x3 tiles each, grid-spaced)
-    INIT_SPACING = 5.0  # Match MIN_PLANT_SPACING for consistent grid
-    for dx in range(-1, 2):
-        for dz in range(-1, 2):
-            # Population A
-            x = pop_a_center[0] + dx * INIT_SPACING
-            z = pop_a_center[1] + dz * INIT_SPACING
-            dna = pop_a_dna.mutate(rng, strength=0.1)
-            plants.append({
-                'x': x, 'z': z, 'y': 0,
-                'dna': dna,
-                'mesh_type': 'tree_cone',
-                'generation': 0,
-                'population': 'A',
-                'scale': 2.0 + rng.random() * 0.5,
-                'rotation': rng.random() * math.pi * 2,
-            })
-            
-            # Population B
-            x = pop_b_center[0] + dx * INIT_SPACING
-            z = pop_b_center[1] + dz * INIT_SPACING
-            dna = pop_b_dna.mutate(rng, strength=0.1)
-            plants.append({
-                'x': x, 'z': z, 'y': 0,
-                'dna': dna,
-                'mesh_type': 'bush',
-                'generation': 0,
-                'population': 'B',
-                'scale': 2.0 + rng.random() * 0.5,
-                'rotation': rng.random() * math.pi * 2,
-            })
+    INIT_SPACING = 5.0
+    for pop_name, pop_info in populations.items():
+        for dx in range(-1, 2):
+            for dz in range(-1, 2):
+                x = pop_info['center'][0] + dx * INIT_SPACING
+                z = pop_info['center'][1] + dz * INIT_SPACING
+                dna = pop_dnas[pop_name].mutate(rng, strength=0.1)
+                plants.append({
+                    'x': x, 'z': z, 'y': 0,
+                    'dna': dna,
+                    'mesh_type': pop_info['mesh_type'],
+                    'generation': 0,
+                    'population': pop_name,
+                    'scale': 2.0 + rng.random() * 0.5,
+                    'rotation': rng.random() * math.pi * 2,
+                })
     
     # Evolution timing
     generation = 0
     time_since_generation = 0.0
-    GENERATION_TIME = 2.0  # Seconds between generations
-    MAX_PLANTS = 2000
+    GENERATION_TIME = 1.5  # Faster generations to see convergence
+    MAX_PLANTS = 3000
     
     print("=" * 60)
-    print("EVOLUTION MODE")
+    print("EVOLUTION MODE - 4 POPULATIONS")
     print("=" * 60)
-    print("Population A (blue-green): Bottom-left - tall cone trees")
-    print("Population B (yellow-green): Top-right - short dome bushes")
+    print("A (Cyan/Teal):   Bottom-left  - Oak trees")
+    print("B (Red/Orange):  Bottom-right - Pine trees")  
+    print("C (Yellow/Gold): Top-left     - Willow trees")
+    print("D (Purple):      Top-right    - Baobab trees")
     print("")
-    print("Watch them grow, spread, and MERGE with crossover!")
+    print("Watch them grow toward center and CROSSOVER!")
     print("=" * 60)
     print("Controls: WASD move, IJKL look, P screenshot, Q quit")
     print("=" * 60)
@@ -2238,12 +2259,16 @@ def run_evolution_mode():
                         child_dna = plant['dna'].crossover(nearby_other['dna'], rng)
                         child_dna = child_dna.mutate(rng, strength=0.2)  # Extra mutation
                         
-                        # Hybrid mesh type - interesting combos
-                        mesh_types = ['tree_dome', 'willow', 'spiral', 'palm', 'fern']
-                        mesh_type = mesh_types[int(rng.integers(0, len(mesh_types)))]
+                        # Hybrid mesh type - interesting combos based on parents
+                        hybrid_mesh_types = ['maple', 'birch', 'cypress', 'bonsai', 'spiral', 'palm']
+                        mesh_type = hybrid_mesh_types[int(rng.integers(0, len(hybrid_mesh_types)))]
                         
-                        new_pop = 'AB'  # Hybrid!
-                        print(f"Gen {generation}: CROSSOVER at ({new_x:.0f}, {new_z:.0f})!")
+                        # Create hybrid population name (sorted to be consistent)
+                        parent_pops = sorted([plant['population'][0], nearby_other['population'][0]])
+                        new_pop = ''.join(parent_pops)
+                        if len(new_pop) > 2:
+                            new_pop = 'X'  # Multi-hybrid
+                        print(f"Gen {generation}: {plant['population']}x{nearby_other['population']} CROSSOVER at ({new_x:.0f}, {new_z:.0f})!")
                     else:
                         # Normal reproduction with mutation
                         child_dna = plant['dna'].mutate(rng, strength=0.15)
@@ -2265,10 +2290,15 @@ def run_evolution_mode():
             plants.extend(new_plants)
             
             # Count populations
-            pop_a = sum(1 for p in plants if p['population'] == 'A')
-            pop_b = sum(1 for p in plants if p['population'] == 'B')
-            pop_ab = sum(1 for p in plants if p['population'] == 'AB')
-            print(f"Gen {generation}: A={pop_a} B={pop_b} Hybrids={pop_ab} Total={len(plants)}")
+            pop_counts = {}
+            for p in plants:
+                pop = p['population']
+                pop_counts[pop] = pop_counts.get(pop, 0) + 1
+            
+            # Format: A=X B=X C=X D=X | Hybrids=X
+            pure = ' '.join(f"{k}={v}" for k, v in sorted(pop_counts.items()) if len(k) == 1)
+            hybrids = sum(v for k, v in pop_counts.items() if len(k) > 1)
+            print(f"Gen {generation}: {pure} | Hybrids={hybrids} | Total={len(plants)}")
         
         # Build camera
         pitch_rad = math.radians(cam_pitch)
