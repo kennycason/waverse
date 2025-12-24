@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 
 def create_ellipsoid(
     radius_x: float, radius_y: float, radius_z: float,
-    segments: int = 12, rings: int = 8,
+    segments: int = 6, rings: int = 4,  # Low poly for performance
     color: Tuple[float, float, float] = (1.0, 1.0, 1.0)
 ) -> Tuple[List, List, List]:
     """Create an ellipsoid mesh centered at origin."""
@@ -82,7 +82,7 @@ def create_ellipsoid(
 
 def create_cylinder(
     radius_bottom: float, radius_top: float, height: float,
-    segments: int = 12,
+    segments: int = 6,  # Low poly for performance
     color: Tuple[float, float, float] = (1.0, 1.0, 1.0)
 ) -> Tuple[List, List, List]:
     """Create a cylinder/cone mesh. If radius_top=0, it's a cone."""
@@ -400,7 +400,7 @@ def plant_dna_to_geometry(dna: Any) -> GeometrySegment:
     Convert PlantDNA to a GeometrySegment tree.
     
     This reads the DNA parameters and builds a hierarchical structure
-    that can be rendered.
+    that can be rendered. Uses trunk_segments, spiral_factor, asymmetry etc.
     """
     # Handle dict (from JSON) or actual PlantDNA object
     if isinstance(dna, dict):
@@ -414,7 +414,13 @@ def plant_dna_to_geometry(dna: Any) -> GeometrySegment:
         branch_angle = float(dna.get('branch_angle', 0.5)) if dna.get('branch_angle') is not None else 0.5
         leaf_density = float(dna.get('leaf_density', 0.5)) if dna.get('leaf_density') is not None else 0.5
         canopy_shape = dna.get('canopy_shape', 'dome')
-        canopy_spread = dna.get('canopy_spread', 1.0)
+        canopy_spread = dna.get('canopy_spread', 1.0) if dna.get('canopy_spread') else 1.0
+        # NEW: Get trunk_segments, spiral, asymmetry for interesting shapes
+        trunk_segments = dna.get('trunk_segments', [])
+        spiral_factor = float(dna.get('spiral_factor', 0.0)) if dna.get('spiral_factor') else 0.0
+        asymmetry = float(dna.get('asymmetry', 0.0)) if dna.get('asymmetry') else 0.0
+        droop = float(dna.get('droop', 0.0)) if dna.get('droop') else 0.0
+        branch_height = float(dna.get('branch_height', 0.5)) if dna.get('branch_height') else 0.5
     else:
         plant_type = getattr(dna, 'plant_type', 'tree')
         height = dna.height_gene.value if hasattr(dna, 'height_gene') else 1.0
@@ -427,6 +433,11 @@ def plant_dna_to_geometry(dna: Any) -> GeometrySegment:
         leaf_density = getattr(dna, 'leaf_density', 0.5)
         canopy_shape = getattr(dna, 'canopy_shape', 'dome')
         canopy_spread = getattr(dna, 'canopy_spread', 1.0)
+        trunk_segments = getattr(dna, 'trunk_segments', [])
+        spiral_factor = getattr(dna, 'spiral_factor', 0.0)
+        asymmetry = getattr(dna, 'asymmetry', 0.0)
+        droop = getattr(dna, 'droop', 0.0)
+        branch_height = getattr(dna, 'branch_height', 0.5)
     
     # Clamp to reasonable sizes for world rendering
     # Different plant types have different max sizes
@@ -446,15 +457,68 @@ def plant_dna_to_geometry(dna: Any) -> GeometrySegment:
     height = min(height, max_height)
     width = min(width, max_width)
     
-    # Build trunk segment
-    trunk = GeometrySegment(
-        shape="cylinder",
-        size_x=width * 0.15,
-        size_y=height * 0.6,
-        size_z=width * 0.15,
-        color=trunk_color,
-        lod=8
-    )
+    # Build trunk from DNA trunk_segments with curve/twist
+    if trunk_segments and len(trunk_segments) > 0:
+        # Use DNA trunk segments for interesting curved shapes
+        root_segment = None
+        current_segment = None
+        cumulative_y = 0.0
+        cumulative_twist = 0.0
+        
+        for i, seg_data in enumerate(trunk_segments[:4]):  # Limit to 4 segments for perf
+            # Extract segment parameters
+            if isinstance(seg_data, dict):
+                seg_length = float(seg_data.get('length', 0.5)) * height * 0.3
+                seg_width = float(seg_data.get('width', 0.2)) * width
+                seg_taper = float(seg_data.get('taper', 0.8))
+                seg_curve = float(seg_data.get('curve', 0.0))
+                seg_twist = float(seg_data.get('twist', 0.0))
+            else:
+                seg_length = getattr(seg_data, 'length', 0.5) * height * 0.3
+                seg_width = getattr(seg_data, 'width', 0.2) * width
+                seg_taper = getattr(seg_data, 'taper', 0.8)
+                seg_curve = getattr(seg_data, 'curve', 0.0)
+                seg_twist = getattr(seg_data, 'twist', 0.0)
+            
+            # Apply spiral_factor to twist
+            cumulative_twist += seg_twist + spiral_factor * 0.3
+            
+            new_seg = GeometrySegment(
+                shape="cylinder",
+                size_x=seg_width * (seg_taper if i > 0 else 1.0),
+                size_y=seg_length,
+                size_z=seg_width * (seg_taper if i > 0 else 1.0),
+                color=trunk_color,
+                offset_y=cumulative_y if i == 0 else seg_length * 0.8,
+                # Apply curve as rotation (bending)
+                rotation_x=seg_curve * (1 + asymmetry * math.sin(i * 1.5)),
+                rotation_z=cumulative_twist,
+                lod=4
+            )
+            
+            cumulative_y = seg_length
+            
+            if root_segment is None:
+                root_segment = new_seg
+                current_segment = new_seg
+            else:
+                current_segment.children.append(new_seg)
+                current_segment = new_seg
+        
+        trunk = root_segment if root_segment else GeometrySegment(
+            shape="cylinder", size_x=width * 0.15, size_y=height * 0.6,
+            size_z=width * 0.15, color=trunk_color, lod=4
+        )
+    else:
+        # Fallback: single trunk segment
+        trunk = GeometrySegment(
+            shape="cylinder",
+            size_x=width * 0.15,
+            size_y=height * 0.6,
+            size_z=width * 0.15,
+            color=trunk_color,
+            lod=4
+        )
     
     # Add canopy/foliage based on plant type
     if plant_type in ('tree', 'tall_tree'):
@@ -466,7 +530,7 @@ def plant_dna_to_geometry(dna: Any) -> GeometrySegment:
             size_z=width * canopy_spread * 0.8,
             color=leaf_color,
             offset_y=height * 0.1,
-            lod=12
+            lod=4
         )
         trunk.children.append(canopy)
         
@@ -483,7 +547,7 @@ def plant_dna_to_geometry(dna: Any) -> GeometrySegment:
                 offset_z=math.sin(angle) * width * 0.1,
                 rotation_z=branch_angle * 0.5 * math.cos(angle),
                 rotation_x=branch_angle * 0.5 * math.sin(angle),
-                lod=6
+                lod=4
             )
             # Small foliage cluster on branch
             branch.children.append(GeometrySegment(
@@ -492,7 +556,7 @@ def plant_dna_to_geometry(dna: Any) -> GeometrySegment:
                 size_y=width * 0.15,
                 size_z=width * 0.2,
                 color=leaf_color,
-                lod=8
+                lod=4
             ))
             trunk.children.append(branch)
             
@@ -511,7 +575,7 @@ def plant_dna_to_geometry(dna: Any) -> GeometrySegment:
                        leaf_color[1] * (0.8 + i * 0.05), 
                        leaf_color[2] * (0.8 + i * 0.05)),
                 offset_y=layer_y,
-                lod=8
+                lod=4
             )
             trunk.children.append(layer)
             
@@ -529,7 +593,7 @@ def plant_dna_to_geometry(dna: Any) -> GeometrySegment:
                 offset_x=math.cos(angle) * dist,
                 offset_y=height * 0.1,
                 offset_z=math.sin(angle) * dist,
-                lod=8
+                lod=4
             )
             trunk.children.append(sphere)
             
@@ -548,7 +612,7 @@ def plant_dna_to_geometry(dna: Any) -> GeometrySegment:
                 offset_y=0,
                 offset_z=math.sin(angle) * width * 0.15,
                 rotation_x=0.3,
-                lod=6
+                lod=4
             )
             trunk.children.append(petal)
         # Center
@@ -558,7 +622,7 @@ def plant_dna_to_geometry(dna: Any) -> GeometrySegment:
             size_y=width * 0.08,
             size_z=width * 0.1,
             color=(0.9, 0.8, 0.2),
-            lod=8
+            lod=4
         ))
         
     elif plant_type == 'mushroom':
@@ -572,7 +636,7 @@ def plant_dna_to_geometry(dna: Any) -> GeometrySegment:
             size_y=height * 0.15,
             size_z=width * 0.5,
             color=flower_color,
-            lod=12
+            lod=4
         )
         trunk.children.append(cap)
         
@@ -592,7 +656,7 @@ def plant_dna_to_geometry(dna: Any) -> GeometrySegment:
                     offset_x=side * width * 0.15,
                     offset_y=-height * 0.1,
                     rotation_z=side * 0.5,
-                    lod=6
+                    lod=4
                 )
                 trunk.children.append(arm)
                 
@@ -635,7 +699,7 @@ def plant_dna_to_geometry(dna: Any) -> GeometrySegment:
                 ),
                 offset_x=math.sin(angle) * width * 0.1,
                 offset_z=math.cos(angle) * width * 0.1,
-                lod=6
+                lod=4
             )
             current.children.append(seg)
             current = seg
@@ -686,7 +750,7 @@ def plant_dna_to_geometry(dna: Any) -> GeometrySegment:
                 offset_z=math.sin(angle) * width * 0.2,
                 rotation_x=0.6 * math.sin(angle),
                 rotation_z=0.6 * math.cos(angle),
-                lod=6
+                lod=4
             )
             # Tip
             tentacle.children.append(GeometrySegment(
@@ -695,7 +759,7 @@ def plant_dna_to_geometry(dna: Any) -> GeometrySegment:
                 size_y=width * 0.06,
                 size_z=width * 0.06,
                 color=(flower_color[0] * 1.2, flower_color[1] * 1.2, flower_color[2] * 1.2),
-                lod=6
+                lod=4
             ))
             trunk.children.append(tentacle)
     else:
@@ -706,7 +770,7 @@ def plant_dna_to_geometry(dna: Any) -> GeometrySegment:
             size_y=height * 0.3,
             size_z=width * 0.5,
             color=leaf_color,
-            lod=10
+            lod=4
         )
         trunk.children.append(canopy)
     
@@ -753,7 +817,7 @@ def animal_dna_to_geometry(dna: Any) -> GeometrySegment:
             size_y=float(size[1]) * base_scale if len(size) > 1 else 0.3,
             size_z=float(size[2]) * base_scale if len(size) > 2 else 0.3,
             color=color,
-            lod=10
+            lod=4
         )
     else:
         # Default body
@@ -763,7 +827,7 @@ def animal_dna_to_geometry(dna: Any) -> GeometrySegment:
             size_y=0.2 * base_scale,
             size_z=0.25 * base_scale,
             color=primary_color,
-            lod=10
+            lod=4
         )
     
     # Add remaining body segments as a chain
@@ -785,7 +849,7 @@ def animal_dna_to_geometry(dna: Any) -> GeometrySegment:
             size_z=float(size[2]) * base_scale if len(size) > 2 else 0.3,
             color=color,
             offset_x=-float(size[0]) * base_scale * 0.5,  # Chain horizontally
-            lod=8
+            lod=4
         )
         current.children.append(seg)
         current = seg
@@ -819,7 +883,7 @@ def animal_dna_to_geometry(dna: Any) -> GeometrySegment:
                 offset_x=float(attach[0]) * base_scale if len(attach) > 0 else 0,
                 offset_y=float(attach[1]) * base_scale if len(attach) > 1 else 0,
                 offset_z=float(attach[2]) * base_scale if len(attach) > 2 else 0,
-                lod=6
+                lod=4
             )
             root.children.append(limb)
     
@@ -849,7 +913,7 @@ def animal_dna_to_geometry(dna: Any) -> GeometrySegment:
                     offset_x=root.size_x * 0.4,
                     offset_y=root.size_y * 0.3,
                     offset_z=side * root.size_z * 0.3,
-                    lod=6
+                    lod=4
                 )
                 # Pupil
                 eye.children.append(GeometrySegment(

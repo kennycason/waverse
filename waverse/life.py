@@ -67,7 +67,7 @@ class LifeConfig:
     EGG_HATCH_MAX = 3.0
     
     # Performance caps - balanced for performance
-    MAX_PLANTS_PER_CHUNK = 50      # Reduced from 80
+    MAX_PLANTS_PER_CHUNK = 25      # Reduced for DNA geometry performance
     MAX_TOTAL_ANIMALS = 250        # Reduced from 400
     MAX_EGGS = 40                  # Reduced from 60
     
