@@ -42,6 +42,8 @@ from .flora import FloraManager
 from .sky import SkySystem
 from .animals import AnimalManager
 from .chunk_worker import ChunkWorker
+from .microscope_view import MicroscopeView
+from .micro_life import MicroDNA, MICRO_TEMPLATES
 
 
 # =============================================================================
@@ -1180,6 +1182,107 @@ def pickup_nearby_items(camera, dropped_items_list, pickup_radius: float = 3.0):
     return picked_up
 
 
+def get_terrain_type_at_cursor(camera, chunk_manager, flora_manager):
+    """Determine what terrain type is at the camera's cursor (look direction).
+    
+    Returns: "water", "plant", or "ground"
+    """
+    # Get camera look direction
+    look_x, look_y, look_z = camera.get_forward_vector()
+    
+    # Check if we hit a plant first
+    max_dist = 15.0
+    hit_radius = 3.0
+    
+    cam_cx = int(camera.x // 32)
+    cam_cz = int(camera.z // 32)
+    
+    for dcx in range(-1, 2):
+        for dcz in range(-1, 2):
+            cx, cz = cam_cx + dcx, cam_cz + dcz
+            chunk_key = (cx, cz)
+            plants = flora_manager.chunk_plants.get(chunk_key, [])
+            
+            for plant in plants:
+                dx = plant.x - camera.x
+                dy = plant.y - camera.y
+                dz = plant.z - camera.z
+                ray_dist = dx * look_x + dy * look_y + dz * look_z
+                
+                if ray_dist < 1.0 or ray_dist > max_dist:
+                    continue
+                
+                closest_x = camera.x + look_x * ray_dist
+                closest_y = camera.y + look_y * ray_dist
+                closest_z = camera.z + look_z * ray_dist
+                
+                perp_dist = math.sqrt(
+                    (plant.x - closest_x)**2 + 
+                    (plant.y - closest_y)**2 + 
+                    (plant.z - closest_z)**2
+                )
+                
+                if perp_dist < hit_radius:
+                    return "plant"
+    
+    # Check terrain at look point
+    # Find where the look ray hits terrain
+    check_dist = 5.0
+    check_x = camera.x + look_x * check_dist
+    check_z = camera.z + look_z * check_dist
+    
+    # Get terrain height at that point
+    terrain_height = get_height(check_x, check_z, chunk_manager)
+    
+    # Check if water (terrain height at or below sea level)
+    SEA_LEVEL = 0.0  # Adjust if your sea level is different
+    if terrain_height <= SEA_LEVEL:
+        return "water"
+    
+    return "ground"
+
+
+def populate_microscope_world(world, terrain_type: str):
+    """Populate a MicroscopeWorld with organisms based on terrain type.
+    
+    Args:
+        world: MicroscopeWorld instance to populate
+        terrain_type: "water", "plant", or "ground"
+    """
+    # Different organisms for different terrains
+    if terrain_type == "water":
+        # Aquatic microbes - algae, paramecium, bacteria
+        templates = [
+            ("algae", 8),
+            ("paramecium", 5),
+            ("bacteria", 15),
+        ]
+    elif terrain_type == "plant":
+        # Plant surface - mostly bacteria, some algae
+        templates = [
+            ("bacteria", 20),
+            ("algae", 3),
+        ]
+    else:  # ground
+        # Soil microbes - bacteria, amoeba
+        templates = [
+            ("bacteria", 18),
+            ("amoeba", 5),
+        ]
+    
+    # Add organisms
+    for template_name, count in templates:
+        template_func = MICRO_TEMPLATES.get(template_name)
+        if template_func:
+            for _ in range(count):
+                dna = template_func()
+                x = world.rng.random() * world.width
+                y = world.rng.random() * world.height
+                world.add_organism(x, y, dna)
+    
+    print(f"  [MICRO] Populated world with {len(world.organisms)} organisms for {terrain_type}")
+
+
 def _set_terrain_height_at_world_pos(chunk_manager, world_x, world_z, delta, modified_chunks):
     """Set terrain height at a world position, updating ALL chunks that share this vertex.
     
@@ -1550,8 +1653,9 @@ class ToolType:
     MINE = "MINE"   # Mine/lower terrain (L1 = single point)
     FILL = "FILL"   # Fill/raise terrain (inverse of MINE)
     CUT = "CUT"     # Cut down trees for wood
+    MICRO = "MICRO" # Microscope - view microscopic life
     
-    ALL_TOOLS = [SCAN, MINE, FILL, CUT]
+    ALL_TOOLS = [SCAN, MINE, FILL, CUT, MICRO]
 
 
 class Item:
@@ -1851,6 +1955,10 @@ class Camera:
         self.inventory_index = 0  # Selected item in inventory grid
         self.inventory_cols = 2   # Columns in inventory grid
         self.inventory_count = 6  # Total inventory items (tools count)
+        
+        # Microscope mode
+        self.microscope_active = False
+        self.microscope_terrain_type = "water"  # What was sampled: water, plant, ground
         
         # Inventory: list of Item objects
         # Starts with default tools (non-stackable, always present)
@@ -5129,7 +5237,12 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                 running = False
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
-                    running = False
+                    if camera.microscope_active:
+                        # Exit microscope mode
+                        camera.microscope_active = False
+                        camera.set_status("Exited microscope", 1.5)
+                    else:
+                        running = False
                 # Speed controls: [ and ] or - and = to decrease/increase
                 elif event.key in (pygame.K_LEFTBRACKET, pygame.K_MINUS):
                     new_level = max(0, camera.speed_level - 1)
@@ -5172,6 +5285,16 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                                     modern_renderer.invalidate_terrain_chunk(chunk_key[0], chunk_key[1])
                     elif camera.current_tool == ToolType.CUT:
                         cut_tree_at_cursor(camera, flora_manager, chunk_manager, dropped_items, debris_particles, modern_renderer, fallen_trees)
+                    elif camera.current_tool == ToolType.MICRO:
+                        # Activate microscope view - sample what's at cursor
+                        terrain_type = get_terrain_type_at_cursor(camera, chunk_manager, flora_manager)
+                        camera.microscope_active = True
+                        camera.microscope_terrain_type = terrain_type
+                        # Initialize microscope world with organisms based on terrain
+                        if modern_renderer and hasattr(modern_renderer, 'microscope_view'):
+                            modern_renderer.microscope_view.world.clear()
+                            populate_microscope_world(modern_renderer.microscope_view.world, terrain_type)
+                        camera.set_status(f"Microscope: viewing {terrain_type} life")
                 elif event.key == pygame.K_t:  # T = cycle tool radius (for MINE/FILL)
                     if camera.current_tool in (ToolType.MINE, ToolType.FILL):
                         camera.cycle_tool_radius()
@@ -5263,7 +5386,16 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                 # Handle joystick button press events (more reliable than polling)
                 print(f"  [JOYBUTTONDOWN] button={event.button} (START is {GamepadConfig.START})")
                 if event.button == GamepadConfig.START:
-                    camera.toggle_menu()
+                    if camera.microscope_active:
+                        # Exit microscope mode
+                        camera.microscope_active = False
+                        camera.set_status("Exited microscope", 1.5)
+                    else:
+                        camera.toggle_menu()
+                elif event.button == 1:  # B button - exit microscope
+                    if camera.microscope_active:
+                        camera.microscope_active = False
+                        camera.set_status("Exited microscope", 1.5)
         
         # Keyboard input
         keys = pygame.key.get_pressed()
@@ -5368,7 +5500,34 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                         gamepad_speed_cooldown = 20
             
             # Left stick = movement (WASD) - only when menu closed
-            if not camera.menu_open:
+            if camera.microscope_active and modern_renderer:
+                # Microscope controls
+                gp_move = gamepad.get_movement()
+                pan_speed = 0.3  # Slower for precise microscope control
+                
+                # Left stick = pan
+                if abs(gp_move[0]) > 0.1 or abs(gp_move[1]) > 0.1:
+                    modern_renderer.microscope_view.pan(
+                        gp_move[1] * pan_speed,  # X = right stick axis
+                        -gp_move[0] * pan_speed  # Y = inverted forward
+                    )
+                
+                # L1/R1 = zoom
+                if gamepad.get_button(GamepadConfig.L1):
+                    modern_renderer.microscope_view.zoom_out(1.02)
+                if gamepad.get_button(GamepadConfig.R1):
+                    modern_renderer.microscope_view.zoom_in(1.02)
+                
+                # A button = select organism at center
+                if gamepad.get_button(GamepadConfig.A) and gamepad_speed_cooldown <= 0:
+                    org = modern_renderer.microscope_view.select_at(
+                        modern_renderer.microscope_view.width // 2,
+                        modern_renderer.microscope_view.height // 2
+                    )
+                    if org:
+                        camera.set_status(f"Selected: {org.dna.species_id}", 2.0)
+                    gamepad_speed_cooldown = 15
+            elif not camera.menu_open:
                 gp_move = gamepad.get_movement()
                 gp_speed = SPEED_LEVELS[camera.speed_level]
                 # Debug: print if movement detected (commented out)
@@ -5477,6 +5636,15 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                                     modern_renderer.invalidate_terrain_chunk(chunk_key[0], chunk_key[1])
                     elif camera.current_tool == ToolType.CUT:
                         cut_tree_at_cursor(camera, flora_manager, chunk_manager, dropped_items, debris_particles, modern_renderer, fallen_trees)
+                    elif camera.current_tool == ToolType.MICRO:
+                        # Activate microscope view
+                        terrain_type = get_terrain_type_at_cursor(camera, chunk_manager, flora_manager)
+                        camera.microscope_active = True
+                        camera.microscope_terrain_type = terrain_type
+                        if modern_renderer and hasattr(modern_renderer, 'microscope_view'):
+                            modern_renderer.microscope_view.world.clear()
+                            populate_microscope_world(modern_renderer.microscope_view.world, terrain_type)
+                        camera.set_status(f"Microscope: viewing {terrain_type} life")
                     gamepad_speed_cooldown = 15
             
             # DPAD = Tool cycling (left/right) and tool radius (up/down)
@@ -5669,8 +5837,8 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
             modern_renderer.set_debris_particles(debris_particles)
             modern_renderer.set_fallen_trees(fallen_trees)
             
-            # Render everything via modern renderer
-            modern_renderer.render()
+            # Render everything via modern renderer (or microscope if active)
+            modern_renderer.render(dt=dt, microscope_active=camera.microscope_active)
             
             # Render entity preview in menu (uses legacy GL after modern render)
             preview_info = modern_renderer.get_menu_preview_info()

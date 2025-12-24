@@ -447,6 +447,10 @@ class MicroscopeWorld:
             y = self.rng.random() * self.height
             self.organisms.append(Microorganism(x, y, dna))
     
+    def clear(self):
+        """Remove all organisms."""
+        self.organisms.clear()
+    
     def update(self, dt: float):
         """Update all organisms."""
         self.time += dt

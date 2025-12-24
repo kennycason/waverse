@@ -292,14 +292,14 @@ class ModernHUDRenderer:
     """
     
     # Available tools with descriptions
-    # Matches ToolType.ALL_TOOLS order: SCAN, MINE, FILL, CUT
+    # Matches ToolType.ALL_TOOLS order: SCAN, MINE, FILL, CUT, MICRO
     TOOLS = [
         ('camera', 'SCAN', 'SCAN TOOL - ANALYZE AND LOG DNA OF PLANTS/ANIMALS'),
         ('pickaxe', 'MINE', 'MINE TOOL - DIG INTO TERRAIN AND LOWER GROUND'),
         ('shovel', 'FILL', 'FILL TOOL - RAISE TERRAIN AND BUILD UP GROUND'),
         ('axe', 'CUT', 'CUT TOOL - CHOP TREES FOR WOOD'),
+        ('microscope', 'MICRO', 'MICRO TOOL - VIEW MICROSCOPIC LIFE ON SURFACES'),
         ('magnifier', 'ZOOM', 'ZOOM TOOL - INSPECT OBJECTS UP CLOSE [COMING SOON]'),
-        ('microscope', 'MICRO', 'MICRO TOOL - VIEW CELLULAR DETAILS [COMING SOON]'),
     ]
     
     INVENTORY_COLS = 4  # 4 columns for inventory grid (square slots)
@@ -1206,8 +1206,8 @@ class ModernHUDRenderer:
         slot_size = 55  # Square slots
         padding = 8
         
-        # First 4 tools are implemented (SCAN, MINE, FILL, CUT)
-        num_implemented = 4
+        # First 5 tools are implemented (SCAN, MINE, FILL, CUT, MICRO)
+        num_implemented = 5
         
         for i, (icon_name, label, description) in enumerate(self.TOOLS):
             col = i % cols

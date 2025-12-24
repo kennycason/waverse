@@ -632,23 +632,24 @@ def run_microscope_demo():
         
         # Controller input
         for js in joysticks:
-            # Left stick for panning
+            # Left stick for panning (scaled down for smoother control)
             DEADZONE = 0.15
+            STICK_SENSITIVITY = 0.3  # Slower movement
             lx = js.get_axis(0)  # Left stick X
             ly = js.get_axis(1)  # Left stick Y
             
             if abs(lx) > DEADZONE:
-                view.pan(lx * pan_speed, 0)
+                view.pan(lx * pan_speed * STICK_SENSITIVITY, 0)
             if abs(ly) > DEADZONE:
-                view.pan(0, -ly * pan_speed)  # Inverted Y
+                view.pan(0, -ly * pan_speed * STICK_SENSITIVITY)  # Inverted Y
             
             # D-pad for panning
             try:
                 hat = js.get_hat(0)
                 if hat[0] != 0:
-                    view.pan(hat[0] * pan_speed * 0.5, 0)
+                    view.pan(hat[0] * pan_speed * 0.15, 0)
                 if hat[1] != 0:
-                    view.pan(0, hat[1] * pan_speed * 0.5)
+                    view.pan(0, hat[1] * pan_speed * 0.15)
             except:
                 pass
             
@@ -662,18 +663,18 @@ def run_microscope_demo():
                 r2_pressed = (r2 + 1) / 2  # 0 to 1
                 
                 if r2_pressed > 0.1:
-                    view.zoom_in(1.0 + r2_pressed * 0.05)
+                    view.zoom_in(1.0 + r2_pressed * 0.02)
                 if l2_pressed > 0.1:
-                    view.zoom_out(1.0 + l2_pressed * 0.05)
+                    view.zoom_out(1.0 + l2_pressed * 0.02)
             except:
                 pass
             
             # Shoulder buttons for zoom (L1/R1)
             try:
                 if js.get_button(4):  # L1
-                    view.zoom_out(1.02)
+                    view.zoom_out(1.01)
                 if js.get_button(5):  # R1
-                    view.zoom_in(1.02)
+                    view.zoom_in(1.01)
             except:
                 pass
         

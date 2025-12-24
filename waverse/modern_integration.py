@@ -28,6 +28,7 @@ from .modern_weather import ModernWeatherRenderer
 from .modern_hud import ModernHUDRenderer
 from .wind_system import WindManager
 from .wind_particles import WindParticleRenderer
+from .microscope_view import MicroscopeView
 
 
 # =============================================================================
@@ -61,6 +62,7 @@ class ModernWorldRenderer:
         self.weather = ModernWeatherRenderer(ctx)  # Rendered last (particles)
         self.wind_particles = WindParticleRenderer(ctx)  # Debris following wind
         self.hud = ModernHUDRenderer(ctx)  # HUD overlay
+        self.microscope_view = MicroscopeView(ctx, 1280, 720)  # Microscope mode
         
         # Wind system
         self.wind = WindManager(seed=42)
@@ -963,13 +965,20 @@ class ModernWorldRenderer:
         """
         return self.hud.get_preview_info()
     
-    def render(self, dt: float = 0.016):
+    def render(self, dt: float = 0.016, microscope_active: bool = False):
         """
         Render the world.
         
         Args:
             dt: Delta time for animations
+            microscope_active: If True, render microscope view instead of world
         """
+        # Check for microscope mode
+        if microscope_active:
+            self.microscope_view.update(dt)
+            self.microscope_view.render()
+            return
+        
         start = time.perf_counter()
         
         # Update wind system
