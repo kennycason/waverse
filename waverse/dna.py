@@ -635,15 +635,16 @@ class PlantDNA:
         elif plant_type == PlantType.TREE:
             dna.height_gene = Gene(5 + rng.random() * 10, 2, 25, 0.25)  # Bigger trees!
             dna.width_gene = Gene(0.2 + rng.random() * 0.3, 0.1, 0.6, 0.15)
+            # More dramatic curves and twists for interesting polygon shapes!
             dna.trunk_segments = [
                 SegmentGene(
-                    0.6 + rng.random() * 0.6,
-                    0.3 - i * 0.08,
-                    0.85,
-                    rng.random() * 0.15 - 0.075,
-                    0
+                    0.6 + rng.random() * 0.6,    # length
+                    0.3 - i * 0.08,              # width
+                    0.85,                         # taper
+                    (rng.random() - 0.5) * 0.6,  # curve: -0.3 to +0.3 (much more visible!)
+                    rng.random() * 0.4           # twist: 0 to 0.4 (spiral effect!)
                 )
-                for i in range(2 + rng.integers(0, 2))
+                for i in range(2 + rng.integers(0, 3))  # 2-4 segments
             ]
             dna.branch_count = 3 + rng.integers(0, 5)  # Reduced for perf
             dna.branch_angle = 0.25 + rng.random() * 0.4
@@ -654,6 +655,7 @@ class PlantDNA:
             dna.canopy_spread = 0.4 + rng.random() * 0.5
             dna.droop = rng.random() * 0.4  # Some droop variation
             dna.asymmetry = 0.1 + rng.random() * 0.3  # Natural asymmetry
+            dna.spiral_factor = rng.random() * 0.35  # Some trees have spiral trunks!
             dna.leaf_shape = rng.choice(["round", "pointed", "heart", "star", "fan"])
             dna.trunk_color = ColorGene(0.25 + rng.random() * 0.2, 0.15 + rng.random() * 0.12, 0.08 + rng.random() * 0.05)
             dna.leaf_color = ColorGene(0.1 + rng.random() * 0.15, 0.3 + rng.random() * 0.4, 0.08 + rng.random() * 0.1)
@@ -661,13 +663,14 @@ class PlantDNA:
         elif plant_type == PlantType.TALL_TREE:
             dna.height_gene = Gene(15 + rng.random() * 20, 8, 50, 0.3)  # Giant trees!
             dna.width_gene = Gene(0.4 + rng.random() * 0.5, 0.2, 1.0, 0.2)
+            # Tall trees can have interesting curved trunks too
             dna.trunk_segments = [
                 SegmentGene(
-                    0.8 + rng.random() * 0.5,
-                    0.5 - i * 0.1,
-                    0.9,
-                    rng.random() * 0.1 - 0.05,
-                    0
+                    0.8 + rng.random() * 0.5,    # length
+                    0.5 - i * 0.1,               # width
+                    0.9,                          # taper
+                    (rng.random() - 0.5) * 0.4,  # curve: noticeable bends
+                    rng.random() * 0.25          # twist: some spiral
                 )
                 for i in range(3 + rng.integers(0, 3))
             ]
