@@ -15,8 +15,17 @@ from typing import Dict, Tuple, List, Optional, Any
 from dataclasses import dataclass, field
 import math
 
-# Import DNA geometry system for DNA-driven mesh generation
-from .dna_geometry import GeometryBuilder, plant_dna_to_geometry
+# Import DNA mesh generator for detailed DNA-driven mesh generation
+# This replaces the simplified dna_geometry approach with the full
+# recursive branching and detailed shapes from the old renderer
+from .dna_mesh_generator import generate_plant_mesh, clear_mesh_cache
+
+# Fallback to old system if needed
+try:
+    from .dna_geometry import GeometryBuilder, plant_dna_to_geometry
+    HAS_OLD_GEOMETRY = True
+except ImportError:
+    HAS_OLD_GEOMETRY = False
 
 
 # =============================================================================
@@ -2492,9 +2501,21 @@ class ModernFloraRenderer:
         
         # Generate or retrieve cached mesh
         if species_id not in self._dna_mesh_cache:
-            # Generate mesh from DNA
-            geometry_root = plant_dna_to_geometry(dna)
-            verts, norms, colors = GeometryBuilder.build_mesh(geometry_root)
+            # Generate mesh from DNA using new detailed mesh generator
+            # This produces recursive branches, proper canopy shapes, etc.
+            verts, norms, colors = generate_plant_mesh(dna)
+            
+            # Fallback if mesh is empty
+            if len(verts) == 0:
+                # Use old geometry system as fallback
+                if HAS_OLD_GEOMETRY:
+                    geometry_root = plant_dna_to_geometry(dna)
+                    verts, norms, colors = GeometryBuilder.build_mesh(geometry_root)
+                else:
+                    # Emergency fallback: simple triangle
+                    verts = np.array([[0, 0, 0], [0.1, 0, 0], [0, 1, 0]], dtype='f4')
+                    norms = np.array([[0, 0, 1], [0, 0, 1], [0, 0, 1]], dtype='f4')
+                    colors = np.array([[0.2, 0.6, 0.2], [0.2, 0.6, 0.2], [0.2, 0.6, 0.2]], dtype='f4')
             
             # Cache it (with LRU eviction if needed)
             if len(self._dna_mesh_cache) >= self._dna_mesh_cache_max:
