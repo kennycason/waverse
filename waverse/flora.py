@@ -1412,56 +1412,64 @@ class FloraManager:
         # Savanna = moderate-sparse (25-45 plants)
         biome = (biome_name or '').lower()
         
+        # Density multiplier - reduced for detailed evolved flora rendering
+        # Set WAVERSE_FLORA_DENSITY=1.0 for original density, 0.5 for half, etc.
+        import os
+        density_mult = float(os.environ.get('WAVERSE_FLORA_DENSITY', '0.5'))
+        
         # === SPECIAL EXOTIC BIOMES ===
         if biome == 'psychedelic':
             # TRIPPY! SUPER dense weird plants!
-            num_plants = rng.integers(80, 120)  # More plants!
-            num_underwater = rng.integers(15, 30)
+            num_plants = int(rng.integers(80, 120) * density_mult)
+            num_underwater = int(rng.integers(15, 30) * density_mult)
         elif biome == 'hellfire':
             # Volcanic - sparse but dramatic
-            num_plants = rng.integers(15, 35)
+            num_plants = int(rng.integers(15, 35) * density_mult)
             num_underwater = 0  # No water in hell
         elif biome == 'shadow':
             # Dark creepy plants - moderate
-            num_plants = rng.integers(30, 55)
-            num_underwater = rng.integers(3, 8)
+            num_plants = int(rng.integers(30, 55) * density_mult)
+            num_underwater = int(rng.integers(3, 8) * density_mult)
         elif biome == 'crystal':
             # Crystalline - sparse but beautiful
-            num_plants = rng.integers(20, 40)
-            num_underwater = rng.integers(2, 6)
+            num_plants = int(rng.integers(20, 40) * density_mult)
+            num_underwater = int(rng.integers(2, 6) * density_mult)
         elif biome == 'void':
             # THE VOID - almost nothing
-            num_plants = rng.integers(2, 8)
+            num_plants = int(rng.integers(2, 8) * density_mult)
             num_underwater = 0
         # === NORMAL BIOMES ===
         elif biome in ('rainforest', 'tropical'):
             # JUNGLE! Dense canopy, vines everywhere, flowers
-            num_plants = rng.integers(55, 90)
-            num_underwater = rng.integers(8, 16)
+            num_plants = int(rng.integers(55, 90) * density_mult)
+            num_underwater = int(rng.integers(8, 16) * density_mult)
         elif biome in ('temperate', 'taiga'):
             # Moderate forest
-            num_plants = rng.integers(35, 58)
-            num_underwater = rng.integers(5, 12)
+            num_plants = int(rng.integers(35, 58) * density_mult)
+            num_underwater = int(rng.integers(5, 12) * density_mult)
         elif biome == 'desert':
             # Sparse, mostly cacti and hardy plants
-            num_plants = rng.integers(4, 14)
+            num_plants = int(rng.integers(4, 14) * density_mult)
             num_underwater = 0
         elif biome in ('tundra', 'frozen'):
             # Sparse arctic plants
-            num_plants = rng.integers(5, 16)
-            num_underwater = rng.integers(0, 3)
+            num_plants = int(rng.integers(5, 16) * density_mult)
+            num_underwater = int(rng.integers(0, 3) * density_mult)
         elif biome == 'savanna':
             # Grassland with scattered trees
-            num_plants = rng.integers(16, 32)
-            num_underwater = rng.integers(1, 5)
+            num_plants = int(rng.integers(16, 32) * density_mult)
+            num_underwater = int(rng.integers(1, 5) * density_mult)
         elif biome == 'swamp':
             # Dense, lots of water plants
-            num_plants = rng.integers(40, 70)
-            num_underwater = rng.integers(12, 24)
+            num_plants = int(rng.integers(40, 70) * density_mult)
+            num_underwater = int(rng.integers(12, 24) * density_mult)
         else:
             # Default (grassland, etc.) - moderate density
-            num_plants = rng.integers(28, 50)
-            num_underwater = rng.integers(5, 14)
+            num_plants = int(rng.integers(28, 50) * density_mult)
+            num_underwater = int(rng.integers(5, 14) * density_mult)
+        
+        # Ensure at least a few plants per chunk
+        num_plants = max(3, num_plants)
         
         for _ in range(num_plants + num_underwater):
             local_x = rng.integers(2, w - 2)
