@@ -2614,31 +2614,35 @@ def run_render_test():
     
     prog = ctx.program(vertex_shader=RENDER_VERT, fragment_shader=RENDER_FRAG)
     
-    # Generate plants with various types - focus on types that should show meandering trunks
+    # Generate a BIG grid of plants with all types!
     rng = np.random.default_rng(42)
     
-    plant_types_to_test = [
-        PlantType.TREE, PlantType.TREE, PlantType.TREE,  # Multiple trees
-        PlantType.TALL_TREE, 
-        PlantType.ALIEN, PlantType.ALIEN, PlantType.ALIEN,  # Multiple aliens (most curved)
-        PlantType.SPIRAL,
-        PlantType.WILLOW,
-        PlantType.PALM,
-        PlantType.MUSHROOM,
-        PlantType.BUSH,
-        PlantType.FERN,
-        PlantType.CACTUS,
-        PlantType.OCTOPUS,
-        PlantType.TENTACLE,
+    # All plant types for variety
+    ALL_TYPES = [
+        PlantType.TREE, PlantType.TALL_TREE, PlantType.ALIEN,
+        PlantType.SPIRAL, PlantType.WILLOW, PlantType.PALM,
+        PlantType.MUSHROOM, PlantType.BUSH, PlantType.FERN,
+        PlantType.CACTUS, PlantType.OCTOPUS, PlantType.TENTACLE,
+        PlantType.PINE, PlantType.CORAL, PlantType.VINE,
     ]
     
-    GRID_COLS = 8
-    SPACING = 12.0  # Wide spacing for inspection
+    # Create a big grid!
+    GRID_ROWS = 8
+    GRID_COLS = 12
+    SPACING = 10.0  # Space between plants
+    
+    # Generate all plant types across the grid
+    plant_types_to_test = []
+    for row in range(GRID_ROWS):
+        for col in range(GRID_COLS):
+            # Pick a type - cycle through all types, then add random variety
+            type_idx = (row * GRID_COLS + col) % len(ALL_TYPES)
+            plant_types_to_test.append(ALL_TYPES[type_idx])
     
     plants = []
     vaos = []
     
-    print("Generating plant meshes using dna_mesh_generator (same as main game)...")
+    print(f"Generating {len(plant_types_to_test)} plants using dna_mesh_generator...")
     
     for i, plant_type in enumerate(plant_types_to_test):
         # Create random DNA of this type
@@ -2655,22 +2659,15 @@ def run_render_test():
             print(f"  WARNING: Empty mesh for {plant_type}")
             continue
         
-        # Debug: check vertex bounds
-        if len(verts) > 0:
-            v_min = verts.min(axis=0)
-            v_max = verts.max(axis=0)
-            print(f"  {plant_type}: {len(verts)} verts, bounds: ({v_min[0]:.1f},{v_min[1]:.1f},{v_min[2]:.1f}) to ({v_max[0]:.1f},{v_max[1]:.1f},{v_max[2]:.1f})")
-        
         # Grid position
         col = i % GRID_COLS
         row = i // GRID_COLS
         x = (col - GRID_COLS/2) * SPACING
-        z = (row - len(plant_types_to_test)//GRID_COLS/2) * SPACING
+        z = (row - GRID_ROWS/2) * SPACING
         
         # Create VAO with explicit format: 3f position, 3f normal, 3f color = 9 floats per vertex
         interleaved = np.hstack([verts, norms, colors]).astype('f4')
         vbo = ctx.buffer(interleaved.tobytes())
-        # Format: '3f 3f 3f' means 3 floats for each of the 3 attributes (stride = 36 bytes)
         vao = ctx.vertex_array(prog, [(vbo, '3f 3f 3f', 'in_position', 'in_normal', 'in_color')])
         
         plants.append({
@@ -2678,17 +2675,48 @@ def run_render_test():
             'dna': dna,
             'x': x, 'z': z,
             'vao': vao,
+            'vbo': vbo,  # Keep VBO reference for updating
             'vert_count': len(verts),
-            'scale': 1.5,
+            'scale': 1.0 + rng.random() * 0.5,
             'rotation': rng.random() * math.pi * 2,
         })
         vaos.append(vao)
     
-    print(f"\nGenerated {len(plants)} plants for inspection")
+    # Helper to regenerate a plant's mesh from mutated DNA
+    def regenerate_plant_mesh(plant_idx):
+        plant = plants[plant_idx]
+        dna = plant['dna']
+        
+        # Mutate the DNA slightly
+        dna = dna.mutate(rng, strength=0.15)
+        plant['dna'] = dna
+        
+        # Regenerate mesh
+        clear_mesh_cache()  # Clear cache to get fresh mesh
+        verts, norms, colors = generate_plant_mesh(dna)
+        
+        if len(verts) == 0:
+            return False
+        
+        # Update VBO with new data
+        interleaved = np.hstack([verts, norms, colors]).astype('f4')
+        
+        # Release old resources and create new ones
+        plant['vao'].release()
+        plant['vbo'].release()
+        
+        plant['vbo'] = ctx.buffer(interleaved.tobytes())
+        plant['vao'] = ctx.vertex_array(prog, [(plant['vbo'], '3f 3f 3f', 'in_position', 'in_normal', 'in_color')])
+        plant['vert_count'] = len(verts)
+        
+        return True
+    
+    print(f"\n🌳 Generated {len(plants)} plants in {GRID_ROWS}x{GRID_COLS} grid!")
     print("\nControls:")
     print("  WASD - Move camera")
-    print("  IJKL - Look around")
+    print("  IJKL - Look around") 
     print("  Space/Shift - Up/Down")
+    print("  M - Toggle MUTATION mode (plants evolve!)")
     print("  Controller: Left stick=move, Right stick=look")
     print("  P - Screenshot | Q/Escape - Quit")
     
@@ -2699,15 +2727,41 @@ def run_render_test():
         gamepad.init()
         print(f"  Gamepad: {gamepad.get_name()}")
     
-    # Camera
-    cam_x, cam_y, cam_z = 0, 15, 50
-    cam_yaw, cam_pitch = 0, -15
+    # Camera - start further back for bigger grid
+    cam_x, cam_y, cam_z = 0, 30, 80
+    cam_yaw, cam_pitch = 0, -20
+    
+    # Mutation state
+    mutation_enabled = True  # Start with mutation ON!
+    mutation_timer = 0.0
+    mutation_interval = 0.5  # Mutate a plant every 0.5 seconds
+    mutation_index = 0
+    generation = 0
     
     clock = pygame.time.Clock()
     running = True
     
+    print("\n🧬 MUTATION MODE: ON - Watch the plants evolve!")
+    
     while running:
         dt = clock.tick(60) / 1000.0
+        
+        # Live mutation - mutate one plant per interval
+        if mutation_enabled:
+            mutation_timer += dt
+            if mutation_timer >= mutation_interval:
+                mutation_timer = 0.0
+                
+                # Mutate the next plant in sequence
+                if regenerate_plant_mesh(mutation_index):
+                    pass  # Silently mutate
+                
+                mutation_index = (mutation_index + 1) % len(plants)
+                
+                # Track generations (one full cycle through all plants)
+                if mutation_index == 0:
+                    generation += 1
+                    print(f"🧬 Generation {generation} complete!")
         
         for event in pygame.event.get():
             if event.type == QUIT:
@@ -2715,6 +2769,11 @@ def run_render_test():
             elif event.type == KEYDOWN:
                 if event.key == K_q or event.key == K_ESCAPE:
                     running = False
+                elif event.key == K_m:
+                    # Toggle mutation mode
+                    mutation_enabled = not mutation_enabled
+                    status = "ON 🧬" if mutation_enabled else "OFF ⏸️"
+                    print(f"Mutation mode: {status}")
                 elif event.key == K_p:
                     # Screenshot
                     from PIL import Image
@@ -2728,7 +2787,7 @@ def run_render_test():
                     img = Image.frombytes('RGB', (WIDTH, HEIGHT), pixels)
                     img = img.transpose(Image.FLIP_TOP_BOTTOM)
                     img.save(filename)
-                    print(f"Saved: {filename}")
+                    print(f"📸 Saved: {filename}")
         
         # Input handling
         keys = pygame.key.get_pressed()
