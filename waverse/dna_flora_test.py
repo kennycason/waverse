@@ -2655,14 +2655,21 @@ def run_render_test():
             print(f"  WARNING: Empty mesh for {plant_type}")
             continue
         
+        # Debug: check vertex bounds
+        if len(verts) > 0:
+            v_min = verts.min(axis=0)
+            v_max = verts.max(axis=0)
+            print(f"  {plant_type}: {len(verts)} verts, bounds: ({v_min[0]:.1f},{v_min[1]:.1f},{v_min[2]:.1f}) to ({v_max[0]:.1f},{v_max[1]:.1f},{v_max[2]:.1f})")
+        
         # Grid position
         col = i % GRID_COLS
         row = i // GRID_COLS
         x = (col - GRID_COLS/2) * SPACING
         z = (row - len(plant_types_to_test)//GRID_COLS/2) * SPACING
         
-        # Create VAO
-        vbo = ctx.buffer(np.hstack([verts, norms, colors]).astype('f4').tobytes())
+        # Create VAO - properly interleave position, normal, color per vertex
+        interleaved = np.hstack([verts, norms, colors]).astype('f4')
+        vbo = ctx.buffer(interleaved.tobytes())
         vao = ctx.simple_vertex_array(prog, vbo, 'in_position', 'in_normal', 'in_color')
         
         plants.append({
@@ -2675,15 +2682,6 @@ def run_render_test():
             'rotation': rng.random() * math.pi * 2,
         })
         vaos.append(vao)
-        
-        # Print DNA params to verify
-        if dna.trunk_segments:
-            seg = dna.trunk_segments[0]
-            curve = getattr(seg, 'curve', 0)
-            twist = getattr(seg, 'twist', 0)
-            print(f"  {plant_type}: {len(verts)} verts, curve={curve:.3f}, twist={twist:.3f}")
-        else:
-            print(f"  {plant_type}: {len(verts)} verts (no trunk segments)")
     
     print(f"\nGenerated {len(plants)} plants for inspection")
     print("\nControls:")
@@ -2833,8 +2831,18 @@ def run_render_test():
             
             mvp = proj * view * model
             
-            prog['u_mvp'].write(np.array(mvp, dtype='f4').tobytes())
-            prog['u_model'].write(np.array(model, dtype='f4').tobytes())
+            # Convert glm matrices to numpy arrays properly
+            # glm.mat4 can be converted by accessing each column
+            def mat4_to_bytes(m):
+                # glm matrices are column-major, so we iterate columns
+                data = []
+                for col in range(4):
+                    for row in range(4):
+                        data.append(m[col][row])
+                return np.array(data, dtype='f4').tobytes()
+            
+            prog['u_mvp'].write(mat4_to_bytes(mvp))
+            prog['u_model'].write(mat4_to_bytes(model))
             
             plant['vao'].render(moderngl.TRIANGLES)
         
