@@ -30,11 +30,14 @@ try:
 except ImportError:
     PIL_AVAILABLE = False
 
-# Import DNA geometry system
+# Import DNA geometry system (legacy, still used for animals)
 from .dna_geometry import (
     GeometryBuilder, GeometrySegment,
     plant_dna_to_geometry, animal_dna_to_geometry
 )
+
+# Import new DNA mesh generator (produces detailed plant meshes like V1!)
+from .dna_mesh_generator import generate_plant_mesh, clear_mesh_cache
 
 
 # =============================================================================
@@ -1611,20 +1614,21 @@ class ModernHUDRenderer:
         self._preview_fbo.use()
         self._preview_fbo.clear(0.12, 0.12, 0.18, 1.0)  # Dark background
         
-        # Enable depth testing
+        # Enable depth testing, disable backface culling for canopy visibility
         self.ctx.enable(moderngl.DEPTH_TEST)
+        self.ctx.disable(moderngl.CULL_FACE)
         
         # Get the actual DNA dict
         entity_dna = dna_data.get('dna', dna_data)
         
-        # Convert DNA to geometry using the new system
+        # Convert DNA to geometry
         if is_plant:
-            geometry_root = plant_dna_to_geometry(entity_dna)
+            # Use the NEW detailed mesh generator for plants (V1-quality!)
+            verts, norms, colors = generate_plant_mesh(entity_dna)
         else:
+            # Animals still use the old geometry system for now
             geometry_root = animal_dna_to_geometry(entity_dna)
-        
-        # Build mesh from geometry tree
-        verts, norms, colors = GeometryBuilder.build_mesh(geometry_root)
+            verts, norms, colors = GeometryBuilder.build_mesh(geometry_root)
         
         # Calculate bounding box for camera positioning
         if len(verts) > 0:
