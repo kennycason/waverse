@@ -2626,10 +2626,10 @@ def run_render_test():
         PlantType.PINE, PlantType.CORAL, PlantType.VINE,
     ]
     
-    # Create a big grid!
-    GRID_ROWS = 8
-    GRID_COLS = 12
-    SPACING = 10.0  # Space between plants
+    # Create an even BIGGER grid with tighter spacing!
+    GRID_ROWS = 12
+    GRID_COLS = 16
+    SPACING = 6.0  # Tighter spacing for a denser forest feel
     
     # Generate all plant types across the grid
     plant_types_to_test = []
@@ -2720,12 +2720,21 @@ def run_render_test():
     print("  Controller: Left stick=move, Right stick=look")
     print("  P - Screenshot | Q/Escape - Quit")
     
-    # Controller setup
+    # Controller setup - match main game axis config
     gamepad = None
+    # Default axis mapping (can vary by controller)
+    LEFT_STICK_X = 0
+    LEFT_STICK_Y = 1
+    RIGHT_STICK_X = 3  # Some controllers use 2
+    RIGHT_STICK_Y = 4  # Some controllers use 3
+    
     if pygame.joystick.get_count() > 0:
         gamepad = pygame.joystick.Joystick(0)
         gamepad.init()
         print(f"  Gamepad: {gamepad.get_name()}")
+        print(f"    Axes: {gamepad.get_numaxes()} | Buttons: {gamepad.get_numbuttons()}")
+        print(f"    L-Stick: axes {LEFT_STICK_X},{LEFT_STICK_Y} | R-Stick: axes {RIGHT_STICK_X},{RIGHT_STICK_Y}")
+        print("    Press G to toggle gamepad debug")
     
     # Camera - start further back for bigger grid
     cam_x, cam_y, cam_z = 0, 30, 80
@@ -2734,9 +2743,12 @@ def run_render_test():
     # Mutation state
     mutation_enabled = True  # Start with mutation ON!
     mutation_timer = 0.0
-    mutation_interval = 0.5  # Mutate a plant every 0.5 seconds
+    mutation_interval = 0.3  # Mutate a plant every 0.3 seconds (faster!)
     mutation_index = 0
     generation = 0
+    
+    # Gamepad debug
+    gamepad_debug = False
     
     clock = pygame.time.Clock()
     running = True
@@ -2774,6 +2786,10 @@ def run_render_test():
                     mutation_enabled = not mutation_enabled
                     status = "ON 🧬" if mutation_enabled else "OFF ⏸️"
                     print(f"Mutation mode: {status}")
+                elif event.key == K_g:
+                    # Toggle gamepad debug
+                    gamepad_debug = not gamepad_debug
+                    print(f"Gamepad debug: {'ON' if gamepad_debug else 'OFF'}")
                 elif event.key == K_p:
                     # Screenshot
                     from PIL import Image
@@ -2800,18 +2816,23 @@ def run_render_test():
         
         if gamepad and not system_mod:
             # Left stick: movement
-            if gamepad.get_numaxes() >= 2:
-                gp_move_x = gamepad.get_axis(0)
-                gp_move_y = gamepad.get_axis(1)
+            if gamepad.get_numaxes() > LEFT_STICK_Y:
+                gp_move_x = gamepad.get_axis(LEFT_STICK_X)
+                gp_move_y = gamepad.get_axis(LEFT_STICK_Y)
                 if abs(gp_move_x) < 0.15: gp_move_x = 0
                 if abs(gp_move_y) < 0.15: gp_move_y = 0
             
             # Right stick: look
-            if gamepad.get_numaxes() >= 4:
-                gp_look_x = gamepad.get_axis(3)
-                gp_look_y = gamepad.get_axis(4)
+            if gamepad.get_numaxes() > RIGHT_STICK_Y:
+                gp_look_x = gamepad.get_axis(RIGHT_STICK_X)
+                gp_look_y = gamepad.get_axis(RIGHT_STICK_Y)
                 if abs(gp_look_x) < 0.15: gp_look_x = 0
                 if abs(gp_look_y) < 0.15: gp_look_y = 0
+            
+            # Debug output (toggle with G key)
+            if gamepad_debug:
+                raw_axes = [gamepad.get_axis(i) for i in range(min(6, gamepad.get_numaxes()))]
+                print(f"Axes: {' '.join(f'{i}:{v:.2f}' for i, v in enumerate(raw_axes))}")
         
         if not system_mod:
             # Camera look (IJKL or right stick)
