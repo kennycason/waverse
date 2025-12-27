@@ -384,30 +384,21 @@ class DNAMeshGenerator:
     def _generate_tree(self, p: Dict):
         """Generate a tree with multi-segment trunk, branches, and canopy.
         
-        Key insight from V1: Each segment's curve CHANGES THE DIRECTION of growth,
-        and subsequent segments inherit that position/angle. This creates meandering
-        polygon trunks instead of straight cylinders with local wiggles.
+        Uses matrix stack rotations to create meandering polygon trunks.
+        Each segment's curve rotates the coordinate system, so subsequent 
+        segments grow in a new direction - creating the bent polygon look.
         """
         height = min(p['height'], 5.0)  # Clamp for performance
         width = min(p['width'], 1.5)
         
-        # Draw multi-segment trunk with CUMULATIVE direction changes
         trunk_segments = p['trunk_segments']
-        
-        # Track cumulative position and direction (like old V1 vine code)
-        current_x = 0.0
-        current_y = 0.0
-        current_z = 0.0
-        direction_yaw = 0.0    # Yaw angle (horizontal direction)
-        direction_pitch = 0.0  # Pitch angle (lean forward/back)
         current_width = width * 0.15
-        cumulative_twist = 0.0
-        
-        # Store segment endpoints for branch attachment
-        segment_positions = [(current_x, current_y, current_z)]
         
         if trunk_segments and len(trunk_segments) > 0:
-            for i, seg in enumerate(trunk_segments[:5]):  # Up to 5 segments
+            # Use matrix stack to accumulate rotations (like V1's glPushMatrix approach)
+            self.matrix.push()
+            
+            for i, seg in enumerate(trunk_segments[:5]):
                 if isinstance(seg, dict):
                     seg_length = float(seg.get('length', 0.5)) * height / len(trunk_segments)
                     seg_taper = float(seg.get('taper', 0.85))
@@ -419,194 +410,47 @@ class DNAMeshGenerator:
                     seg_curve = getattr(seg, 'curve', 0.0)
                     seg_twist = getattr(seg, 'twist', 0.0)
                 
-                # Add spiral factor to twist
-                seg_twist += p['spiral_factor'] * 0.4 * i
+                # Add spiral factor
+                seg_twist += p['spiral_factor'] * 0.3 * i
                 
-                # Accumulate twist for the current segment
-                cumulative_twist += seg_twist
+                # ROTATE BEFORE DRAWING - this is what creates the meandering effect!
+                # The curve rotates the coordinate system, so the next segment
+                # grows in a different direction
+                curve_angle = seg_curve * 45  # Convert curve (-1 to 1) to degrees
                 
-                # CRITICAL: Each segment's curve changes the DIRECTION of growth!
-                # This creates the meandering polygon trunks from V1
-                direction_yaw += seg_curve * math.pi * 0.6  # Curve affects yaw direction
-                direction_pitch += seg_curve * math.pi * 0.3 * (1 if i % 2 == 0 else -1)  # Alternate pitch
+                # Alternate the rotation axis for more interesting shapes
+                if i % 2 == 0:
+                    self.matrix.rotate_z(curve_angle)  # Lean left/right
+                else:
+                    self.matrix.rotate_x(curve_angle * 0.5)  # Lean forward/back
                 
-                # Calculate new end position based on direction
-                # The trunk grows in the direction we're facing
-                dx = math.sin(direction_yaw) * seg_length * 0.4
-                dy = seg_length * math.cos(direction_pitch * 0.5)  # Mostly upward
-                dz = math.cos(direction_yaw) * seg_length * 0.3
+                # Apply twist rotation
+                self.matrix.rotate_y(seg_twist * 30)
                 
-                next_x = current_x + dx
-                next_y = current_y + dy
-                next_z = current_z + dz
-                next_width = current_width * seg_taper
+                # Draw the segment as a tapered cylinder
+                self._add_cylinder(current_width, seg_length, 6, p['trunk_color'], taper=seg_taper)
                 
-                # Draw this segment connecting current position to next position
-                self._draw_trunk_segment_positioned(
-                    current_x, current_y, current_z, current_width,
-                    next_x, next_y, next_z, next_width,
-                    cumulative_twist, p['trunk_color']
-                )
+                # Move up to the top of this segment for the next one
+                self.matrix.translate(0, seg_length, 0)
                 
-                # Update position for next segment
-                current_x, current_y, current_z = next_x, next_y, next_z
-                current_width = next_width
-                segment_positions.append((current_x, current_y, current_z))
+                current_width *= seg_taper
+            
+            self.matrix.pop()
         else:
-            # Single trunk
+            # Single trunk - no segments
             self._add_cylinder(width * 0.15, height * 0.6, 6, p['trunk_color'], taper=0.7)
-            current_y = height * 0.6
-            segment_positions.append((0, current_y, 0))
         
-        # Store final trunk position for canopy
-        trunk_top_x, trunk_top_y, trunk_top_z = current_x, current_y, current_z
-        
-        # Draw branches from various segment positions
+        # Draw branches
         if p['branch_count'] > 0:
-            self._draw_branches_from_positions(p, segment_positions, height)
+            branch_start = height * p['branch_height']
+            self._draw_branches(p, branch_start, height)
         
-        # Draw canopy at trunk top
-        self._draw_canopy_at(p, trunk_top_x, trunk_top_y, trunk_top_z, height)
+        # Draw canopy
+        self._draw_canopy(p, height)
         
         # Draw flowers if present
         if p['has_flowers'] and p['flower_size'] > 0:
-            self._draw_flowers_at(p, trunk_top_x, trunk_top_y, trunk_top_z, height)
-    
-    def _draw_trunk_segment_positioned(self, x1: float, y1: float, z1: float, w1: float,
-                                        x2: float, y2: float, z2: float, w2: float,
-                                        twist: float, color: Color):
-        """Draw a trunk segment connecting two 3D positions with different widths.
-        
-        This creates the actual meandering polygon shape by connecting rings
-        at different positions, not just different heights.
-        """
-        segments = 6  # Number of sides on the cylinder
-        rings = 4     # Number of rings along the segment
-        
-        # Calculate the direction vector
-        dx = x2 - x1
-        dy = y2 - y1
-        dz = z2 - z1
-        length = math.sqrt(dx*dx + dy*dy + dz*dz)
-        if length < 0.001:
-            return
-        
-        # Normalize direction
-        dx, dy, dz = dx/length, dy/length, dz/length
-        
-        # Calculate perpendicular vectors for ring orientation
-        # Use a simple approach: find a vector perpendicular to the direction
-        if abs(dy) > 0.9:
-            # Nearly vertical, use X axis as reference
-            perp1_x, perp1_y, perp1_z = 1, 0, 0
-        else:
-            # Use Y axis as reference
-            perp1_x, perp1_y, perp1_z = 0, 1, 0
-        
-        # Cross product to get first perpendicular
-        p1x = dy * perp1_z - dz * perp1_y
-        p1y = dz * perp1_x - dx * perp1_z
-        p1z = dx * perp1_y - dy * perp1_x
-        p1_len = math.sqrt(p1x*p1x + p1y*p1y + p1z*p1z)
-        if p1_len > 0.001:
-            p1x, p1y, p1z = p1x/p1_len, p1y/p1_len, p1z/p1_len
-        
-        # Cross product to get second perpendicular
-        p2x = dy * p1z - dz * p1y
-        p2y = dz * p1x - dx * p1z
-        p2z = dx * p1y - dy * p1x
-        p2_len = math.sqrt(p2x*p2x + p2y*p2y + p2z*p2z)
-        if p2_len > 0.001:
-            p2x, p2y, p2z = p2x/p2_len, p2y/p2_len, p2z/p2_len
-        
-        # Draw the segment as connected rings
-        for ring in range(rings):
-            t1 = ring / rings
-            t2 = (ring + 1) / rings
-            
-            # Interpolate position
-            px1 = x1 + (x2 - x1) * t1
-            py1 = y1 + (y2 - y1) * t1
-            pz1 = z1 + (z2 - z1) * t1
-            px2 = x1 + (x2 - x1) * t2
-            py2 = y1 + (y2 - y1) * t2
-            pz2 = z1 + (z2 - z1) * t2
-            
-            # Interpolate width
-            r1 = w1 + (w2 - w1) * t1
-            r2 = w1 + (w2 - w1) * t2
-            
-            # Twist angles
-            tw1 = twist * t1 * math.pi
-            tw2 = twist * t2 * math.pi
-            
-            for seg in range(segments):
-                a1 = (seg / segments) * 2 * math.pi + tw1
-                a2 = ((seg + 1) / segments) * 2 * math.pi + tw1
-                a1_next = (seg / segments) * 2 * math.pi + tw2
-                a2_next = ((seg + 1) / segments) * 2 * math.pi + tw2
-                
-                # Calculate vertex positions using perpendicular vectors
-                def ring_point(px, py, pz, angle, radius):
-                    ox = (math.cos(angle) * p1x + math.sin(angle) * p2x) * radius
-                    oy = (math.cos(angle) * p1y + math.sin(angle) * p2y) * radius
-                    oz = (math.cos(angle) * p1z + math.sin(angle) * p2z) * radius
-                    return (px + ox, py + oy, pz + oz)
-                
-                v1 = ring_point(px1, py1, pz1, a1, r1)
-                v2 = ring_point(px1, py1, pz1, a2, r1)
-                v3 = ring_point(px2, py2, pz2, a2_next, r2)
-                v4 = ring_point(px2, py2, pz2, a1_next, r2)
-                
-                self._add_quad(v1, v2, v3, v4, color)
-    
-    def _draw_branches_from_positions(self, p: Dict, positions: list, total_height: float):
-        """Draw branches from segment positions along the trunk."""
-        rng = np.random.default_rng(p['species_id'] & 0xFFFFFFFF)
-        
-        # Start branches from middle-upper positions
-        start_idx = max(1, len(positions) // 2)
-        
-        for i in range(min(p['branch_count'], 6)):
-            # Choose a position along the trunk
-            pos_idx = start_idx + (i % (len(positions) - start_idx))
-            if pos_idx >= len(positions):
-                pos_idx = len(positions) - 1
-            
-            bx, by, bz = positions[pos_idx]
-            
-            angle = (i / max(1, p['branch_count'])) * 360 * p['branch_spread']
-            angle += p['asymmetry'] * 30 * math.sin(i * 2.5)
-            
-            self.matrix.push()
-            self.matrix.translate(bx, by, bz)
-            self.matrix.rotate_y(angle)
-            self.matrix.rotate_x(p['branch_angle'] * 75 + p['droop'] * 20)
-            
-            branch_len = total_height * 0.3
-            branch_w = p['width'] * 0.08
-            
-            self._draw_branch_recursive(
-                p, branch_len, branch_w, 
-                depth=0, max_depth=min(p['recursive_depth'], 2),
-                rng=rng
-            )
-            
-            self.matrix.pop()
-    
-    def _draw_canopy_at(self, p: Dict, cx: float, cy: float, cz: float, height: float):
-        """Draw tree canopy at a specific position."""
-        self.matrix.push()
-        self.matrix.translate(cx, 0, cz)  # Only offset X/Z, Y is handled in canopy
-        self._draw_canopy(p, height)
-        self.matrix.pop()
-    
-    def _draw_flowers_at(self, p: Dict, cx: float, cy: float, cz: float, height: float):
-        """Draw flowers at a specific position."""
-        self.matrix.push()
-        self.matrix.translate(cx, 0, cz)
-        self._draw_flowers(p, height)
-        self.matrix.pop()
+            self._draw_flowers(p, height)
     
     def _draw_branches(self, p: Dict, start_height: float, total_height: float):
         """Draw branches with recursive sub-branching."""
