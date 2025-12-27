@@ -2542,9 +2542,317 @@ def run_evolution_mode():
     pygame.quit()
 
 
+def run_render_test():
+    """
+    Render test mode - uses the ACTUAL dna_mesh_generator.py that the main game uses.
+    
+    This shows exactly what the in-game plants look like, with:
+    - Wide spacing for inspection
+    - Controller support (like main game)
+    - IJKL camera controls
+    - Various plant types including ALIEN and exotic
+    """
+    pygame.init()
+    pygame.joystick.init()
+    
+    WIDTH, HEIGHT = 1280, 720
+    
+    # OpenGL 4.1 Core profile for macOS
+    pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MAJOR_VERSION, 4)
+    pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MINOR_VERSION, 1)
+    pygame.display.gl_set_attribute(pygame.GL_CONTEXT_PROFILE_MASK, pygame.GL_CONTEXT_PROFILE_CORE)
+    pygame.display.gl_set_attribute(pygame.GL_CONTEXT_FORWARD_COMPATIBLE_FLAG, True)
+    
+    pygame.display.set_mode((WIDTH, HEIGHT), DOUBLEBUF | OPENGL)
+    pygame.display.set_caption("DNA Render Test - ACTUAL in-game mesh generator")
+    
+    ctx = moderngl.create_context(require=410)
+    ctx.enable(moderngl.DEPTH_TEST)
+    ctx.enable(moderngl.CULL_FACE)
+    
+    # Import the ACTUAL mesh generator used by the main game
+    from .dna_mesh_generator import generate_plant_mesh, clear_mesh_cache
+    
+    # Shader for rendering the generated meshes
+    RENDER_VERT = """
+    #version 330
+    in vec3 in_position;
+    in vec3 in_normal;
+    in vec3 in_color;
+    
+    uniform mat4 u_mvp;
+    uniform mat4 u_model;
+    
+    out vec3 v_normal;
+    out vec3 v_color;
+    out vec3 v_pos;
+    
+    void main() {
+        v_pos = (u_model * vec4(in_position, 1.0)).xyz;
+        v_normal = mat3(u_model) * in_normal;
+        v_color = in_color;
+        gl_Position = u_mvp * vec4(in_position, 1.0);
+    }
+    """
+    
+    RENDER_FRAG = """
+    #version 330
+    in vec3 v_normal;
+    in vec3 v_color;
+    in vec3 v_pos;
+    
+    out vec4 f_color;
+    
+    void main() {
+        vec3 light_dir = normalize(vec3(0.3, 1.0, 0.4));
+        float diff = max(dot(normalize(v_normal), light_dir), 0.0) * 0.7;
+        float ambient = 0.4;
+        vec3 lit = v_color * (ambient + diff);
+        f_color = vec4(lit, 1.0);
+    }
+    """
+    
+    prog = ctx.program(vertex_shader=RENDER_VERT, fragment_shader=RENDER_FRAG)
+    
+    # Generate plants with various types - focus on types that should show meandering trunks
+    rng = np.random.default_rng(42)
+    
+    plant_types_to_test = [
+        PlantType.TREE, PlantType.TREE, PlantType.TREE,  # Multiple trees
+        PlantType.TALL_TREE, 
+        PlantType.ALIEN, PlantType.ALIEN, PlantType.ALIEN,  # Multiple aliens (most curved)
+        PlantType.SPIRAL,
+        PlantType.WILLOW,
+        PlantType.PALM,
+        PlantType.MUSHROOM,
+        PlantType.BUSH,
+        PlantType.FERN,
+        PlantType.CACTUS,
+        PlantType.OCTOPUS,
+        PlantType.TENTACLE,
+    ]
+    
+    GRID_COLS = 8
+    SPACING = 12.0  # Wide spacing for inspection
+    
+    plants = []
+    vaos = []
+    
+    print("Generating plant meshes using dna_mesh_generator (same as main game)...")
+    
+    for i, plant_type in enumerate(plant_types_to_test):
+        # Create random DNA of this type
+        seed = int(rng.integers(0, 2**31))
+        dna = PlantDNA.create_random(plant_type, seed)
+        
+        # Apply extra mutation for variety
+        dna = dna.mutate(rng, strength=0.5)
+        
+        # Generate mesh using the ACTUAL generator
+        verts, norms, colors = generate_plant_mesh(dna)
+        
+        if len(verts) == 0:
+            print(f"  WARNING: Empty mesh for {plant_type}")
+            continue
+        
+        # Grid position
+        col = i % GRID_COLS
+        row = i // GRID_COLS
+        x = (col - GRID_COLS/2) * SPACING
+        z = (row - len(plant_types_to_test)//GRID_COLS/2) * SPACING
+        
+        # Create VAO
+        vbo = ctx.buffer(np.hstack([verts, norms, colors]).astype('f4').tobytes())
+        vao = ctx.simple_vertex_array(prog, vbo, 'in_position', 'in_normal', 'in_color')
+        
+        plants.append({
+            'type': plant_type,
+            'dna': dna,
+            'x': x, 'z': z,
+            'vao': vao,
+            'vert_count': len(verts),
+            'scale': 1.5,
+            'rotation': rng.random() * math.pi * 2,
+        })
+        vaos.append(vao)
+        
+        # Print DNA params to verify
+        if dna.trunk_segments:
+            seg = dna.trunk_segments[0]
+            curve = getattr(seg, 'curve', 0)
+            twist = getattr(seg, 'twist', 0)
+            print(f"  {plant_type}: {len(verts)} verts, curve={curve:.3f}, twist={twist:.3f}")
+        else:
+            print(f"  {plant_type}: {len(verts)} verts (no trunk segments)")
+    
+    print(f"\nGenerated {len(plants)} plants for inspection")
+    print("\nControls:")
+    print("  WASD - Move camera")
+    print("  IJKL - Look around")
+    print("  Space/Shift - Up/Down")
+    print("  Controller: Left stick=move, Right stick=look")
+    print("  P - Screenshot | Q/Escape - Quit")
+    
+    # Controller setup
+    gamepad = None
+    if pygame.joystick.get_count() > 0:
+        gamepad = pygame.joystick.Joystick(0)
+        gamepad.init()
+        print(f"  Gamepad: {gamepad.get_name()}")
+    
+    # Camera
+    cam_x, cam_y, cam_z = 0, 15, 50
+    cam_yaw, cam_pitch = 0, -15
+    
+    clock = pygame.time.Clock()
+    running = True
+    
+    while running:
+        dt = clock.tick(60) / 1000.0
+        
+        for event in pygame.event.get():
+            if event.type == QUIT:
+                running = False
+            elif event.type == KEYDOWN:
+                if event.key == K_q or event.key == K_ESCAPE:
+                    running = False
+                elif event.key == K_p:
+                    # Screenshot
+                    from PIL import Image
+                    import os
+                    from datetime import datetime
+                    screenshot_dir = os.path.expanduser("~/.waverse/screenshots")
+                    os.makedirs(screenshot_dir, exist_ok=True)
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    filename = f"{screenshot_dir}/render_test_{timestamp}.png"
+                    pixels = ctx.fbo.read(components=3)
+                    img = Image.frombytes('RGB', (WIDTH, HEIGHT), pixels)
+                    img = img.transpose(Image.FLIP_TOP_BOTTOM)
+                    img.save(filename)
+                    print(f"Saved: {filename}")
+        
+        # Input handling
+        keys = pygame.key.get_pressed()
+        mods = pygame.key.get_mods()
+        system_mod = (mods & pygame.KMOD_META) or (mods & pygame.KMOD_CTRL)
+        
+        # Controller input
+        gp_move_x, gp_move_y = 0, 0
+        gp_look_x, gp_look_y = 0, 0
+        
+        if gamepad and not system_mod:
+            # Left stick: movement
+            if gamepad.get_numaxes() >= 2:
+                gp_move_x = gamepad.get_axis(0)
+                gp_move_y = gamepad.get_axis(1)
+                if abs(gp_move_x) < 0.15: gp_move_x = 0
+                if abs(gp_move_y) < 0.15: gp_move_y = 0
+            
+            # Right stick: look
+            if gamepad.get_numaxes() >= 4:
+                gp_look_x = gamepad.get_axis(3)
+                gp_look_y = gamepad.get_axis(4)
+                if abs(gp_look_x) < 0.15: gp_look_x = 0
+                if abs(gp_look_y) < 0.15: gp_look_y = 0
+        
+        if not system_mod:
+            # Camera look (IJKL or right stick)
+            look_speed = 100 * dt
+            if keys[K_i]: cam_pitch += look_speed
+            if keys[K_k]: cam_pitch -= look_speed
+            if keys[K_j]: cam_yaw += look_speed
+            if keys[K_l]: cam_yaw -= look_speed
+            
+            cam_yaw += gp_look_x * look_speed * 1.5
+            cam_pitch -= gp_look_y * look_speed * 1.5
+            
+            # Clamp pitch
+            cam_pitch = max(-89, min(89, cam_pitch))
+            
+            # Movement
+            move_speed = 20 * dt
+            yaw_rad = math.radians(cam_yaw)
+            pitch_rad = math.radians(cam_pitch)
+            
+            forward_x = -math.sin(yaw_rad) * math.cos(pitch_rad)
+            forward_y = math.sin(pitch_rad)
+            forward_z = -math.cos(yaw_rad) * math.cos(pitch_rad)
+            right_x = math.cos(yaw_rad)
+            right_z = -math.sin(yaw_rad)
+            
+            # Keyboard movement
+            if keys[K_w]:
+                cam_x += forward_x * move_speed
+                cam_y += forward_y * move_speed
+                cam_z += forward_z * move_speed
+            if keys[K_s]:
+                cam_x -= forward_x * move_speed
+                cam_y -= forward_y * move_speed
+                cam_z -= forward_z * move_speed
+            if keys[K_a]:
+                cam_x -= right_x * move_speed
+                cam_z -= right_z * move_speed
+            if keys[K_d]:
+                cam_x += right_x * move_speed
+                cam_z += right_z * move_speed
+            if keys[K_SPACE]:
+                cam_y += move_speed
+            if keys[K_LSHIFT]:
+                cam_y -= move_speed
+            
+            # Controller movement (left stick)
+            cam_x += right_x * gp_move_x * move_speed
+            cam_z += right_z * gp_move_x * move_speed
+            cam_x -= forward_x * gp_move_y * move_speed
+            cam_y -= forward_y * gp_move_y * move_speed
+            cam_z -= forward_z * gp_move_y * move_speed
+        
+        # Build matrices
+        yaw_rad = math.radians(cam_yaw)
+        pitch_rad = math.radians(cam_pitch)
+        dir_x = -math.sin(yaw_rad) * math.cos(pitch_rad)
+        dir_y = math.sin(pitch_rad)
+        dir_z = -math.cos(yaw_rad) * math.cos(pitch_rad)
+        
+        proj = glm.perspective(glm.radians(60), WIDTH/HEIGHT, 0.1, 500.0)
+        view = glm.lookAt(
+            glm.vec3(cam_x, cam_y, cam_z),
+            glm.vec3(cam_x + dir_x, cam_y + dir_y, cam_z + dir_z),
+            glm.vec3(0, 1, 0)
+        )
+        
+        # Render
+        ctx.clear(0.5, 0.7, 0.9, 1.0)
+        
+        for plant in plants:
+            # Model matrix
+            model = glm.mat4(1.0)
+            model = glm.translate(model, glm.vec3(plant['x'], 0, plant['z']))
+            model = glm.rotate(model, plant['rotation'], glm.vec3(0, 1, 0))
+            model = glm.scale(model, glm.vec3(plant['scale']))
+            
+            mvp = proj * view * model
+            
+            prog['u_mvp'].write(np.array(mvp, dtype='f4').tobytes())
+            prog['u_model'].write(np.array(model, dtype='f4').tobytes())
+            
+            plant['vao'].render(moderngl.TRIANGLES)
+        
+        pygame.display.flip()
+    
+    # Cleanup
+    for vao in vaos:
+        vao.release()
+    
+    pygame.quit()
+    print("Render test complete!")
+
+
 if __name__ == '__main__':
     if '--evolve' in sys.argv or '--continuous' in sys.argv:
         run_evolution_mode()
+    elif '--render-test' in sys.argv:
+        run_render_test()
     else:
         run_test_grid()
 
