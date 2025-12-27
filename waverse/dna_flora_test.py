@@ -2667,10 +2667,11 @@ def run_render_test():
         x = (col - GRID_COLS/2) * SPACING
         z = (row - len(plant_types_to_test)//GRID_COLS/2) * SPACING
         
-        # Create VAO - properly interleave position, normal, color per vertex
+        # Create VAO with explicit format: 3f position, 3f normal, 3f color = 9 floats per vertex
         interleaved = np.hstack([verts, norms, colors]).astype('f4')
         vbo = ctx.buffer(interleaved.tobytes())
-        vao = ctx.simple_vertex_array(prog, vbo, 'in_position', 'in_normal', 'in_color')
+        # Format: '3f 3f 3f' means 3 floats for each of the 3 attributes (stride = 36 bytes)
+        vao = ctx.vertex_array(prog, [(vbo, '3f 3f 3f', 'in_position', 'in_normal', 'in_color')])
         
         plants.append({
             'type': plant_type,
