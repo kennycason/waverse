@@ -2568,7 +2568,8 @@ def run_render_test():
     
     ctx = moderngl.create_context(require=410)
     ctx.enable(moderngl.DEPTH_TEST)
-    ctx.enable(moderngl.CULL_FACE)
+    # Disable backface culling so canopies are visible from above AND below
+    # ctx.enable(moderngl.CULL_FACE)  
     
     # Import the ACTUAL mesh generator used by the main game
     from .dna_mesh_generator import generate_plant_mesh, clear_mesh_cache
