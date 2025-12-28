@@ -735,8 +735,11 @@ class ModernWorldRenderer:
         Update animal instances from the animal manager.
         
         Animals are more dynamic than flora - they move, so we rebuild every frame.
+        Uses DNA-based mesh generation for genetic variation.
         """
+        # Clear both standard and DNA instances
         self.animals.clear_instances()
+        self.animals.clear_dna_instances()
         
         cam_x, cam_z = camera.x, camera.z
         render_dist_sq = (self.animal_render_distance * self.chunk_size * self.tile_scale) ** 2
@@ -765,9 +768,20 @@ class ModernWorldRenderer:
             # Animation phase based on movement/time
             anim_phase = getattr(animal, 'anim_time', 0)
             
-            # Get type and color from DNA
+            # Get DNA for rendering
             dna = getattr(animal, 'dna', None)
-            if dna:
+            
+            if dna and self.use_dna_geometry:
+                # Use DNA-based mesh generation for genetic variation
+                # Get scale from DNA
+                base_scale_gene = getattr(dna, 'base_scale', None)
+                if base_scale_gene is not None:
+                    scale = scale * max(0.3, min(5.0, float(base_scale_gene)))
+                
+                # Add as DNA instance (mesh generated from DNA)
+                self.animals.add_dna_instance(dna, x, y, z, scale, rotation, anim_phase)
+            elif dna:
+                # Fallback: use predefined meshes with DNA-derived properties
                 animal_type = getattr(dna, 'animal_type', 'worm')
                 type_id = get_animal_type_id(animal_type)
                 
@@ -775,7 +789,6 @@ class ModernWorldRenderer:
                 size_gene = getattr(dna, 'size', None)
                 base_scale_gene = getattr(dna, 'base_scale', None)
                 if base_scale_gene is not None:
-                    # base_scale can be 0.5 to 4.0+ for mammals
                     scale = scale * max(0.3, min(5.0, float(base_scale_gene)))
                 elif size_gene is not None:
                     if hasattr(size_gene, 'value'):
@@ -800,16 +813,15 @@ class ModernWorldRenderer:
                 if secondary and hasattr(secondary, 'r'):
                     pattern = getattr(dna, 'pattern_type', 'solid')
                     if pattern in ('spotted', 'striped', 'patched'):
-                        # Blend colors for patterned animals
                         blend = 0.2
                         r = r * (1 - blend) + secondary.r * blend
                         g = g * (1 - blend) + secondary.g * blend
                         b = b * (1 - blend) + secondary.b * blend
+                
+                self.animals.add_instance(type_id, x, y, z, scale, rotation, anim_phase, r, g, b)
             else:
-                type_id = 0  # Default to worm
-                r, g, b = 0.6, 0.5, 0.4
-            
-            self.animals.add_instance(type_id, x, y, z, scale, rotation, anim_phase, r, g, b)
+                # No DNA - use default worm
+                self.animals.add_instance(0, x, y, z, scale, rotation, anim_phase, 0.6, 0.5, 0.4)
     
     def set_lighting(self, sun_dir: Tuple[float, float, float] = None,
                      ambient: Tuple[float, float, float] = None,

@@ -30,14 +30,15 @@ try:
 except ImportError:
     PIL_AVAILABLE = False
 
-# Import DNA geometry system (legacy, still used for animals)
+# Import DNA geometry system (legacy)
 from .dna_geometry import (
     GeometryBuilder, GeometrySegment,
     plant_dna_to_geometry, animal_dna_to_geometry
 )
 
-# Import new DNA mesh generator (produces detailed plant meshes like V1!)
+# Import new DNA mesh generators (produces detailed meshes from DNA!)
 from .dna_mesh_generator import generate_plant_mesh, clear_mesh_cache
+from .dna_animal_mesh import generate_animal_mesh
 
 
 # =============================================================================
@@ -356,8 +357,8 @@ class ModernHUDRenderer:
         self.menu_tab_names = ["INVENTORY", "LOG", "CONTROLS"]
         self.log_items = []  # List of DNA log filenames
         self.log_index = 0   # Currently selected log item
-        self.log_filter = 0  # 0=ALL, 1=PLANTS, 2=ANIMALS
-        self.log_filter_names = ["ALL", "PLANTS", "ANIMALS"]
+        self.log_filter = 0  # 0=ALL, 1=PLANTS, 2=ANIMALS, 3=MICRO
+        self.log_filter_names = ["ALL", "PLANTS", "ANIMALS", "MICRO"]
         self.favorites = set()  # Set of favorited log filenames
         self.inventory_index = 0  # Selected tool in inventory tab
         self.inventory_items = []  # Actual inventory items from camera
@@ -1164,7 +1165,12 @@ class ModernHUDRenderer:
             # Entity type header
             if len(parts) >= 1:
                 entity_type = parts[0].upper()
-                type_color = (0.4, 0.8, 0.4) if entity_type == "PLANT" else (0.8, 0.6, 0.3)
+                if entity_type == "PLANT":
+                    type_color = (0.4, 0.8, 0.4)  # Green
+                elif entity_type == "MICRO":
+                    type_color = (0.3, 0.7, 0.9)  # Cyan/blue for microorganisms
+                else:
+                    type_color = (0.8, 0.6, 0.3)  # Orange/brown for animals
                 self._draw_text(vertices, entity_type, preview_x + 10, content_y + 10, 2.0, *type_color, 1.0)
             
             # Date/time
@@ -1601,9 +1607,14 @@ class ModernHUDRenderer:
         
         # Determine entity type
         is_plant = 'plant' in filename.lower()
+        is_micro = 'micro' in filename.lower()
         
         # === RENDER 3D TO FRAMEBUFFER ===
-        self._render_3d_to_framebuffer(dna_data, is_plant)
+        if is_micro:
+            # Render 2D microorganism preview instead of 3D
+            self._render_micro_preview(dna_data)
+        else:
+            self._render_3d_to_framebuffer(dna_data, is_plant)
         
         # === DRAW FRAMEBUFFER TEXTURE TO SCREEN ===
         self._draw_preview_texture(x, y, w, h)
@@ -1621,14 +1632,13 @@ class ModernHUDRenderer:
         # Get the actual DNA dict
         entity_dna = dna_data.get('dna', dna_data)
         
-        # Convert DNA to geometry
+        # Convert DNA to geometry using new mesh generators
         if is_plant:
             # Use the NEW detailed mesh generator for plants (V1-quality!)
             verts, norms, colors = generate_plant_mesh(entity_dna)
         else:
-            # Animals still use the old geometry system for now
-            geometry_root = animal_dna_to_geometry(entity_dna)
-            verts, norms, colors = GeometryBuilder.build_mesh(geometry_root)
+            # Use the NEW DNA animal mesh generator for genetic variation!
+            verts, norms, colors = generate_animal_mesh(entity_dna)
         
         # Calculate bounding box for camera positioning
         if len(verts) > 0:
@@ -1652,13 +1662,14 @@ class ModernHUDRenderer:
         projection = glm.perspective(glm.radians(45.0), aspect, 0.1, 100.0)
         
         # Set up view (camera orbiting around entity)
+        # Camera looks slightly down at the entity from above-side angle
         eye_x = math.sin(self._preview_rotation) * cam_distance
         eye_z = math.cos(self._preview_rotation) * cam_distance
-        eye_y = center_y + cam_distance * 0.3  # Look at center
+        eye_y = center_y + cam_distance * 0.5  # Higher angle to see plant from above
         view = glm.lookAt(
             glm.vec3(eye_x, eye_y, eye_z),
-            glm.vec3(0, center_y, 0),  # Look at vertical center
-            glm.vec3(0, 1, 0)
+            glm.vec3(0, center_y * 0.8, 0),  # Look slightly below center for better framing
+            glm.vec3(0, 1, 0)  # Y-up
         )
         
         # Set uniforms
@@ -1703,6 +1714,61 @@ class ModernHUDRenderer:
         # Cleanup
         vao.release()
         vbo.release()
+    
+    def _render_micro_preview(self, dna_data: Dict):
+        """Render 2D microorganism preview to framebuffer."""
+        # Bind framebuffer
+        self._preview_fbo.use()
+        self._preview_fbo.clear(0.05, 0.08, 0.12, 1.0)  # Dark blue-ish background (microscope slide)
+        
+        # Get micro DNA
+        micro_dna = dna_data.get('dna', dna_data)
+        
+        # Build simple 2D representation
+        vertices = []
+        
+        # Extract organism properties
+        shape = micro_dna.get('shape', 'circle')
+        size = micro_dna.get('size', 0.3) * 200  # Scale for preview
+        color_r = micro_dna.get('r', 0.3)
+        color_g = micro_dna.get('g', 0.7)
+        color_b = micro_dna.get('b', 0.5)
+        
+        # Draw centered organism shape
+        cx, cy = 128, 128  # Center of 256x256 framebuffer
+        
+        # Main body (simple quad for now - can be enhanced)
+        half = size / 2
+        
+        # Create a simple colored quad in 3D space (XY plane)
+        verts = np.array([
+            [cx - half, cy - half, 0],
+            [cx + half, cy - half, 0],
+            [cx + half, cy + half, 0],
+            [cx - half, cy - half, 0],
+            [cx + half, cy + half, 0],
+            [cx - half, cy + half, 0],
+        ], dtype='f4') / 128.0 - 1.0  # Normalize to -1..1
+        
+        norms = np.array([[0, 0, 1]] * 6, dtype='f4')
+        colors = np.array([[color_r, color_g, color_b]] * 6, dtype='f4')
+        
+        # Use simple orthographic projection for 2D
+        projection = glm.ortho(-1, 1, -1, 1, -1, 1)
+        view = glm.mat4(1.0)
+        model = glm.mat4(1.0)
+        
+        self._preview_program['u_projection'].write(projection)
+        self._preview_program['u_view'].write(view)
+        self._preview_program['u_model'].write(model)
+        self._preview_program['u_light_dir'].value = (0.0, 0.0, 1.0)
+        self._preview_program['u_ambient'].value = (0.9, 0.9, 0.9)
+        
+        # Render
+        self._render_dna_mesh(verts, norms, colors)
+        
+        # Restore default framebuffer
+        self.ctx.screen.use()
     
     def _render_animal_3d(self, dna: Dict):
         """Render animal body segments as 3D shapes."""

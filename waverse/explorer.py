@@ -2055,8 +2055,8 @@ class Camera:
         self.menu_tab = 0  # 0 = Inventory, 1 = Log, 2 = Controls
         self.log_index = 0  # Currently selected log item
         self.log_items = []  # List of logged DNA files
-        self.log_filter = 0  # 0 = ALL, 1 = PLANTS, 2 = ANIMALS
-        self.log_filter_names = ["ALL", "PLANTS", "ANIMALS"]
+        self.log_filter = 0  # 0 = ALL, 1 = PLANTS, 2 = ANIMALS, 3 = MICRO
+        self.log_filter_names = ["ALL", "PLANTS", "ANIMALS", "MICRO"]
         self.inventory_index = 0  # Selected item in inventory grid
         self.inventory_cols = 2   # Columns in inventory grid
         self.inventory_count = 6  # Total inventory items (tools count)
@@ -2182,6 +2182,8 @@ class Camera:
                         all_items.append(f)
                     elif self.log_filter == 2 and f.startswith('animal_'):  # ANIMALS
                         all_items.append(f)
+                    elif self.log_filter == 3 and f.startswith('micro_'):  # MICRO
+                        all_items.append(f)
         
         # Sort by timestamp (newest first) - filename format: type_dna_YYYYMMDD_HHMMSS.json
         def get_timestamp(filename):
@@ -2294,14 +2296,14 @@ class Camera:
         self.menu_tab = (self.menu_tab + direction) % 3  # 3 tabs: Inventory, Log, Controls
     
     def log_filter_prev(self):
-        """Switch to previous log filter (ALL, PLANTS, ANIMALS)."""
-        self.log_filter = (self.log_filter - 1) % 3
+        """Switch to previous log filter (ALL, PLANTS, ANIMALS, MICRO)."""
+        self.log_filter = (self.log_filter - 1) % 4  # 4 filters now
         self.refresh_log_items()
         print(f"  Log filter: {self.log_filter_names[self.log_filter]}")
     
     def log_filter_next(self):
-        """Switch to next log filter (ALL, PLANTS, ANIMALS)."""
-        self.log_filter = (self.log_filter + 1) % 3
+        """Switch to next log filter (ALL, PLANTS, ANIMALS, MICRO)."""
+        self.log_filter = (self.log_filter + 1) % 4  # 4 filters now
         self.refresh_log_items()
         print(f"  Log filter: {self.log_filter_names[self.log_filter]}")
     

@@ -4,6 +4,7 @@ ModernGL Animal Renderer
 Instanced rendering for animals/fauna with:
 - GPU-based animation (walking, flying, swimming)
 - Per-instance color tinting from DNA
+- DNA-based mesh generation for genetic variation
 - Efficient batched drawing
 - Distance-based LOD
 """
@@ -18,6 +19,9 @@ try:
     from pyglm import glm
 except ImportError:
     import glm
+
+# Import DNA mesh generator for genetic variation
+from .dna_animal_mesh import generate_animal_mesh, clear_animal_mesh_cache
 
 
 # =============================================================================
@@ -700,6 +704,171 @@ class ModernAnimalRenderer:
             'instances_rendered': 0,
             'draw_calls': 0,
         }
+        
+        # DNA-based mesh batches (species_id -> (vao, vbo, instance_list))
+        self.dna_batches: Dict[int, Tuple[moderngl.VertexArray, moderngl.Buffer, moderngl.Buffer, int, List]] = {}
+        self._dna_mesh_cache_max = 100
+        
+        # Create DNA program (with color vertex attribute)
+        self.dna_program = self._create_dna_program()
+    
+    def _create_dna_program(self):
+        """Create shader program for DNA-based meshes (with per-vertex color)."""
+        vert = """
+        #version 330 core
+        
+        in vec3 in_position;
+        in vec3 in_normal;
+        in vec3 in_color;
+        
+        // Per-instance data
+        in vec3 in_instance_pos;
+        in vec4 in_instance_data;  // scale, rotation, anim_phase, _
+        
+        out vec3 v_normal;
+        out vec3 v_color;
+        out vec3 v_world_pos;
+        out float v_fog_factor;
+        
+        uniform mat4 u_projection;
+        uniform mat4 u_view;
+        uniform vec3 u_camera_pos;
+        uniform float u_time;
+        uniform float u_fog_start;
+        uniform float u_fog_end;
+        
+        mat3 rotateY(float angle) {
+            float c = cos(angle);
+            float s = sin(angle);
+            return mat3(c, 0, s, 0, 1, 0, -s, 0, c);
+        }
+        
+        void main() {
+            float scale = in_instance_data.x;
+            float rotation = in_instance_data.y;
+            float anim_phase = in_instance_data.z;
+            
+            // Apply rotation
+            vec3 pos = rotateY(rotation) * in_position;
+            
+            // Scale and translate
+            vec3 world_pos = pos * scale + in_instance_pos;
+            
+            // Simple bounce animation based on phase
+            float bounce = sin(u_time * 3.0 + anim_phase * 6.28) * 0.05 * scale;
+            world_pos.y += bounce;
+            
+            gl_Position = u_projection * u_view * vec4(world_pos, 1.0);
+            
+            // Transform normal
+            v_normal = rotateY(rotation) * in_normal;
+            v_color = in_color;
+            v_world_pos = world_pos;
+            
+            // Fog
+            float dist = distance(u_camera_pos, world_pos);
+            v_fog_factor = clamp((dist - u_fog_start) / (u_fog_end - u_fog_start), 0.0, 1.0);
+        }
+        """
+        
+        frag = """
+        #version 330 core
+        
+        in vec3 v_normal;
+        in vec3 v_color;
+        in vec3 v_world_pos;
+        in float v_fog_factor;
+        
+        out vec4 f_color;
+        
+        uniform vec3 u_light_dir;
+        uniform vec3 u_ambient;
+        uniform vec3 u_fog_color;
+        
+        void main() {
+            vec3 normal = normalize(v_normal);
+            vec3 light = normalize(u_light_dir);
+            
+            float diff = max(dot(normal, light), 0.0);
+            vec3 color = v_color * (u_ambient + diff * 0.6);
+            
+            // Apply fog
+            color = mix(color, u_fog_color, v_fog_factor);
+            
+            f_color = vec4(color, 1.0);
+        }
+        """
+        
+        return self.ctx.program(vertex_shader=vert, fragment_shader=frag)
+    
+    def add_dna_instance(self, dna: Any, x: float, y: float, z: float,
+                         scale: float, rotation: float, anim_phase: float):
+        """Add an animal instance using DNA-generated mesh."""
+        # Get species ID for batching
+        if hasattr(dna, 'species_id'):
+            species_id = dna.species_id
+        elif isinstance(dna, dict):
+            species_id = dna.get('species_id', id(dna))
+        else:
+            species_id = id(dna)
+        
+        # Create batch if needed
+        if species_id not in self.dna_batches:
+            self._create_dna_batch(species_id, dna)
+        
+        # Add instance to batch
+        if species_id in self.dna_batches:
+            _, _, _, _, instances = self.dna_batches[species_id]
+            instances.append((x, y, z, scale, rotation, anim_phase))
+    
+    def _create_dna_batch(self, species_id: int, dna: Any):
+        """Create a rendering batch for a DNA species."""
+        # Limit cache size
+        if len(self.dna_batches) >= self._dna_mesh_cache_max:
+            # Remove oldest
+            oldest = next(iter(self.dna_batches))
+            vao, mesh_vbo, inst_vbo, _, _ = self.dna_batches[oldest]
+            vao.release()
+            mesh_vbo.release()
+            inst_vbo.release()
+            del self.dna_batches[oldest]
+        
+        try:
+            # Generate mesh from DNA
+            verts, norms, colors = generate_animal_mesh(dna)
+            
+            if len(verts) == 0:
+                return
+            
+            # Create mesh VBO (position + normal + color)
+            mesh_data = np.zeros((len(verts), 9), dtype='f4')
+            mesh_data[:, 0:3] = verts
+            mesh_data[:, 3:6] = norms
+            mesh_data[:, 6:9] = colors
+            mesh_vbo = self.ctx.buffer(mesh_data.tobytes())
+            
+            # Create instance buffer
+            inst_vbo = self.ctx.buffer(reserve=1000 * 7 * 4)  # 7 floats per instance (pos, data)
+            
+            # Create VAO
+            vao = self.ctx.vertex_array(
+                self.dna_program,
+                [
+                    (mesh_vbo, '3f 3f 3f', 'in_position', 'in_normal', 'in_color'),
+                    (inst_vbo, '3f 4f /i', 'in_instance_pos', 'in_instance_data'),
+                ],
+            )
+            
+            self.dna_batches[species_id] = (vao, mesh_vbo, inst_vbo, len(verts), [])
+            
+        except Exception as e:
+            print(f"Error creating DNA animal batch: {e}")
+    
+    def clear_dna_instances(self):
+        """Clear all DNA-based instances (keep batches for reuse)."""
+        for species_id in self.dna_batches:
+            _, _, _, _, instances = self.dna_batches[species_id]
+            instances.clear()
     
     def _create_meshes(self):
         """Create VBOs for each animal mesh type."""
@@ -802,6 +971,44 @@ class ModernAnimalRenderer:
             
             self.frame_stats['instances_rendered'] += len(instances)
             self.frame_stats['draw_calls'] += 1
+        
+        # Render DNA-based animals
+        self._render_dna_batches()
+    
+    def _render_dna_batches(self):
+        """Render all DNA-based animal batches."""
+        if not self.dna_batches:
+            return
+        
+        # Set uniforms for DNA program
+        self.dna_program['u_projection'].write(self.projection)
+        self.dna_program['u_view'].write(self.view)
+        self.dna_program['u_camera_pos'].write(self.camera_pos)
+        self.dna_program['u_time'].value = self.time
+        self.dna_program['u_light_dir'].write(self.light_dir)
+        self.dna_program['u_ambient'].write(self.ambient)
+        self.dna_program['u_fog_color'].write(self.fog_color)
+        self.dna_program['u_fog_start'].value = self.fog_start
+        self.dna_program['u_fog_end'].value = self.fog_end
+        
+        for species_id, (vao, mesh_vbo, inst_vbo, vertex_count, instances) in self.dna_batches.items():
+            if not instances:
+                continue
+            
+            # Build instance data: x, y, z, scale, rotation, anim_phase, 0 (padding)
+            instance_data = []
+            for x, y, z, scale, rotation, anim_phase in instances:
+                instance_data.extend([x, y, z, scale, rotation, anim_phase, 0])
+            
+            # Upload instance data
+            data = np.array(instance_data, dtype='f4')
+            inst_vbo.write(data.tobytes())
+            
+            # Render
+            vao.render(moderngl.TRIANGLES, vertices=vertex_count, instances=len(instances))
+            
+            self.frame_stats['instances_rendered'] += len(instances)
+            self.frame_stats['draw_calls'] += 1
     
     def cleanup(self):
         """Release GPU resources."""
@@ -811,6 +1018,16 @@ class ModernAnimalRenderer:
         for vao in self.vaos.values():
             vao.release()
         self.program.release()
+        
+        # Clean up DNA batches
+        for species_id, (vao, mesh_vbo, inst_vbo, _, _) in self.dna_batches.items():
+            vao.release()
+            mesh_vbo.release()
+            inst_vbo.release()
+        self.dna_batches.clear()
+        
+        if hasattr(self, 'dna_program'):
+            self.dna_program.release()
 
 
 # =============================================================================
