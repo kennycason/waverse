@@ -57,6 +57,8 @@ class ModernWorldRenderer:
         self.terrain = ModernTerrainRenderer(ctx)
         self.structures = ModernStructureRenderer(ctx)  # Buildings, before flora
         self.flora = ModernFloraRenderer(ctx)
+        # Hook up batch cleanup callback to clear loaded_flora_chunks
+        self.flora.on_batches_cleaned = self._on_flora_batches_cleaned
         self.animals = ModernAnimalRenderer(ctx)
         self.water = ModernWaterRenderer(ctx, enable_waves=enable_waves)  # Flat or waves
         self.weather = ModernWeatherRenderer(ctx)  # Rendered last (particles)
@@ -307,34 +309,23 @@ class ModernWorldRenderer:
         elif plants is None:
             plants = []
         
-        # Calculate chunk center for distance-based density
-        chunk_world_size = self.chunk_size * self.tile_scale
-        chunk_center_x = (cx + 0.5) * chunk_world_size
-        chunk_center_z = (cz + 0.5) * chunk_world_size
-        chunk_dist = math.sqrt((chunk_center_x - cam_x)**2 + (chunk_center_z - cam_z)**2)
-        
-        # Distance-based density falloff:
-        # - Close chunks (< 500 units): render all plants
-        # - Medium chunks (500-1500): render every other plant
-        # - Far chunks (1500-2500): render 1 in 4 plants
-        # - Very far (> 2500): render 1 in 8 plants
-        skip_rate = 1  # render all by default
-        if chunk_dist > 2500:
-            skip_rate = 8
-        elif chunk_dist > 1500:
-            skip_rate = 4
-        elif chunk_dist > 500:
-            skip_rate = 2
-        
-        for i, plant in enumerate(plants):
-            # Use plant index + position hash for consistent culling
-            if skip_rate > 1:
-                plant_hash = hash((int(plant.x * 100), int(plant.z * 100)))
-                if (i + plant_hash) % skip_rate != 0:
-                    continue
+        # Add all plants in this chunk - density is already controlled in flora.py
+        # (Removed distance-based skip_rate which caused visual popping artifacts)
+        for plant in plants:
             self._add_plant_instance(plant)
         
         self.loaded_flora_chunks.add(key)
+    
+    def _on_flora_batches_cleaned(self, cleaned_keys: set):
+        """Called when flora batches are cleaned.
+        
+        Note: We do NOT clear loaded_flora_chunks here because that would cause
+        duplicate plants to be added to pending_instances. Instead, we accept
+        that some batches may be lost but at least we don't corrupt the data.
+        """
+        # Don't clear loaded_flora_chunks - this was causing duplicate plant accumulation!
+        # If batches are cleaned, those plants are gone but we won't corrupt others.
+        pass
     
     def _add_plant_instance(self, plant):
         """Add a single plant to the flora renderer using full DNA data."""
@@ -349,9 +340,14 @@ class ModernWorldRenderer:
         
         # Use DNA-driven geometry if enabled
         if self.use_dna_geometry and dna:
-            # DNA geometry already includes height from DNA genes
-            # Just use base_scale (typically 1.0) to avoid double-scaling
-            scale = base_scale
+            # Get height from DNA for proper scaling
+            # DNA meshes are generated at ~1 unit tall, scale by height_gene
+            height_gene = getattr(dna, 'height_gene', None)
+            if height_gene is not None and hasattr(height_gene, 'value'):
+                scale = height_gene.value * base_scale
+                scale = max(1.0, min(30.0, scale))  # Reasonable range
+            else:
+                scale = base_scale * 5.0  # Default ~5 units tall
             
             self.flora.add_instance_from_dna(dna, x, y, z, scale, rotation)
             return

@@ -388,8 +388,10 @@ class DNAMeshGenerator:
         Each segment's curve rotates the coordinate system, so subsequent 
         segments grow in a new direction - creating the bent polygon look.
         """
-        height = min(p['height'], 5.0)  # Clamp for performance
-        width = min(p['width'], 1.5)
+        # Internal mesh height (scale applied externally)
+        # Use ~1.0 as base, instance scale handles final size
+        height = max(0.5, min(p['height'], 2.0))  # Normalized mesh height
+        width = max(0.1, min(p['width'], 1.0))
         
         trunk_segments = p['trunk_segments']
         current_width = width * 0.15

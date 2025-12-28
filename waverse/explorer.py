@@ -5018,6 +5018,12 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
     NO_FLORA_UPDATE = debug_flags.get('no_flora_update', False)
     NO_ANIMAL_RENDER = debug_flags.get('no_animal_render', False)
     NO_ANIMAL_UPDATE = debug_flags.get('no_animal_update', False)
+    
+    # Environment variable overrides for stable testing
+    import os
+    if os.environ.get('WAVERSE_STATIC_FLORA', '').lower() in ('1', 'true', 'yes'):
+        NO_FLORA_UPDATE = True
+        print("  [CONFIG] WAVERSE_STATIC_FLORA=1 - Flora growth/death paused")
     MAX_FLORA = debug_flags.get('max_flora')
     MAX_ANIMALS = debug_flags.get('max_animals')
     
@@ -5096,7 +5102,9 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
             if gl_version < 330:
                 raise RuntimeError(f"OpenGL {gl_version} < 330, need 3.3+ for shaders")
             
-            modern_renderer = ModernWorldRenderer(modern_ctx, enable_waves=ENABLE_WAVES)
+            # DNA geometry = TRUE - this is the core feature!
+            # All plants rendered from their genetic DNA
+            modern_renderer = ModernWorldRenderer(modern_ctx, enable_waves=ENABLE_WAVES, use_dna_geometry=True)
             modern_renderer.set_chunk_params(CHUNK_SIZE, TILE_SCALE, HEIGHT_SCALE)
             modern_renderer.set_screen_size(display[0], display[1])
             print(f"  [RENDERER] ModernGL initialized successfully!")

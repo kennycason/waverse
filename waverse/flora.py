@@ -1412,10 +1412,11 @@ class FloraManager:
         # Savanna = moderate-sparse (25-45 plants)
         biome = (biome_name or '').lower()
         
-        # Density multiplier - reduced for detailed evolved flora rendering
-        # Set WAVERSE_FLORA_DENSITY=1.0 for original density, 0.5 for half, etc.
+        # Density multiplier for DNA geometry
+        # Set WAVERSE_FLORA_DENSITY=1.0 for original density
+        # Default 0.12 = 12% density - optimized for performance with DNA rendering
         import os
-        density_mult = float(os.environ.get('WAVERSE_FLORA_DENSITY', '0.5'))
+        density_mult = float(os.environ.get('WAVERSE_FLORA_DENSITY', '0.12'))
         
         # === SPECIAL EXOTIC BIOMES ===
         if biome == 'psychedelic':

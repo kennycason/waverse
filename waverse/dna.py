@@ -1137,19 +1137,26 @@ class DNAPool:
             if neighbor_key in self.chunk_dna:
                 neighbors.extend(self.chunk_dna[neighbor_key])
         
-        # Generate DNA for this chunk
-        num_species = 3 + chunk_rng.integers(0, 5)
+        # Generate DNA for this chunk - more species for better variety!
+        num_species = 5 + chunk_rng.integers(0, 8)  # 5-12 species per chunk
         chunk_dna = []
         
         for i in range(num_species):
-            # Pick a plant type based on position (pseudo-biome)
-            biome_factor = np.sin(cx * 0.1) * np.cos(cz * 0.1)
-            if biome_factor > 0.3:
-                plant_type = chunk_rng.choice([PlantType.TREE, PlantType.TALL_TREE, PlantType.BUSH])
-            elif biome_factor < -0.3:
-                plant_type = chunk_rng.choice([PlantType.GRASS, PlantType.FERN, PlantType.CACTUS])
-            else:
+            # Pick a plant type - 70% chance to use full variety, 30% biome-influenced
+            if chunk_rng.random() < 0.7:
+                # Full variety from all types
                 plant_type = chunk_rng.choice(PlantType.ALL_TYPES)
+            else:
+                # Biome-influenced selection
+                biome_factor = np.sin(cx * 0.1) * np.cos(cz * 0.1)
+                if biome_factor > 0.3:
+                    plant_type = chunk_rng.choice([PlantType.TREE, PlantType.TALL_TREE, PlantType.BUSH, 
+                                                   PlantType.OAK, PlantType.BIRCH, PlantType.MAPLE])
+                elif biome_factor < -0.3:
+                    plant_type = chunk_rng.choice([PlantType.GRASS, PlantType.FERN, PlantType.CACTUS,
+                                                   PlantType.FLOWER, PlantType.MUSHROOM])
+                else:
+                    plant_type = chunk_rng.choice(PlantType.ALL_TYPES)
             
             # Get base template
             base_templates = self.templates.get(plant_type, self.templates[PlantType.TREE])

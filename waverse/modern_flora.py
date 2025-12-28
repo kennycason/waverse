@@ -83,27 +83,27 @@ void main() {
     
     // === PSYCHEDELIC DANCE MODE ===
     if (u_dance_mode > 0.5) {
-        // Plants BOP to the beat! No wind, just rhythmic bouncing
+        // Plants BOP to the beat! Slower, gentler rhythmic swaying
         // Each plant has its own phase based on position
         float plant_phase = in_instance_pos.x * 0.1 + in_instance_pos.z * 0.13;
         
-        // Multiple frequency bops (like dancing to a beat)
-        float bop1 = sin(u_wind_time * 4.0 + plant_phase) * 0.3;  // Main beat
-        float bop2 = sin(u_wind_time * 8.0 + plant_phase * 1.5) * 0.15;  // Double time
-        float bop3 = sin(u_wind_time * 2.0 + plant_phase * 0.5) * 0.2;  // Half time sway
+        // Slower frequency bops (gentle dance, not frantic)
+        float bop1 = sin(u_wind_time * 1.5 + plant_phase) * 0.15;  // Main beat (was 4.0 * 0.3)
+        float bop2 = sin(u_wind_time * 3.0 + plant_phase * 1.5) * 0.08;  // Double time (was 8.0 * 0.15)
+        float bop3 = sin(u_wind_time * 0.8 + plant_phase * 0.5) * 0.1;  // Half time sway (was 2.0 * 0.2)
         
         float height_factor = max(0.0, in_position.y) / (in_instance_scale * 2.0 + 0.1);
         height_factor = clamp(height_factor, 0.0, 1.0);
         
-        // Vertical bop (bounce up and down)
-        world_pos.y += (bop1 + bop2) * height_factor * in_instance_scale * 0.5;
+        // Vertical bop (gentle bounce)
+        world_pos.y += (bop1 + bop2) * height_factor * in_instance_scale * 0.3;
         
-        // Side sway (like swaying to music)
-        world_pos.x += bop3 * height_factor * in_instance_scale * 0.4;
-        world_pos.z += bop1 * 0.5 * height_factor * in_instance_scale * 0.3;
+        // Side sway (subtle)
+        world_pos.x += bop3 * height_factor * in_instance_scale * 0.2;
+        world_pos.z += bop1 * 0.3 * height_factor * in_instance_scale * 0.15;
         
-        // Slight rotation wobble
-        float wobble = sin(u_wind_time * 3.0 + plant_phase * 2.0) * 0.1;
+        // Slight rotation wobble (slower)
+        float wobble = sin(u_wind_time * 1.0 + plant_phase * 2.0) * 0.05;
         vec3 wobbled = rotateY(wobble * height_factor) * (world_pos - in_instance_pos) + in_instance_pos;
         world_pos = wobbled;
     } else {
@@ -113,10 +113,10 @@ void main() {
         height_factor = clamp(height_factor, 0.0, 1.0);
         height_factor = height_factor * height_factor; // Quadratic falloff - base stays still
         
-        // Base wind sway
-        float sway_phase = u_wind_time * 2.0 + in_instance_pos.x * 0.05 + in_instance_pos.z * 0.07;
-        float sway = sin(sway_phase) * u_wind_strength * height_factor * 0.8;
-        float sway2 = sin(sway_phase * 0.7 + 1.3) * u_wind_strength * height_factor * 0.3;
+        // Base wind sway (slower, gentler)
+        float sway_phase = u_wind_time * 0.8 + in_instance_pos.x * 0.05 + in_instance_pos.z * 0.07;
+        float sway = sin(sway_phase) * u_wind_strength * height_factor * 0.5;
+        float sway2 = sin(sway_phase * 0.7 + 1.3) * u_wind_strength * height_factor * 0.2;
         
         world_pos.x += u_wind_dir.x * sway + u_wind_dir.y * sway2;
         world_pos.z += u_wind_dir.y * sway - u_wind_dir.x * sway2;
@@ -133,8 +133,8 @@ void main() {
                 vec2 tangent = normalize(vec2(-to_tornado.y, to_tornado.x));
                 float tornado_sway = u_tornado_strength * falloff * height_factor * 2.0;
                 
-                world_pos.x += tangent.x * tornado_sway * sin(u_wind_time * 5.0);
-                world_pos.z += tangent.y * tornado_sway * sin(u_wind_time * 5.0);
+                world_pos.x += tangent.x * tornado_sway * sin(u_wind_time * 2.0);
+                world_pos.z += tangent.y * tornado_sway * sin(u_wind_time * 2.0);
             }
         }
     }
@@ -2427,7 +2427,10 @@ class ModernFloraRenderer:
         
         # DNA-generated mesh cache: species_id -> (verts, normals, colors)
         self._dna_mesh_cache: Dict[int, Tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
-        self._dna_mesh_cache_max = 50  # Reduced for memory safety
+        self._dna_mesh_cache_max = 200  # Increased for DNA variety
+        
+        # Callback when batches are cleaned (so integration can clear loaded_flora_chunks)
+        self.on_batches_cleaned = None  # Set to callable(cleaned_keys: set)
         
         # Pending instance data (before GPU upload)
         # Initialize with all mesh types from templates
@@ -2563,6 +2566,7 @@ class ModernFloraRenderer:
         
         # Remove oldest ones
         to_remove = dna_batch_keys[:len(dna_batch_keys) - keep_count]
+        cleaned_keys = set()
         for key in to_remove:
             batch = self.batches.pop(key, None)
             if batch:
@@ -2572,9 +2576,14 @@ class ModernFloraRenderer:
                     batch.instance_vbo.release()
                 if batch.vao:
                     batch.vao.release()
+                cleaned_keys.add(key)
             # Also clean from mesh_templates
             self.mesh_templates.pop(key, None)
             self.pending_instances.pop(key, None)
+        
+        # Notify integration layer so it can clear loaded_flora_chunks
+        if cleaned_keys and self.on_batches_cleaned:
+            self.on_batches_cleaned(cleaned_keys)
     
     def clear_instances(self):
         """Clear all pending instances."""
@@ -2608,9 +2617,13 @@ class ModernFloraRenderer:
                 )
                 self.batches[mesh_type] = batch
                 
-                # Limit total batches to prevent memory explosion
-                if len(self.batches) > 100:
-                    self._cleanup_oldest_batches(50)
+                # NOTE: Batch cleanup disabled for now - it was causing visual artifacts
+                # because pending_instances would get re-added when loaded_flora_chunks
+                # was cleared, causing duplicate instances.
+                # TODO: Implement proper cleanup that also clears pending_instances
+                # if len(self.batches) > 2000:
+                #     self._cleanup_oldest_batches(1500)
+                pass
             else:
                 batch = self.batches[mesh_type]
             
@@ -2636,7 +2649,7 @@ class ModernFloraRenderer:
                 ]
             )
             
-            # Release old resources
+            # Release old resources AFTER new ones are created
             if old_vbo:
                 old_vbo.release()
             if old_vao:
@@ -2658,6 +2671,12 @@ class ModernFloraRenderer:
         """Render all flora instances."""
         self.time += dt
         self.frame_stats = {'instances_rendered': 0, 'draw_calls': 0}
+        
+        # Ensure correct OpenGL state for flora rendering
+        self.ctx.enable(moderngl.DEPTH_TEST)
+        self.ctx.disable(moderngl.BLEND)  # Flora is opaque
+        # Don't enable CULL_FACE - we want to see canopy from above
+        self.ctx.disable(moderngl.CULL_FACE)
         
         # Set uniforms - write glm matrices directly (column-major as OpenGL expects)
         self.program['u_projection'].write(self.projection)
