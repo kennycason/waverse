@@ -104,10 +104,10 @@ class ModernWorldRenderer:
         self._visible_structures: List[Any] = []
         
         # Render settings
-        # Render distances - extended for better view (can be overridden by set_render_distances)
-        self.render_distance = 50  # Chunks (terrain) - ~6km view distance
-        self.flora_render_distance = 45  # Chunks (plants - GPU instanced, efficient)
-        self.animal_render_distance = 25  # Chunks (animals)
+        # Render distances - balanced for performance (can be overridden by set_render_distances)
+        self.render_distance = 40  # Chunks (terrain) - reduced from 50
+        self.flora_render_distance = 20  # Chunks (plants) - reduced from 30
+        self.animal_render_distance = 12  # Chunks (animals) - reduced from 20
     
     def set_render_distances(self, terrain: int = None, flora: int = None, animals: int = None):
         """Update render distances dynamically."""
@@ -121,7 +121,7 @@ class ModernWorldRenderer:
         # Chunk size info (set by waverse)
         self.chunk_size = 64  # Grid cells per chunk
         self.tile_scale = 2.0  # World units per cell
-        self.height_scale = 1.0
+        self.height_scale = 1.5  # Increased for more dramatic terrain (was 1.0)
     
     def set_chunk_params(self, chunk_size: int, tile_scale: float, height_scale: float):
         """Set chunk generation parameters."""
@@ -218,11 +218,13 @@ class ModernWorldRenderer:
             return
         
         # Get heightmap
-        heightmap = chunk.heightmap  # This is a numpy array
+        heightmap = chunk.heightmap.copy()  # Copy so we can modify
         
         # Get biome from ClimateManager
         biome = 'grassland'  # Default
         chaos_factor = 0.0
+        height_multiplier = 1.0
+        height_offset = 0.0
         if climate_manager:
             biome_dna = climate_manager.get_biome(cx, cz)
             if biome_dna:
@@ -231,6 +233,22 @@ class ModernWorldRenderer:
                 self._current_biome = biome.lower()
                 # Get chaos factor for exotic biomes (jagged terrain)
                 chaos_factor = getattr(biome_dna, 'chaos_factor', 0.0)
+                # Get height modifiers for mountain/ocean biomes
+                height_multiplier = getattr(biome_dna, 'height_multiplier', 1.0)
+                height_offset = getattr(biome_dna, 'height_offset', 0.0)
+        
+        # Apply height modifiers for special biomes
+        # Mountains and oceans are just the same terrain with different height scales
+        if biome.lower() == 'mountain':
+            # Mountains: amplify existing terrain (2x-3x taller)
+            heightmap = heightmap * height_multiplier + height_offset
+            
+        elif biome.lower() == 'deep_ocean':
+            # Deep ocean: push terrain way down
+            heightmap = heightmap * 0.3 + height_offset  # Flatten and sink
+            
+        elif height_multiplier != 1.0 or height_offset != 0.0:
+            heightmap = heightmap * height_multiplier + height_offset
         
         # Calculate world position
         chunk_world_x = cx * self.chunk_size * self.tile_scale
@@ -679,6 +697,12 @@ class ModernWorldRenderer:
                     break  # Defer rest to next frame
                 self.load_flora_for_chunk(cx, cz, flora_manager, chunk_manager, camera.x, camera.z)
                 flora_loaded_this_frame += 1
+            
+            # NOTE: Flora unloading is NOT done here because:
+            # 1. GPU batches contain instances from multiple chunks mixed together
+            # 2. We can't selectively remove instances from a batch
+            # 3. The batch cleanup in modern_flora.py handles memory limits
+            # The density explosion is controlled by spawn rate limits in life.py
             
             # TIME-BASED GPU UPLOAD to avoid per-frame buffer recreation
             # Only upload every ~0.5 seconds to batch changes together

@@ -57,7 +57,7 @@ class LifeConfig:
     ANIMAL_GROWTH_RATE = 1.0
     
     # Plant spawn chance per update when conditions are good
-    PLANT_SPAWN_CHANCE = 0.06  # 6% chance - doubled for more flora
+    PLANT_SPAWN_CHANCE = 0.01  # 1% chance - reduced to prevent density explosion
     
     # Pregnancy duration in game-hours
     PREGNANCY_DURATION = 2.0  # 2 hours
@@ -67,9 +67,9 @@ class LifeConfig:
     EGG_HATCH_MAX = 3.0
     
     # Performance caps
-    MAX_PLANTS_PER_CHUNK = 40      # Restored with original mesh templates
-    MAX_TOTAL_ANIMALS = 250        # Reduced from 400
-    MAX_EGGS = 40                  # Reduced from 60
+    MAX_PLANTS_PER_CHUNK = 25      # Reduced from 40 - prevents density explosion
+    MAX_TOTAL_ANIMALS = 100        # Reduced to 70% (was 150)
+    MAX_EGGS = 15                  # Reduced (was 25)
     
     # === PERFORMANCE TUNING ===
     # Life simulation runs every UPDATE_INTERVAL seconds (NOT every frame!)
@@ -662,13 +662,15 @@ class LifeSimulator:
         if any_visual_change:
             self.chunks_needing_refresh.add(chunk_key)
         
-        # Chance to spawn new plant if conditions good (cap at 40 per chunk)
-        if (is_raining or sun_intensity > 0.5) and len(plants) < 40:
-            if self.rng.random() < LifeConfig.PLANT_SPAWN_CHANCE:
-                self.pending_plants[chunk_key] = self.pending_plants.get(chunk_key, 0) + 1
-                self.plants_grown += 1
-                if LifeConfig.LOG_ENABLED and self.rng.random() < 0.3:
-                    print(f"  [LIFE] New plant sprouting!")
+        # Chance to spawn new plant if conditions good (strict cap per chunk)
+        # Only spawn if chunk is WELL under capacity and random chance hits
+        if len(plants) < LifeConfig.MAX_PLANTS_PER_CHUNK * 0.6:  # Only if <60% full
+            if is_raining or sun_intensity > 0.5:
+                if self.rng.random() < LifeConfig.PLANT_SPAWN_CHANCE:
+                    self.pending_plants[chunk_key] = self.pending_plants.get(chunk_key, 0) + 1
+                    self.plants_grown += 1
+                    if LifeConfig.LOG_ENABLED and self.rng.random() < 0.3:
+                        print(f"  [LIFE] New plant sprouting!")
     
     def _update_animals(self, animals: list, dt_hours: float, is_day: bool,
                         plants: list, chunk_key: tuple):

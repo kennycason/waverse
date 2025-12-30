@@ -212,6 +212,10 @@ class DNAMeshGenerator:
             self._generate_groundcover(params)
         elif plant_type == 'coral':
             self._generate_coral(params)
+        elif plant_type in ('crystal', 'crystal_formation'):
+            self._generate_crystal(params)
+        elif plant_type in ('stone', 'boulder', 'rock_cluster', 'mossy_rock', 'flat_rock'):
+            self._generate_rock(params)
         elif plant_type == 'blob_tree':
             self._generate_blob_tree(params)
         elif plant_type == 'layered_tree':
@@ -1178,6 +1182,46 @@ class DNAMeshGenerator:
             self._add_cylinder(width * 0.1, branch_h, 4, color, taper=0.7)
             
             self.matrix.pop()
+    
+    def _generate_crystal(self, p: Dict):
+        """Generate crystal formation - translucent shards."""
+        height = max(0.5, min(p['height'] * 0.8, 2.0))
+        color = p['leaf_color']  # Use leaf color for crystals
+        
+        rng = np.random.default_rng(p['species_id'])
+        
+        # Main central crystal
+        self._add_cone(height, p['width'] * 0.15, 4, color)
+        
+        # Smaller crystals around it
+        for i in range(3 + rng.integers(0, 3)):
+            self.matrix.push()
+            
+            angle = (i / 5) * 360 + rng.random() * 30
+            dist = p['width'] * 0.3
+            self.matrix.translate(math.cos(math.radians(angle)) * dist, 0, 
+                                 math.sin(math.radians(angle)) * dist)
+            self.matrix.rotate_z(rng.random() * 20 - 10)  # Slight tilt
+            
+            h = height * (0.3 + rng.random() * 0.5)
+            w = p['width'] * 0.08
+            self._add_cone(h, w, 4, color)
+            
+            self.matrix.pop()
+    
+    def _generate_rock(self, p: Dict):
+        """Generate a rock/boulder - low polygon boulder shape."""
+        size = max(0.3, min(p['height'] * 0.5, 1.5))
+        # Rocks are gray/brown
+        color = (0.4 + p['trunk_color'][0] * 0.2, 
+                 0.35 + p['trunk_color'][1] * 0.15,
+                 0.3 + p['trunk_color'][2] * 0.1)
+        
+        # Use octahedron for rock shape
+        self.matrix.push()
+        self.matrix.translate(0, size * 0.3, 0)  # Half buried
+        self._add_octahedron(size, color)
+        self.matrix.pop()
 
 
 # Global instance for easy access

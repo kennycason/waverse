@@ -169,6 +169,10 @@ BIOME_COLORS = {
     # Void - near black with hints of deep purple
     'Void': (0.05, 0.02, 0.10),
     'void': (0.05, 0.02, 0.10),
+    # Mountain - rocky grays with hints of brown
+    'Mountain': (0.45, 0.42, 0.38),
+    # Deep Ocean - dark blues
+    'Deep_ocean': (0.08, 0.15, 0.35),
 }
 
 

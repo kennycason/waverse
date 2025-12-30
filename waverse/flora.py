@@ -1417,7 +1417,7 @@ class FloraManager:
         # Set WAVERSE_FLORA_DENSITY=1.0 for original density
         # Default 0.12 = 12% density - optimized for performance with DNA rendering
         import os
-        density_mult = float(os.environ.get('WAVERSE_FLORA_DENSITY', '0.04'))
+        density_mult = float(os.environ.get('WAVERSE_FLORA_DENSITY', '0.03'))  # Reduced from 0.04
         
         # === SPECIAL EXOTIC BIOMES ===
         if biome == 'psychedelic':
@@ -1457,6 +1457,10 @@ class FloraManager:
             # Sparse arctic plants
             num_plants = int(rng.integers(5, 16) * density_mult)
             num_underwater = int(rng.integers(0, 3) * density_mult)
+        elif biome == 'mountain':
+            # Very sparse alpine vegetation
+            num_plants = int(rng.integers(3, 8) * density_mult)
+            num_underwater = 0
         elif biome == 'savanna':
             # Grassland with scattered trees
             num_plants = int(rng.integers(16, 32) * density_mult)
@@ -1470,8 +1474,8 @@ class FloraManager:
             num_plants = int(rng.integers(15, 30) * density_mult)  # Reduced
             num_underwater = int(rng.integers(3, 8) * density_mult)
         
-        # Ensure at least a few plants per chunk
-        num_plants = max(3, num_plants)
+        # Ensure at least 1 plant per chunk (reduced from 3)
+        num_plants = max(1, num_plants)
         
         # Main plant loop - trees, bushes, etc.
         for _ in range(num_plants + num_underwater):

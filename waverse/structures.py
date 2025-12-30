@@ -1504,9 +1504,11 @@ class StructureManager:
         local_x = rng.integers(8, w - 8)
         local_z = rng.integers(8, h - 8)
         
-        # Check height range
+        # Check height range - avoid underwater, extreme peaks, and very steep areas
         center_h = heightmap[local_z, local_x]
-        if center_h < 3 or center_h > 50:  # Not underwater or extreme peaks
+        if center_h < 3:  # Not underwater
+            return
+        if center_h > 80:  # Not on extreme mountain peaks
             return
         
         # Pre-calculate building size to sample correct terrain positions
@@ -1533,8 +1535,14 @@ class StructureManager:
         ]
         max_slope = max(corner_heights) - min(corner_heights)
         
-        # Allow buildings on steeper slopes (pillars will handle it)
-        if max_slope > 20:  # But not too extreme
+        # STRICT slope check - no buildings on steep terrain
+        # Mountain biomes will have very few buildings
+        if max_slope > 15:  # Stricter slope limit
+            return
+        
+        # Also check steepness relative to height (mountains are naturally steep)
+        avg_height = sum(corner_heights) / 4
+        if avg_height > 60 and max_slope > 8:  # Extra strict on high terrain
             return
         
         # IMPORTANT: Scale local coordinates by tile_scale to get world coords

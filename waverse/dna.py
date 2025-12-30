@@ -1222,6 +1222,17 @@ class DNAPool:
             else:  # Tundra
                 return [PlantType.GRASS, PlantType.GRASS, PlantType.BUSH,
                         PlantType.MOSS_PAD, PlantType.SHRUB]
+        
+        # Mountain biome - hardy alpine plants (no crystals!)
+        if biome == 'mountain':
+            return [PlantType.PINE, PlantType.FIR, PlantType.SPRUCE,
+                    PlantType.GRASS, PlantType.GRASS, PlantType.MOSS_PAD,
+                    PlantType.BUSH, PlantType.SHRUB, PlantType.CEDAR]
+        
+        # Deep ocean - underwater plants
+        if biome == 'deep_ocean':
+            return [PlantType.SEAWEED, PlantType.CORAL, PlantType.OCTOPUS,
+                    PlantType.TENTACLE, PlantType.SPIRAL, PlantType.REED]
         else:  # Temperate
             if humid > 0.6:  # Temperate rainforest - SOLID trees dominate!
                 return [PlantType.BLOB_TREE, PlantType.LAYERED_TREE, PlantType.CLUMP_TREE,

@@ -803,7 +803,7 @@ class AnimalManager:
         return templates
     
     # Animal cap - balanced for performance
-    MAX_TOTAL_ANIMALS = 500  # Reduced from 800
+    MAX_TOTAL_ANIMALS = 350  # Reduced to 70% (was 500)
     
     def spawn_animals_for_chunk(self, cx: int, cz: int, heightmap, 
                                  chunk_world_x: float, chunk_world_z: float,

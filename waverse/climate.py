@@ -40,8 +40,13 @@ class BiomeDNA:
     
     # SPECIAL BIOMES - rare exotic zones!
     # None = normal biome, otherwise overrides everything
-    special_biome: str = None  # "psychedelic", "hellfire", "shadow", "crystal", "void"
+    # Options: "psychedelic", "hellfire", "shadow", "crystal", "void", "mountain", "deep_ocean"
+    special_biome: str = None
     chaos_factor: float = 0.0  # 0=normal terrain, 1=extremely chaotic/jagged
+    
+    # Height modifiers for special terrain biomes
+    height_multiplier: float = 1.0  # 1=normal, 3+=mountains, 0.3=deep ocean
+    height_offset: float = 0.0      # Added to all heights (negative for oceans)
     
     def mutate(self, rng: np.random.Generator, strength: float = 0.02) -> "BiomeDNA":
         """Very slow mutation - biomes should span many chunks."""
@@ -55,11 +60,11 @@ class BiomeDNA:
         demo_mode = os.environ.get('WAVERSE_DEMO_BIOMES', '0') == '1'
         
         # Chance to exit or enter a special biome
-        # Demo mode: VERY high chance for showing friends!
+        # Demo mode: Smaller but CONTIGUOUS biomes (not chaotic!)
         # Debug mode: 10% chance, Normal mode: 0.5% chance
         if demo_mode:
-            change_chance = 0.25  # 25% chance to change biome type
-            enter_chance = 0.85   # 85% chance the new biome is exotic!
+            change_chance = 0.04  # 4% chance - biomes ~25 chunks wide on average
+            enter_chance = 0.70   # 70% chance the new biome is exotic
         elif debug_biomes:
             change_chance = 0.10
             enter_chance = 0.50
@@ -75,12 +80,26 @@ class BiomeDNA:
             else:
                 # Chance to enter a special biome
                 if rng.random() < enter_chance:
-                    new_special = rng.choice(['psychedelic', 'hellfire', 'shadow', 'crystal', 'void'])
+                    # Include mountain and deep_ocean as terrain-altering biomes
+                    new_special = rng.choice(['psychedelic', 'hellfire', 'shadow', 'crystal', 'void', 
+                                             'mountain', 'mountain', 'deep_ocean'])  # Mountain more likely
                     new_chaos = 0.5 + rng.random() * 0.5  # High chaos in special biomes
         
         # If in special biome, chaos can vary
         if new_special:
             new_chaos = _clamp(new_chaos + rng.normal(0, 0.1))
+        
+        # Set height modifiers for terrain-altering biomes
+        new_height_mult = 1.0
+        new_height_offset = 0.0
+        if new_special == 'mountain':
+            new_height_mult = 2.5 + rng.random() * 1.5  # 2.5x-4x height for mountains
+            new_height_offset = 30 + rng.random() * 40   # Base elevation boost
+            new_chaos = 0.3 + rng.random() * 0.4  # Moderate chaos (not too jagged)
+        elif new_special == 'deep_ocean':
+            new_height_mult = 0.8  # Slightly compress terrain
+            new_height_offset = -60 - rng.random() * 40  # Deep underwater
+            new_chaos = 0.1 + rng.random() * 0.2  # Smooth ocean floor
         
         # Only 8% chance of any mutation for normal params
         if rng.random() > 0.08:
@@ -95,6 +114,8 @@ class BiomeDNA:
                 wind_base=self.wind_base,
                 special_biome=new_special,
                 chaos_factor=new_chaos,
+                height_multiplier=new_height_mult,
+                height_offset=new_height_offset,
             )
         
         # Tiny mutations
@@ -110,6 +131,8 @@ class BiomeDNA:
             wind_base=_clamp(self.wind_base + rng.normal(0, s)),
             special_biome=new_special,
             chaos_factor=new_chaos,
+            height_multiplier=new_height_mult,
+            height_offset=new_height_offset,
         )
     
     def crossover(self, other: "BiomeDNA", rng: np.random.Generator) -> "BiomeDNA":
@@ -122,8 +145,10 @@ class BiomeDNA:
         else:
             new_special = self.special_biome or other.special_biome
         
-        # Blend chaos
+        # Blend chaos and height modifiers
         new_chaos = self.chaos_factor * (1-t) + other.chaos_factor * t
+        new_height_mult = self.height_multiplier * (1-t) + other.height_multiplier * t
+        new_height_offset = self.height_offset * (1-t) + other.height_offset * t
         
         return BiomeDNA(
             temperature=self.temperature * (1-t) + other.temperature * t,
@@ -136,6 +161,8 @@ class BiomeDNA:
             wind_base=self.wind_base * (1-t) + other.wind_base * t,
             special_biome=new_special,
             chaos_factor=new_chaos,
+            height_multiplier=new_height_mult,
+            height_offset=new_height_offset,
         )
     
     def get_biome_name(self) -> str:

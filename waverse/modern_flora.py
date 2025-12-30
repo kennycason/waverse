@@ -2617,12 +2617,10 @@ class ModernFloraRenderer:
                 )
                 self.batches[mesh_type] = batch
                 
-                # NOTE: Batch cleanup disabled for now - it was causing visual artifacts
-                # because pending_instances would get re-added when loaded_flora_chunks
-                # was cleared, causing duplicate instances.
-                # TODO: Implement proper cleanup that also clears pending_instances
-                # if len(self.batches) > 2000:
-                #     self._cleanup_oldest_batches(1500)
+                # NOTE: Batch cleanup disabled - it causes visual glitches because:
+                # 1. Removing batches doesn't clear loaded_flora_chunks
+                # 2. This causes duplicate instances when chunks reload
+                # Memory is bounded by flora_render_distance limiting active chunks
                 pass
             else:
                 batch = self.batches[mesh_type]
