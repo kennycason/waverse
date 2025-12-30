@@ -1147,16 +1147,16 @@ class DNAPool:
                     neighbors.extend(self.chunk_dna[neighbor_key])
                     break
         
-        # Generate DNA for this chunk - biome-specific variety
-        num_species = 5 + chunk_rng.integers(0, 8)  # 5-12 species per chunk
+        # Generate DNA for this chunk - HIGH DIVERSITY!
+        num_species = 8 + chunk_rng.integers(0, 10)  # 8-17 species per chunk (more variety)
         chunk_dna = []
         
         # Get biome-specific plant types
         biome_plants = self._get_biome_plants(biome, temperature, humidity, chunk_rng)
         
         for i in range(num_species):
-            # 80% chance to use biome-specific plants, 20% variety for mixing zones
-            if chunk_rng.random() < 0.8 and biome_plants:
+            # 60% chance to use biome-specific plants, 40% wild variety
+            if chunk_rng.random() < 0.6 and biome_plants:
                 plant_type = chunk_rng.choice(biome_plants)
             else:
                 plant_type = chunk_rng.choice(PlantType.ALL_TYPES)
@@ -1168,19 +1168,19 @@ class DNAPool:
             # Apply biome-specific color mutations
             base = self._apply_biome_colors(base, biome, chunk_rng)
             
-            # If we have neighbors, crossover with them
-            if neighbors and chunk_rng.random() < 0.6:
+            # If we have neighbors, crossover with them (lower chance = more unique per chunk)
+            if neighbors and chunk_rng.random() < 0.4:
                 # Find similar neighbor
                 similar = [n for n in neighbors if n.plant_type == base.plant_type]
                 if similar:
                     parent2 = chunk_rng.choice(similar)
                     offspring = base.crossover(parent2, chunk_rng)
-                    offspring = offspring.mutate(chunk_rng, strength=0.3)
+                    offspring = offspring.mutate(chunk_rng, strength=0.5)  # Stronger mutation
                     chunk_dna.append(offspring)
                     continue
             
-            # Otherwise just mutate the template
-            mutated = base.mutate(chunk_rng, strength=0.4)
+            # Otherwise mutate more strongly for unique plants
+            mutated = base.mutate(chunk_rng, strength=0.6)  # Increased from 0.4
             chunk_dna.append(mutated)
         
         self.chunk_dna[key] = chunk_dna

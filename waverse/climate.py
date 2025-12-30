@@ -60,11 +60,11 @@ class BiomeDNA:
         demo_mode = os.environ.get('WAVERSE_DEMO_BIOMES', '0') == '1'
         
         # Chance to exit or enter a special biome
-        # Demo mode: Smaller but CONTIGUOUS biomes (not chaotic!)
+        # Demo mode: Larger, more contiguous exotic biomes
         # Debug mode: 10% chance, Normal mode: 0.5% chance
         if demo_mode:
-            change_chance = 0.04  # 4% chance - biomes ~25 chunks wide on average
-            enter_chance = 0.70   # 70% chance the new biome is exotic
+            change_chance = 0.02  # 2% chance - biomes ~50 chunks wide (stable areas!)
+            enter_chance = 0.85   # 85% chance the new biome is exotic
         elif debug_biomes:
             change_chance = 0.10
             enter_chance = 0.50
@@ -80,26 +80,18 @@ class BiomeDNA:
             else:
                 # Chance to enter a special biome
                 if rng.random() < enter_chance:
-                    # Include mountain and deep_ocean as terrain-altering biomes
-                    new_special = rng.choice(['psychedelic', 'hellfire', 'shadow', 'crystal', 'void', 
-                                             'mountain', 'mountain', 'deep_ocean'])  # Mountain more likely
-                    new_chaos = 0.5 + rng.random() * 0.5  # High chaos in special biomes
+                    # Exotic biomes only - mountain/ocean removed (should be natural terrain)
+                    new_special = rng.choice(['psychedelic', 'psychedelic', 'psychedelic',
+                                             'hellfire', 'shadow', 'crystal', 'void'])
+                    new_chaos = 0.3 + rng.random() * 0.4  # Moderate chaos
         
         # If in special biome, chaos can vary
         if new_special:
             new_chaos = _clamp(new_chaos + rng.normal(0, 0.1))
         
-        # Set height modifiers for terrain-altering biomes
+        # Height modifiers removed - mountains/oceans are natural terrain features now
         new_height_mult = 1.0
         new_height_offset = 0.0
-        if new_special == 'mountain':
-            new_height_mult = 2.5 + rng.random() * 1.5  # 2.5x-4x height for mountains
-            new_height_offset = 30 + rng.random() * 40   # Base elevation boost
-            new_chaos = 0.3 + rng.random() * 0.4  # Moderate chaos (not too jagged)
-        elif new_special == 'deep_ocean':
-            new_height_mult = 0.8  # Slightly compress terrain
-            new_height_offset = -60 - rng.random() * 40  # Deep underwater
-            new_chaos = 0.1 + rng.random() * 0.2  # Smooth ocean floor
         
         # Only 8% chance of any mutation for normal params
         if rng.random() > 0.08:

@@ -1417,7 +1417,7 @@ class FloraManager:
         # Set WAVERSE_FLORA_DENSITY=1.0 for original density
         # Default 0.12 = 12% density - optimized for performance with DNA rendering
         import os
-        density_mult = float(os.environ.get('WAVERSE_FLORA_DENSITY', '0.03'))  # Reduced from 0.04
+        density_mult = float(os.environ.get('WAVERSE_FLORA_DENSITY', '0.015'))  # Halved again for performance
         
         # === SPECIAL EXOTIC BIOMES ===
         if biome == 'psychedelic':

@@ -66,10 +66,10 @@ class LifeConfig:
     EGG_HATCH_MIN = 1.0
     EGG_HATCH_MAX = 3.0
     
-    # Performance caps
-    MAX_PLANTS_PER_CHUNK = 25      # Reduced from 40 - prevents density explosion
-    MAX_TOTAL_ANIMALS = 100        # Reduced to 70% (was 150)
-    MAX_EGGS = 15                  # Reduced (was 25)
+    # Performance caps - further reduced for stable FPS
+    MAX_PLANTS_PER_CHUNK = 15      # Reduced from 25
+    MAX_TOTAL_ANIMALS = 60         # Reduced from 100
+    MAX_EGGS = 10                  # Reduced from 15
     
     # === PERFORMANCE TUNING ===
     # Life simulation runs every UPDATE_INTERVAL seconds (NOT every frame!)

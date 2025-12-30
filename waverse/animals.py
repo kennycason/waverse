@@ -793,17 +793,17 @@ class AnimalManager:
         self.species_templates = self._generate_species()
     
     def _generate_species(self) -> Dict[str, List[AnimalDNA]]:
-        """Generate base species templates."""
+        """Generate base species templates - HIGH DIVERSITY!"""
         templates = {}
         for i, animal_type in enumerate(AnimalType.ALL):
             templates[animal_type] = [
                 AnimalDNA.create_random(animal_type, self.world_seed + i * 100 + j)
-                for j in range(2)  # 2 variations per type
+                for j in range(5)  # 5 variations per type (was 2)
             ]
         return templates
     
     # Animal cap - balanced for performance
-    MAX_TOTAL_ANIMALS = 350  # Reduced to 70% (was 500)
+    MAX_TOTAL_ANIMALS = 200  # Reduced from 350 for stable FPS
     
     def spawn_animals_for_chunk(self, cx: int, cz: int, heightmap, 
                                  chunk_world_x: float, chunk_world_z: float,
@@ -834,56 +834,40 @@ class AnimalManager:
         # BIOME-BASED animal density!
         biome = (biome_name or '').lower()
         
-        # === SPECIAL EXOTIC BIOMES ===
+        # === SPECIAL EXOTIC BIOMES - counts halved for performance ===
         if biome == 'psychedelic':
-            # TRIPPY! LOTS of weird creatures!
-            num_animals = rng.integers(10, 18)  # More creatures!
+            num_animals = rng.integers(4, 8)
         elif biome == 'hellfire':
-            # Hell creatures - moderate
-            num_animals = rng.integers(4, 8)
+            num_animals = rng.integers(2, 4)
         elif biome == 'shadow':
-            # Creepy crawlies - moderate
-            num_animals = rng.integers(3, 7)
-        elif biome == 'crystal':
-            # Delicate crystalline creatures - sparse
-            num_animals = rng.integers(2, 5)
-        elif biome == 'void':
-            # THE VOID - almost nothing
-            num_animals = rng.integers(0, 2)
-        # === NORMAL BIOMES ===
-        elif biome in ('rainforest', 'tropical'):
-            # Jungle! Many animals - insects, birds, mammals, reptiles
-            num_animals = rng.integers(5, 10)
-        elif biome == 'savanna':
-            # Lots of grazers and predators
-            num_animals = rng.integers(4, 8)
-        elif biome in ('temperate', 'taiga'):
-            # Moderate wildlife
-            num_animals = rng.integers(3, 7)
-        elif biome == 'desert':
-            # Sparse - reptiles, insects
             num_animals = rng.integers(1, 3)
+        elif biome == 'crystal':
+            num_animals = rng.integers(1, 2)
+        elif biome == 'void':
+            num_animals = rng.integers(0, 1)
+        # === NORMAL BIOMES - halved ===
+        elif biome in ('rainforest', 'tropical'):
+            num_animals = rng.integers(2, 5)
+        elif biome == 'savanna':
+            num_animals = rng.integers(2, 4)
+        elif biome in ('temperate', 'taiga'):
+            num_animals = rng.integers(1, 3)
+        elif biome == 'desert':
+            num_animals = rng.integers(0, 2)
         elif biome in ('tundra', 'frozen'):
-            # Sparse arctic creatures
-            num_animals = rng.integers(1, 4)
+            num_animals = rng.integers(0, 2)
         elif biome == 'swamp':
-            # Lots of amphibians, insects, crocs
-            num_animals = rng.integers(4, 9)
+            num_animals = rng.integers(2, 4)
         elif biome in ('ocean', 'underwater', 'coral_reef'):
-            # TEEMING with sea life!
-            num_animals = rng.integers(8, 15)
+            num_animals = rng.integers(3, 6)
         elif biome == 'meadow':
-            # Lots of insects and small creatures
-            num_animals = rng.integers(5, 10)
+            num_animals = rng.integers(2, 4)
         elif biome in ('forest', 'deciduous'):
-            # Rich woodland life
-            num_animals = rng.integers(4, 8)
+            num_animals = rng.integers(2, 4)
         elif biome == 'volcanic':
-            # Harsh but some life survives
-            num_animals = rng.integers(1, 4)
+            num_animals = rng.integers(0, 2)
         else:
-            # Default (grassland, etc.)
-            num_animals = rng.integers(3, 7)
+            num_animals = rng.integers(1, 3)
         
         for _ in range(num_animals):
             local_x = rng.integers(5, w - 5)

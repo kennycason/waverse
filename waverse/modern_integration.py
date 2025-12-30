@@ -237,18 +237,9 @@ class ModernWorldRenderer:
                 height_multiplier = getattr(biome_dna, 'height_multiplier', 1.0)
                 height_offset = getattr(biome_dna, 'height_offset', 0.0)
         
-        # Apply height modifiers for special biomes
-        # Mountains and oceans are just the same terrain with different height scales
-        if biome.lower() == 'mountain':
-            # Mountains: amplify existing terrain (2x-3x taller)
-            heightmap = heightmap * height_multiplier + height_offset
-            
-        elif biome.lower() == 'deep_ocean':
-            # Deep ocean: push terrain way down
-            heightmap = heightmap * 0.3 + height_offset  # Flatten and sink
-            
-        elif height_multiplier != 1.0 or height_offset != 0.0:
-            heightmap = heightmap * height_multiplier + height_offset
+        # NOTE: Mountain/ocean biomes removed - they caused visual glitches
+        # Mountains should be natural terrain features, not special biome modifiers
+        # The wave DNA already creates varied terrain - we just need bigger amplitudes there
         
         # Calculate world position
         chunk_world_x = cx * self.chunk_size * self.tile_scale
