@@ -219,8 +219,8 @@ class PlantType:
                  BANANA, FICUS, MONSTERA, HELICONIA, STONE, BOULDER, MOSSY_ROCK, 
                  ROCK_CLUSTER, FLAT_ROCK, CRYSTAL_FORMATION, BLOB_TREE, LAYERED_TREE, CLUMP_TREE]
     
-    # Underwater-specific types
-    UNDERWATER_TYPES = [SEAWEED, CORAL]
+    # Underwater-specific types - expanded for variety!
+    UNDERWATER_TYPES = [SEAWEED, CORAL, LILY_PAD, REED, MANGROVE, OCTOPUS, TENTACLE, SPIRAL]
     
     # Sprawling ground types
     GROUND_TYPES = [GROUNDCOVER, CREEPER, LICHEN, MOSS_PAD]
@@ -651,7 +651,7 @@ class PlantDNA:
             dna.branch_height = 0.4 + rng.random() * 0.35
             dna.sub_branch_chance = 0.3 + rng.random() * 0.35  # 30-65% chance
             dna.recursive_depth = 1 + rng.integers(0, 2)  # 1-2 levels of branching
-            dna.canopy_shape = rng.choice(["dome", "cone", "umbrella", "weeping", "sphere", "layered", "explosion"])
+            dna.canopy_shape = rng.choice(["dome", "cone", "umbrella", "weeping", "sphere", "layered", "explosion", "blob"])
             dna.canopy_spread = 0.4 + rng.random() * 0.5
             dna.droop = rng.random() * 0.4  # Some droop variation
             dna.asymmetry = 0.1 + rng.random() * 0.3  # Natural asymmetry
@@ -834,7 +834,7 @@ class PlantDNA:
             dna.recursive_depth = 1 + rng.integers(0, 2)  # 1-2 levels max
             dna.droop = rng.random() * 0.8 - 0.3  # Can droop or reach up
             dna.leaf_shape = rng.choice(["round", "pointed", "frond", "needle", "blade", "heart", "star", "fan", "spiral", "feather"])
-            dna.canopy_shape = rng.choice(["dome", "cone", "umbrella", "weeping", "columnar", "sphere", "layered", "explosion", "cascading"])
+            dna.canopy_shape = rng.choice(["dome", "cone", "umbrella", "weeping", "columnar", "sphere", "layered", "explosion", "cascading", "blob"])
             dna.asymmetry = 0.2 + rng.random() * 0.4
             dna.spiral_factor = rng.random() * 0.5
             
@@ -1117,50 +1117,56 @@ class DNAPool:
             ]
         return templates
     
-    def get_dna_for_chunk(self, cx: int, cz: int) -> List[PlantDNA]:
+    def get_dna_for_chunk(self, cx: int, cz: int, biome: str = None, 
+                           temperature: float = 0.5, humidity: float = 0.5) -> List[PlantDNA]:
         """
         Get or generate DNA for plants in a chunk.
         Uses neighboring chunk DNA for crossover to create gradual variation.
+        Biome strongly influences plant type selection for distinct regions.
         """
-        key = (cx, cz)
+        # Include biome in cache key to support different biomes
+        key = (cx, cz, biome)
         if key in self.chunk_dna:
             return self.chunk_dna[key]
         
+        # Also check non-biome key for backwards compatibility
+        old_key = (cx, cz)
+        if old_key in self.chunk_dna:
+            return self.chunk_dna[old_key]
+        
         # Deterministic RNG for this chunk
-        chunk_seed = abs(hash((self.seed, cx, cz))) % (2**31)
+        chunk_seed = abs(hash((self.seed, cx, cz, biome or ''))) % (2**31)
         chunk_rng = np.random.default_rng(chunk_seed)
         
         # Get neighbor DNA for crossover (if available)
         neighbors = []
         for dx, dz in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-            neighbor_key = (cx + dx, cz + dz)
-            if neighbor_key in self.chunk_dna:
-                neighbors.extend(self.chunk_dna[neighbor_key])
+            for b in [biome, None]:
+                neighbor_key = (cx + dx, cz + dz, b) if b else (cx + dx, cz + dz)
+                if neighbor_key in self.chunk_dna:
+                    neighbors.extend(self.chunk_dna[neighbor_key])
+                    break
         
-        # Generate DNA for this chunk - more species for better variety!
+        # Generate DNA for this chunk - biome-specific variety
         num_species = 5 + chunk_rng.integers(0, 8)  # 5-12 species per chunk
         chunk_dna = []
         
+        # Get biome-specific plant types
+        biome_plants = self._get_biome_plants(biome, temperature, humidity, chunk_rng)
+        
         for i in range(num_species):
-            # Pick a plant type - 70% chance to use full variety, 30% biome-influenced
-            if chunk_rng.random() < 0.7:
-                # Full variety from all types
-                plant_type = chunk_rng.choice(PlantType.ALL_TYPES)
+            # 80% chance to use biome-specific plants, 20% variety for mixing zones
+            if chunk_rng.random() < 0.8 and biome_plants:
+                plant_type = chunk_rng.choice(biome_plants)
             else:
-                # Biome-influenced selection
-                biome_factor = np.sin(cx * 0.1) * np.cos(cz * 0.1)
-                if biome_factor > 0.3:
-                    plant_type = chunk_rng.choice([PlantType.TREE, PlantType.TALL_TREE, PlantType.BUSH, 
-                                                   PlantType.OAK, PlantType.BIRCH, PlantType.MAPLE])
-                elif biome_factor < -0.3:
-                    plant_type = chunk_rng.choice([PlantType.GRASS, PlantType.FERN, PlantType.CACTUS,
-                                                   PlantType.FLOWER, PlantType.MUSHROOM])
-                else:
-                    plant_type = chunk_rng.choice(PlantType.ALL_TYPES)
+                plant_type = chunk_rng.choice(PlantType.ALL_TYPES)
             
             # Get base template
             base_templates = self.templates.get(plant_type, self.templates[PlantType.TREE])
             base = chunk_rng.choice(base_templates)
+            
+            # Apply biome-specific color mutations
+            base = self._apply_biome_colors(base, biome, chunk_rng)
             
             # If we have neighbors, crossover with them
             if neighbors and chunk_rng.random() < 0.6:
@@ -1169,7 +1175,6 @@ class DNAPool:
                 if similar:
                     parent2 = chunk_rng.choice(similar)
                     offspring = base.crossover(parent2, chunk_rng)
-                    # Also mutate slightly
                     offspring = offspring.mutate(chunk_rng, strength=0.3)
                     chunk_dna.append(offspring)
                     continue
@@ -1180,6 +1185,155 @@ class DNAPool:
         
         self.chunk_dna[key] = chunk_dna
         return chunk_dna
+    
+    def _get_biome_plants(self, biome: str, temp: float, humid: float, 
+                          rng: np.random.Generator) -> List[str]:
+        """Get plant types appropriate for a biome."""
+        # Special exotic biomes
+        if biome == 'psychedelic':
+            return [PlantType.ALIEN, PlantType.CRYSTAL, PlantType.OCTOPUS, 
+                    PlantType.SPIRAL, PlantType.MUSHROOM, PlantType.SEAWEED,
+                    PlantType.FLOWER, PlantType.HELICONIA, PlantType.CORAL]
+        elif biome == 'hellfire':
+            return [PlantType.CACTUS, PlantType.DEAD_TREE, PlantType.SPINY_VINE,
+                    PlantType.CRYSTAL, PlantType.CREEPER, PlantType.SNAG]
+        elif biome == 'shadow':
+            return [PlantType.DEAD_TREE, PlantType.MUSHROOM, PlantType.SNAG,
+                    PlantType.FERN, PlantType.CREEPER, PlantType.VINE]
+        elif biome == 'crystal':
+            return [PlantType.CRYSTAL, PlantType.CORAL, PlantType.ALIEN,
+                    PlantType.SPIRAL, PlantType.CRYSTAL_FORMATION]
+        elif biome == 'void':
+            return [PlantType.ALIEN, PlantType.OCTOPUS, PlantType.CRYSTAL,
+                    PlantType.SPIRAL, PlantType.TENTACLE]
+        
+        # Temperature/humidity-based biomes
+        if temp > 0.7:  # Hot
+            if humid > 0.6:  # Tropical - Solid palms and blobs
+                return [PlantType.PALM, PlantType.BLOB_TREE, PlantType.CLUMP_TREE,
+                        PlantType.MONSTERA, PlantType.FERN, PlantType.GRASS]
+            else:  # Desert/dry hot
+                return [PlantType.CACTUS, PlantType.SHRUB, PlantType.GRASS,
+                        PlantType.DEAD_TREE, PlantType.BOULDER]
+        elif temp < 0.3:  # Cold
+            if humid > 0.5:  # Snowy forest - Solid cones
+                return [PlantType.PINE, PlantType.SPRUCE, PlantType.FIR,
+                        PlantType.CLUMP_TREE, PlantType.GRASS]
+            else:  # Tundra
+                return [PlantType.GRASS, PlantType.GRASS, PlantType.BUSH,
+                        PlantType.MOSS_PAD, PlantType.SHRUB]
+        else:  # Temperate
+            if humid > 0.6:  # Temperate rainforest - SOLID trees dominate!
+                return [PlantType.BLOB_TREE, PlantType.LAYERED_TREE, PlantType.CLUMP_TREE,
+                        PlantType.PINE, PlantType.TREE, PlantType.FERN, PlantType.GRASS]
+            elif humid > 0.3:  # Deciduous forest - Mix solid + branchy
+                return [PlantType.BLOB_TREE, PlantType.CLUMP_TREE, PlantType.LAYERED_TREE,
+                        PlantType.OAK, PlantType.BUSH, PlantType.GRASS, PlantType.PINE]
+            else:  # Grassland - mostly grass with occasional trees
+                return [PlantType.GRASS, PlantType.GRASS, PlantType.GRASS, PlantType.BUSH,
+                        PlantType.SHRUB, PlantType.BLOB_TREE, PlantType.FLOWER]
+        
+        return PlantType.ALL_TYPES
+    
+    def _apply_biome_colors(self, dna: PlantDNA, biome: str, 
+                            rng: np.random.Generator) -> PlantDNA:
+        """Apply biome-specific color mutations."""
+        if not biome:
+            return dna
+        
+        # Psychedelic: vivid, saturated, varied hues
+        if biome == 'psychedelic':
+            hue = rng.random()
+            sat = 0.8 + rng.random() * 0.2
+            val = 0.7 + rng.random() * 0.3
+            r, g, b = self._hsv_to_rgb(hue, sat, val)
+            dna.trunk_color = ColorGene(r, g, b)
+            
+            hue2 = (hue + 0.3 + rng.random() * 0.4) % 1.0
+            r2, g2, b2 = self._hsv_to_rgb(hue2, sat, val)
+            dna.leaf_color = ColorGene(r2, g2, b2)
+            
+            hue3 = (hue + 0.5 + rng.random() * 0.5) % 1.0
+            r3, g3, b3 = self._hsv_to_rgb(hue3, sat, val)
+            dna.flower_color = ColorGene(r3, g3, b3)
+            
+        # Hellfire: reds, oranges, blacks
+        elif biome == 'hellfire':
+            dna.trunk_color = ColorGene(
+                0.15 + rng.random() * 0.15,
+                0.05 + rng.random() * 0.1,
+                0.02 + rng.random() * 0.05
+            )
+            dna.leaf_color = ColorGene(
+                0.8 + rng.random() * 0.2,
+                0.2 + rng.random() * 0.3,
+                0.0 + rng.random() * 0.1
+            )
+            
+        # Shadow: dark purples, deep greens, grays
+        elif biome == 'shadow':
+            dna.trunk_color = ColorGene(
+                0.1 + rng.random() * 0.1,
+                0.05 + rng.random() * 0.1,
+                0.15 + rng.random() * 0.1
+            )
+            dna.leaf_color = ColorGene(
+                0.1 + rng.random() * 0.15,
+                0.15 + rng.random() * 0.15,
+                0.2 + rng.random() * 0.15
+            )
+            
+        # Crystal: whites, pale blues, silvers
+        elif biome == 'crystal':
+            dna.trunk_color = ColorGene(
+                0.7 + rng.random() * 0.3,
+                0.75 + rng.random() * 0.25,
+                0.85 + rng.random() * 0.15
+            )
+            dna.leaf_color = ColorGene(
+                0.6 + rng.random() * 0.3,
+                0.8 + rng.random() * 0.2,
+                0.9 + rng.random() * 0.1
+            )
+            
+        # Void: deep purples, blacks, occasional neon accents
+        elif biome == 'void':
+            dna.trunk_color = ColorGene(
+                0.05 + rng.random() * 0.1,
+                0.0 + rng.random() * 0.05,
+                0.1 + rng.random() * 0.15
+            )
+            if rng.random() < 0.3:  # Neon accent
+                hue = rng.choice([0.0, 0.3, 0.5, 0.8])  # Red, green, cyan, purple
+                r, g, b = self._hsv_to_rgb(hue, 1.0, 1.0)
+                dna.leaf_color = ColorGene(r, g, b)
+            else:
+                dna.leaf_color = ColorGene(
+                    0.1 + rng.random() * 0.1,
+                    0.0 + rng.random() * 0.1,
+                    0.2 + rng.random() * 0.2
+                )
+        
+        return dna
+    
+    def _hsv_to_rgb(self, h: float, s: float, v: float) -> Tuple[float, float, float]:
+        """Convert HSV to RGB."""
+        if s == 0:
+            return (v, v, v)
+        
+        h = h * 6
+        i = int(h)
+        f = h - i
+        p = v * (1 - s)
+        q = v * (1 - s * f)
+        t = v * (1 - s * (1 - f))
+        
+        if i == 0: return (v, t, p)
+        if i == 1: return (q, v, p)
+        if i == 2: return (p, v, t)
+        if i == 3: return (p, q, v)
+        if i == 4: return (t, p, v)
+        return (v, p, q)
     
     def cleanup_distant_chunks(self, center_cx: int, center_cz: int, max_distance: int = 30):
         """Remove DNA for chunks that are too far away to save memory."""

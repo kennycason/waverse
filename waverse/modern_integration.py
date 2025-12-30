@@ -778,8 +778,20 @@ class ModernWorldRenderer:
                 if base_scale_gene is not None:
                     scale = scale * max(0.3, min(5.0, float(base_scale_gene)))
                 
+                # VERTICAL OFFSET: Raise animals so bottom touches ground (not center)
+                # Animals are roughly spherical/centered, so lift by half their height
+                animal_type = getattr(dna, 'animal_type', 'worm')
+                # Different offsets by type - flying animals don't need offset
+                if animal_type in ('bird', 'jellyfish'):
+                    y_offset = 0  # Flying/floating - no offset needed
+                elif animal_type in ('fish',):
+                    y_offset = scale * 0.2  # Fish swim, slight offset
+                else:
+                    # Land animals need significant offset to sit on ground
+                    y_offset = scale * 0.5  # Lift by half the scale
+                
                 # Add as DNA instance (mesh generated from DNA)
-                self.animals.add_dna_instance(dna, x, y, z, scale, rotation, anim_phase)
+                self.animals.add_dna_instance(dna, x, y + y_offset, z, scale, rotation, anim_phase)
             elif dna:
                 # Fallback: use predefined meshes with DNA-derived properties
                 animal_type = getattr(dna, 'animal_type', 'worm')

@@ -212,6 +212,14 @@ class DNAMeshGenerator:
             self._generate_groundcover(params)
         elif plant_type == 'coral':
             self._generate_coral(params)
+        elif plant_type == 'blob_tree':
+            self._generate_blob_tree(params)
+        elif plant_type == 'layered_tree':
+            self._generate_layered_tree(params)
+        elif plant_type == 'clump_tree':
+            self._generate_clump_tree(params)
+        elif plant_type in ('pine', 'spruce', 'fir', 'cedar'):
+            self._generate_cone_tree(params)
         else:
             # Default: tree
             self._generate_tree(params)
@@ -388,10 +396,10 @@ class DNAMeshGenerator:
         Each segment's curve rotates the coordinate system, so subsequent 
         segments grow in a new direction - creating the bent polygon look.
         """
-        # Internal mesh height (scale applied externally)
-        # Use ~1.0 as base, instance scale handles final size
-        height = max(0.5, min(p['height'], 2.0))  # Normalized mesh height
-        width = max(0.1, min(p['width'], 1.0))
+        # Internal mesh height - MASSIVE trees since we have fewer!
+        # Height multiplier maximized for visual impact with sparse density
+        height = max(1.5, min(p['height'] * 2.5, 7.0))  # HUGE trees!
+        width = max(0.25, min(p['width'] * 1.8, 2.5))   # THICK trunks
         
         trunk_segments = p['trunk_segments']
         current_width = width * 0.15
@@ -430,7 +438,7 @@ class DNAMeshGenerator:
                 self.matrix.rotate_y(seg_twist * 30)
                 
                 # Draw the segment as a tapered cylinder
-                self._add_cylinder(current_width, seg_length, 6, p['trunk_color'], taper=seg_taper)
+                self._add_cylinder(current_width, seg_length, 4, p['trunk_color'], taper=seg_taper)
                 
                 # Move up to the top of this segment for the next one
                 self.matrix.translate(0, seg_length, 0)
@@ -440,7 +448,7 @@ class DNAMeshGenerator:
             self.matrix.pop()
         else:
             # Single trunk - no segments
-            self._add_cylinder(width * 0.15, height * 0.6, 6, p['trunk_color'], taper=0.7)
+            self._add_cylinder(width * 0.15, height * 0.6, 4, p['trunk_color'], taper=0.7)
         
         # Draw branches
         if p['branch_count'] > 0:
@@ -455,26 +463,52 @@ class DNAMeshGenerator:
             self._draw_flowers(p, height)
     
     def _draw_branches(self, p: Dict, start_height: float, total_height: float):
-        """Draw branches with recursive sub-branching."""
+        """Draw branches with recursive sub-branching, properly connected to trunk."""
         rng = np.random.default_rng(p['species_id'] & 0xFFFFFFFF)
         
-        for i in range(min(p['branch_count'], 6)):  # Limit for performance
-            angle = (i / max(1, p['branch_count'])) * 360 * p['branch_spread']
-            angle += p['asymmetry'] * 30 * math.sin(i * 2.5)
+        # THICKER trunk for better branch connections
+        trunk_radius = p['width'] * 0.2  # Increased from 0.15
+        
+        for i in range(min(p['branch_count'], 3)):  # Minimal branches - skeleton style
+            angle_deg = (i / max(1, p['branch_count'])) * 360 * p['branch_spread']
+            angle_deg += p['asymmetry'] * 30 * math.sin(i * 2.5)
+            angle_rad = math.radians(angle_deg)
+            
+            # Calculate branch connection point on trunk surface
+            branch_y = start_height + (i / max(1, p['branch_count'])) * (total_height * 0.4)
+            # Trunk tapers but stays visible
+            trunk_r = trunk_radius * max(0.4, 1 - branch_y / (total_height * 1.5))
             
             self.matrix.push()
             
-            branch_y = start_height + (i / max(1, p['branch_count'])) * (total_height * 0.4)
+            # Position at trunk CENTER, then draw connector TO trunk surface
             self.matrix.translate(0, branch_y, 0)
-            self.matrix.rotate_y(angle)
-            self.matrix.rotate_x(p['branch_angle'] * 75 + p['droop'] * 20)
+            self.matrix.rotate_y(angle_deg)
             
-            branch_len = total_height * 0.3
-            branch_w = p['width'] * 0.08
+            # Branch dimensions - thicker for better visibility
+            branch_w = p['width'] * 0.14  # Thicker branches
+            
+            # OVERLAPPING CONNECTOR: Draw cylinder that starts INSIDE trunk and extends OUT
+            # This eliminates gaps by ensuring geometry overlaps
+            self.matrix.push()
+            self.matrix.translate(-trunk_r * 0.3, 0, 0)  # Start slightly inside trunk
+            self.matrix.rotate_z(-90)  # Point outward
+            connector_len = trunk_r * 2.0  # Long enough to overlap
+            self._add_cylinder(branch_w * 1.1, connector_len, 5, p['trunk_color'], taper=0.9)
+            self.matrix.pop()
+            
+            # Move to end of connector for main branch
+            self.matrix.translate(trunk_r * 1.2, 0, 0)
+            
+            # Tilt for main branch - less aggressive angle for sturdier look
+            branch_tilt = p['branch_angle'] * 50 + p['droop'] * 20 + 15
+            self.matrix.rotate_z(-branch_tilt)
+            
+            branch_len = total_height * 0.4  # Good branch length
             
             self._draw_branch_recursive(
                 p, branch_len, branch_w, 
-                depth=0, max_depth=min(p['recursive_depth'], 2),  # Limit depth
+                depth=0, max_depth=1,  # Max 1 level - skeleton style
                 rng=rng
             )
             
@@ -482,57 +516,46 @@ class DNAMeshGenerator:
     
     def _draw_branch_recursive(self, p: Dict, length: float, width: float,
                                 depth: int, max_depth: int, rng: np.random.Generator):
-        """Recursively draw branches."""
-        if width < 0.01 or length < 0.05 or depth > max_depth:
+        """Draw skeleton-style branches - simple, always connected."""
+        if width < 0.02 or length < 0.1 or depth > max_depth:
             return
         
-        # Add curve variation
-        curve = (rng.random() - 0.5) * 0.3 * (1 + depth * 0.5)
-        taper = 0.7 if depth < max_depth else 0.5
+        # Simple taper - no complex curves
+        taper = 0.6
         
-        # Draw this branch segment
-        segments = 4
-        for i in range(segments):
-            t1 = i / segments
-            t2 = (i + 1) / segments
-            y1 = t1 * length
-            y2 = t2 * length
-            w1 = width * (1 - t1 * (1 - taper))
-            w2 = width * (1 - t2 * (1 - taper))
-            x_off1 = curve * t1 * t1 * length
-            x_off2 = curve * t2 * t2 * length
-            
-            self._add_quad(
-                (-w1 + x_off1, y1, 0),
-                (w1 + x_off1, y1, 0),
-                (w2 + x_off2, y2, 0),
-                (-w2 + x_off2, y2, 0),
-                p['trunk_color']
-            )
+        # SKELETON STYLE: Single tapered quad for the branch (2 triangles)
+        # Much simpler than multi-segment approach
+        self._add_quad(
+            (-width, 0, 0),
+            (width, 0, 0),
+            (width * taper, length, 0),
+            (-width * taper, length, 0),
+            p['trunk_color']
+        )
+        # Second face perpendicular for 3D look
+        self._add_quad(
+            (0, 0, -width),
+            (0, 0, width),
+            (0, length, width * taper),
+            (0, length, -width * taper),
+            p['trunk_color']
+        )
         
         # Move to end of branch
-        self.matrix.translate(curve * length, length, 0)
+        self.matrix.translate(0, length, 0)
         
-        # Sub-branches
-        if depth < max_depth:
-            sub_count = 0
-            for _ in range(2):  # Reduced from 3
-                if rng.random() < p['sub_branch_chance']:
-                    sub_count += 1
+        # Only 1 sub-branch max at depth 0 for skeleton look
+        if depth == 0 and rng.random() < p['sub_branch_chance'] * 0.5:
+            self.matrix.push()
+            sub_angle = rng.random() * 360
+            self.matrix.rotate_y(sub_angle)
+            self.matrix.rotate_x(30 + rng.random() * 30)
             
-            for j in range(sub_count):
-                self.matrix.push()
-                
-                sub_angle = (j / max(1, sub_count)) * 360 + rng.random() * 60 - 30
-                self.matrix.rotate_y(sub_angle)
-                self.matrix.rotate_x(25 + rng.random() * 35 + p['droop'] * 15)
-                
-                sub_len = length * (0.5 + rng.random() * 0.3)
-                sub_wid = width * taper * (0.6 + rng.random() * 0.2)
-                
-                self._draw_branch_recursive(p, sub_len, sub_wid, depth + 1, max_depth, rng)
-                
-                self.matrix.pop()
+            sub_len = length * 0.6
+            sub_wid = width * taper * 0.7
+            
+            self._draw_branch_recursive(p, sub_len, sub_wid, depth + 1, max_depth, rng)
+            self.matrix.pop()
         
         # Leaves at tips
         if depth >= max_depth - 1:
@@ -554,27 +577,87 @@ class DNAMeshGenerator:
                 self.matrix.pop()
     
     def _draw_canopy(self, p: Dict, height: float):
-        """Draw tree canopy based on shape."""
+        """Draw tree canopy based on shape - with 3D variety and tilted leaf clusters."""
         spread = height * p['canopy_spread'] * 0.5
         canopy_base = height * 0.5
         shape = p['canopy_shape']
         color = p['leaf_color']
+        rng = np.random.default_rng((p['species_id'] + 7777) & 0xFFFFFFFF)
         
         if shape == "cone":
+            # Pine tree style - stacked tilted rings
             self.matrix.push()
             self.matrix.translate(0, canopy_base, 0)
-            self._add_cone(spread, height * 0.6, 12, color)
+            num_rings = 3  # Simplified
+            for ring in range(num_rings):
+                t = ring / num_rings
+                ring_y = (height * 0.6) * t
+                ring_spread = spread * (1 - t * 0.7)  # Narrows toward top
+                
+                # Add tilted fan segments around the ring
+                num_fans = 6 + int(rng.random() * 4)
+                for fan_i in range(num_fans):
+                    angle = (fan_i / num_fans) * 360
+                    self.matrix.push()
+                    self.matrix.translate(0, ring_y, 0)
+                    self.matrix.rotate_y(angle)
+                    self.matrix.translate(ring_spread * 0.3, 0, 0)
+                    tilt = 20 + t * 40 + rng.random() * 15  # More tilt toward top
+                    self.matrix.rotate_z(-tilt)
+                    self._add_triangle(
+                        (0, 0, 0),
+                        (ring_spread * 0.4, ring_spread * 0.2, ring_spread * 0.1),
+                        (ring_spread * 0.4, ring_spread * 0.2, -ring_spread * 0.1),
+                        color
+                    )
+                    self.matrix.pop()
             self.matrix.pop()
             
         elif shape == "umbrella":
-            # Flat umbrella
+            # Flat umbrella with angled edge panels AND vertical fills
             self.matrix.push()
             self.matrix.translate(0, height * 0.85, 0)
-            self._add_fan((0, 0, 0), spread * 1.2, 12, color, -0.1)
+            self._add_fan((0, 0, 0), spread * 1.3, 14, color, -0.1)  # Bigger fan
+            
+            # Tilted edge segments (drooping)
+            num_edges = 12  # More edges
+            for edge in range(num_edges):
+                angle = (edge / num_edges) * 360
+                self.matrix.push()
+                self.matrix.rotate_y(angle)
+                self.matrix.translate(spread * 1.1, 0, 0)
+                droop = 45 + rng.random() * 30
+                self.matrix.rotate_z(-droop)
+                leaf_size = spread * 0.4
+                self._add_triangle(
+                    (0, 0, 0),
+                    (leaf_size, -leaf_size * 0.5, leaf_size * 0.12),
+                    (leaf_size, -leaf_size * 0.5, -leaf_size * 0.12),
+                    color
+                )
+                self.matrix.pop()
+            
+            # VERTICAL HANGING LEAVES for side visibility
+            num_hangers = 4  # Reduced
+            for h in range(num_hangers):
+                h_angle = (h / num_hangers) * 360 + rng.random() * 20
+                self.matrix.push()
+                self.matrix.rotate_y(h_angle)
+                self.matrix.translate(spread * 0.7, 0, 0)
+                self.matrix.rotate_z(-80 - rng.random() * 20)  # Nearly vertical
+                hang_len = spread * 0.5
+                self._add_triangle(
+                    (0, 0, 0),
+                    (hang_len, 0, hang_len * 0.15),
+                    (hang_len, 0, -hang_len * 0.15),
+                    color
+                )
+                self.matrix.pop()
+            
             self.matrix.pop()
             
         elif shape == "weeping":
-            # Multiple drooping layers
+            # Multiple drooping layers with hanging tendrils
             for layer in range(3):
                 layer_y = height * (0.9 - layer * 0.15)
                 layer_spread = spread * (0.6 + layer * 0.25)
@@ -583,29 +666,231 @@ class DNAMeshGenerator:
                 self.matrix.push()
                 self.matrix.translate(0, layer_y - droop_amt, 0)
                 self._add_fan((0, 0, 0), layer_spread, 12, color)
+                
+                # Add hanging leaf clusters
+                num_hangers = 4 + layer * 2
+                for h in range(num_hangers):
+                    h_angle = (h / num_hangers) * 360 + layer * 30
+                    self.matrix.push()
+                    self.matrix.rotate_y(h_angle)
+                    self.matrix.translate(layer_spread * 0.7, 0, 0)
+                    self.matrix.rotate_z(-70 - rng.random() * 20)
+                    hang_len = spread * (0.2 + rng.random() * 0.2)
+                    self._add_quad(
+                        (0, 0, -0.02),
+                        (0, 0, 0.02),
+                        (hang_len, -hang_len * 0.5, 0.01),
+                        (hang_len, -hang_len * 0.5, -0.01),
+                        color
+                    )
+                    self.matrix.pop()
                 self.matrix.pop()
                 
         elif shape == "columnar":
-            # Tall narrow
+            # Tall narrow with alternating tufts
             self.matrix.push()
             self.matrix.translate(0, canopy_base, 0)
-            for layer in range(4):
-                t = layer / 4
-                layer_h = (height - canopy_base) * 0.25
-                layer_w = spread * 0.4 * (1 - t * 0.15)
-                self._add_cylinder(layer_w, layer_h, 8, color, taper=0.9)
+            for layer in range(5):
+                t = layer / 5
+                layer_h = (height - canopy_base) * 0.2
+                layer_w = spread * 0.35 * (1 - t * 0.1)
+                
+                # Add outward-facing leaf tufts
+                num_tufts = 5
+                for tuft in range(num_tufts):
+                    tuft_angle = (tuft / num_tufts) * 360 + layer * 36
+                    self.matrix.push()
+                    self.matrix.translate(0, layer_h * 0.5, 0)
+                    self.matrix.rotate_y(tuft_angle)
+                    self.matrix.translate(layer_w * 0.6, 0, 0)
+                    tilt_angle = 30 + t * 25 + rng.random() * 20
+                    self.matrix.rotate_z(-tilt_angle)
+                    tuft_size = layer_w * 0.5
+                    self._add_triangle(
+                        (0, 0, 0),
+                        (tuft_size, tuft_size * 0.4, tuft_size * 0.2),
+                        (tuft_size, tuft_size * 0.4, -tuft_size * 0.2),
+                        color
+                    )
+                    self.matrix.pop()
+                
                 self.matrix.translate(0, layer_h, 0)
             self.matrix.pop()
             
-        else:  # dome (default)
-            for layer in range(3):
-                layer_y = height * (0.55 + layer * 0.12)
-                layer_spread = spread * (1 - layer * 0.15)
+        elif shape == "sphere":
+            # Spherical canopy with 3D leaf clusters from multiple angles
+            self._draw_spherical_canopy(p, height, spread, color, rng)
+        
+        elif shape == "blob":
+            # BLOB CANOPY: Multiple overlapping spheres for puffy look
+            self._draw_blob_canopy(p, height, spread, color, rng)
+            
+        else:  # dome (default) - improved with 3D clusters
+            self._draw_dome_canopy(p, height, spread, color, rng)
+    
+    def _draw_spherical_canopy(self, p: Dict, height: float, spread: float, 
+                                color: Color, rng: np.random.Generator):
+        """Draw spherical canopy with 3D leaf clusters at various angles."""
+        center_y = height * 0.7
+        radius = spread * 0.9
+        
+        # Place leaf clusters on sphere surface at various angles
+        num_clusters = 6  # Simplified
+        for i in range(num_clusters):
+            # Fibonacci sphere distribution for even coverage
+            phi = math.acos(1 - 2 * (i + 0.5) / num_clusters)
+            theta = math.pi * (1 + 5**0.5) * i
+            
+            # Position on sphere
+            x = radius * math.sin(phi) * math.cos(theta)
+            y = radius * math.cos(phi)
+            z = radius * math.sin(phi) * math.sin(theta)
+            
+            self.matrix.push()
+            self.matrix.translate(x, center_y + y, z)
+            
+            # Orient cluster to face outward
+            self.matrix.rotate_y(math.degrees(theta))
+            self.matrix.rotate_z(math.degrees(phi) - 90)
+            
+            # Draw cluster (several triangles)
+            cluster_size = spread * (0.15 + rng.random() * 0.1)
+            for j in range(3):
+                self.matrix.push()
+                self.matrix.rotate_y(j * 120 + rng.random() * 30)
+                self._add_triangle(
+                    (0, 0, 0),
+                    (cluster_size, cluster_size * 0.5, cluster_size * 0.15),
+                    (cluster_size, cluster_size * 0.5, -cluster_size * 0.15),
+                    color
+                )
+                self.matrix.pop()
+            
+            self.matrix.pop()
+    
+    def _draw_dome_canopy(self, p: Dict, height: float, spread: float,
+                           color: Color, rng: np.random.Generator):
+        """Draw dome canopy with 3D leaf clusters, visible from all angles."""
+        # MORE layers for fuller canopy
+        for layer in range(4):
+            layer_y = height * (0.5 + layer * 0.1)
+            layer_spread = spread * (1.1 - layer * 0.15)  # Slightly wider
+            
+            # Central horizontal fan for top-down visibility
+            self.matrix.push()
+            self.matrix.translate(0, layer_y, 0)
+            self._add_fan((0, height * 0.08, 0), layer_spread * 0.7, 10, color)
+            self.matrix.pop()
+            
+            # SIDE VISIBILITY: Many tilted leaf clusters around perimeter
+            num_clusters = 4 + layer  # Simplified
+            for c in range(num_clusters):
+                cluster_angle = (c / num_clusters) * 360 + layer * 22
                 
                 self.matrix.push()
                 self.matrix.translate(0, layer_y, 0)
-                self._add_fan((0, height * 0.15, 0), layer_spread, 10, color)
+                self.matrix.rotate_y(cluster_angle)
+                self.matrix.translate(layer_spread * 0.55, 0, 0)
+                
+                # VARIED tilt angles - some horizontal, some very tilted
+                base_tilt = 25 + layer * 15
+                tilt = base_tilt + rng.random() * 35
+                self.matrix.rotate_z(-tilt)
+                
+                # Larger clusters for more coverage
+                cluster_size = layer_spread * 0.35
+                
+                # Draw multiple leaves per cluster for fullness
+                for leaf in range(2):
+                    self.matrix.push()
+                    self.matrix.rotate_y(leaf * 90 + rng.random() * 30)
+                    leaf_size = cluster_size * (0.8 + rng.random() * 0.4)
+                    self._add_triangle(
+                        (0, 0, 0),
+                        (leaf_size, leaf_size * 0.5, leaf_size * 0.2),
+                        (leaf_size, leaf_size * 0.5, -leaf_size * 0.2),
+                        color
+                    )
+                    self.matrix.pop()
+                
                 self.matrix.pop()
+        
+        # VERTICAL LEAF SPRAYS - visible from the side!
+        num_sprays = 3  # Simplified
+        for s in range(num_sprays):
+            spray_angle = (s / num_sprays) * 360 + rng.random() * 30
+            
+            self.matrix.push()
+            self.matrix.translate(0, height * 0.6, 0)
+            self.matrix.rotate_y(spray_angle)
+            self.matrix.translate(spread * 0.4, 0, 0)
+            
+            # Point mostly upward with slight outward tilt
+            self.matrix.rotate_z(-10 - rng.random() * 20)
+            
+            # Draw vertical leaf spray
+            spray_height = height * 0.25
+            spray_width = spread * 0.15
+            for leaf_i in range(3):
+                leaf_y = leaf_i * spray_height * 0.3
+                self.matrix.push()
+                self.matrix.translate(0, leaf_y, 0)
+                self.matrix.rotate_y(leaf_i * 60 + rng.random() * 40)
+                self.matrix.rotate_z(-15 - rng.random() * 25)
+                
+                self._add_triangle(
+                    (0, 0, 0),
+                    (spray_width, spray_width * 0.6, spray_width * 0.15),
+                    (spray_width, spray_width * 0.6, -spray_width * 0.15),
+                    color
+                )
+                self.matrix.pop()
+            
+            self.matrix.pop()
+    
+    def _draw_blob_canopy(self, p: Dict, height: float, spread: float,
+                           color: Color, rng: np.random.Generator):
+        """Draw puffy blob canopy with overlapping spheres/balls of leaves."""
+        center_y = height * 0.65
+        
+        # Multiple overlapping "blobs" (spheres made of triangles)
+        num_blobs = 5 + int(rng.random() * 4)
+        
+        for i in range(num_blobs):
+            # Position blobs around canopy
+            if i == 0:
+                # Central blob
+                bx, by, bz = 0, center_y + spread * 0.3, 0
+                blob_size = spread * 0.6
+            else:
+                # Surrounding blobs
+                angle = ((i - 1) / (num_blobs - 1)) * 360 + rng.random() * 30
+                rad = math.radians(angle)
+                dist = spread * (0.4 + rng.random() * 0.3)
+                bx = math.cos(rad) * dist
+                bz = math.sin(rad) * dist
+                by = center_y + (rng.random() - 0.3) * spread * 0.4
+                blob_size = spread * (0.35 + rng.random() * 0.25)
+            
+            self.matrix.push()
+            self.matrix.translate(bx, by, bz)
+            
+            # Draw blob as octahedron-ish shape (8 triangles = sphere-like)
+            # This gives a puffy, ball-shaped leaf cluster
+            half = blob_size * 0.5
+            
+            # Top pyramid
+            self._add_triangle((0, half, 0), (half, 0, 0), (0, 0, half), color)
+            self._add_triangle((0, half, 0), (0, 0, half), (-half, 0, 0), color)
+            self._add_triangle((0, half, 0), (-half, 0, 0), (0, 0, -half), color)
+            self._add_triangle((0, half, 0), (0, 0, -half), (half, 0, 0), color)
+            # Bottom pyramid
+            self._add_triangle((0, -half * 0.5, 0), (0, 0, half), (half, 0, 0), color)
+            self._add_triangle((0, -half * 0.5, 0), (-half, 0, 0), (0, 0, half), color)
+            self._add_triangle((0, -half * 0.5, 0), (0, 0, -half), (-half, 0, 0), color)
+            self._add_triangle((0, -half * 0.5, 0), (half, 0, 0), (0, 0, -half), color)
+            
+            self.matrix.pop()
     
     def _draw_flowers(self, p: Dict, height: float):
         """Draw flowers on the plant."""
@@ -629,43 +914,142 @@ class DNAMeshGenerator:
     # ==========================================================================
     
     def _generate_grass(self, p: Dict):
-        """Generate grass blades."""
-        height = min(p['height'], 1.0)
+        """Generate grass blades - BIGGER for visibility."""
+        height = max(0.5, min(p['height'] * 1.5, 2.0))  # Taller grass
         color = p['leaf_color']
+        width = 0.12  # Wider blades
         
-        # Two crossed blades
-        self._add_triangle((-0.08, 0, 0), (0.08, 0, 0), (0, height, 0), color)
-        self._add_triangle((0, 0, -0.08), (0, 0, 0.08), (0, height * 0.9, 0), color)
+        # Multiple crossed blades for fuller look
+        self._add_triangle((-width, 0, 0), (width, 0, 0), (0, height, 0), color)
+        self._add_triangle((0, 0, -width), (0, 0, width), (0, height * 0.9, 0), color)
+        # Third blade for more volume
+        self._add_triangle((-width * 0.7, 0, -width * 0.7), (width * 0.7, 0, width * 0.7), 
+                          (0, height * 0.85, 0), color)
     
     def _generate_bush(self, p: Dict):
-        """Generate bush/shrub."""
-        height = min(p['height'], 2.0)
+        """Generate bush/shrub - SIMPLE, just 2 crossed triangles."""
+        height = max(0.8, min(p['height'] * 2.0, 4.0))  # Bigger since fewer
         spread = height * 0.5
         color = p['leaf_color']
         
-        # Multiple triangular fans
-        self._add_triangle((0, height, 0), (-spread, 0, -spread * 0.5), (spread, 0, spread * 0.5), color)
-        self._add_triangle((0, height * 0.9, 0), (-spread * 0.5, 0, spread), (spread * 0.5, 0, -spread), color)
-        
-        # Optional: add more detail based on branch_count
-        for i in range(min(p['branch_count'], 4)):
-            angle = (i / 4) * 2 * math.pi
-            x = math.cos(angle) * spread * 0.4
-            z = math.sin(angle) * spread * 0.4
-            self._add_triangle(
-                (x, height * 0.8, z),
-                (x - spread * 0.3, 0.1, z - spread * 0.2),
-                (x + spread * 0.3, 0.1, z + spread * 0.2),
-                color
-            )
+        # Simple: just 2 crossed triangles (4 triangles total for visibility from all angles)
+        self._add_triangle((0, height, 0), (-spread, 0, -spread), (spread, 0, spread), color)
+        self._add_triangle((0, height, 0), (-spread, 0, spread), (spread, 0, -spread), color)
     
+    def _generate_blob_tree(self, p: Dict):
+        """Generate blob tree - solid puffy shape, NO branches. Fleshy and full!"""
+        height = max(2.0, min(p['height'] * 2.5, 8.0))
+        width = max(0.3, p['width'] * 1.5)
+        
+        # Simple thick trunk
+        self._add_cylinder(width * 0.4, height * 0.5, 4, p['trunk_color'], taper=0.8)
+        
+        # SOLID BLOB canopy - multiple overlapping octahedrons
+        color = p['leaf_color']
+        rng = np.random.default_rng(p['species_id'] & 0xFFFFFFFF)
+        
+        # Central blob
+        self.matrix.push()
+        self.matrix.translate(0, height * 0.6, 0)
+        blob_size = height * 0.4
+        self._add_octahedron(blob_size, color)
+        self.matrix.pop()
+        
+        # 3-4 surrounding blobs for full puffy look
+        for i in range(3):
+            angle = (i / 3) * 360 + rng.random() * 30
+            self.matrix.push()
+            self.matrix.rotate_y(angle)
+            self.matrix.translate(blob_size * 0.4, height * 0.55 + rng.random() * 0.1 * height, 0)
+            self._add_octahedron(blob_size * 0.7, color)
+            self.matrix.pop()
+    
+    def _generate_layered_tree(self, p: Dict):
+        """Generate layered tree - stacked horizontal discs. Full and solid!"""
+        height = max(2.0, min(p['height'] * 2.5, 8.0))
+        width = max(0.3, p['width'] * 1.2)
+        
+        # Trunk
+        self._add_cylinder(width * 0.3, height * 0.4, 4, p['trunk_color'], taper=0.85)
+        
+        # Stacked disc layers
+        color = p['leaf_color']
+        num_layers = 4
+        for i in range(num_layers):
+            t = i / num_layers
+            layer_y = height * (0.35 + t * 0.5)
+            layer_size = height * 0.35 * (1 - t * 0.4)  # Narrower toward top
+            
+            self.matrix.push()
+            self.matrix.translate(0, layer_y, 0)
+            self._add_fan((0, 0, 0), layer_size, 6, color)
+            # Add thickness with bottom face
+            self._add_fan((0, -0.05, 0), layer_size * 0.9, 6, color)
+            self.matrix.pop()
+    
+    def _generate_clump_tree(self, p: Dict):
+        """Generate clump tree - dense cluster of pyramids. Very solid!"""
+        height = max(2.0, min(p['height'] * 2.5, 8.0))
+        width = max(0.3, p['width'] * 1.2)
+        
+        # Short thick trunk
+        self._add_cylinder(width * 0.35, height * 0.3, 4, p['trunk_color'], taper=0.9)
+        
+        # Cluster of cone/pyramids
+        color = p['leaf_color']
+        rng = np.random.default_rng(p['species_id'] & 0xFFFFFFFF)
+        
+        # Central cone
+        self.matrix.push()
+        self.matrix.translate(0, height * 0.25, 0)
+        self._add_cone(height * 0.35, height * 0.6, 5, color)
+        self.matrix.pop()
+        
+        # Surrounding smaller cones
+        for i in range(4):
+            angle = (i / 4) * 360 + rng.random() * 20
+            self.matrix.push()
+            self.matrix.rotate_y(angle)
+            self.matrix.translate(height * 0.2, height * 0.2, 0)
+            cone_size = height * 0.2 + rng.random() * 0.1 * height
+            self._add_cone(cone_size, cone_size * 1.5, 4, color)
+            self.matrix.pop()
+    
+    def _generate_cone_tree(self, p: Dict):
+        """Generate simple cone/pine tree - solid cone, no branches!"""
+        height = max(2.0, min(p['height'] * 2.5, 8.0))
+        width = max(0.3, p['width'] * 1.2)
+        
+        # Trunk
+        self._add_cylinder(width * 0.25, height * 0.3, 4, p['trunk_color'], taper=0.9)
+        
+        # Single big cone
+        self.matrix.push()
+        self.matrix.translate(0, height * 0.25, 0)
+        self._add_cone(height * 0.4, height * 0.7, 6, p['leaf_color'])
+        self.matrix.pop()
+    
+    def _add_octahedron(self, size: float, color: Color):
+        """Add octahedron (diamond shape) - 8 triangles, very efficient solid."""
+        half = size * 0.5
+        # Top pyramid
+        self._add_triangle((0, half, 0), (half, 0, 0), (0, 0, half), color)
+        self._add_triangle((0, half, 0), (0, 0, half), (-half, 0, 0), color)
+        self._add_triangle((0, half, 0), (-half, 0, 0), (0, 0, -half), color)
+        self._add_triangle((0, half, 0), (0, 0, -half), (half, 0, 0), color)
+        # Bottom pyramid
+        self._add_triangle((0, -half * 0.6, 0), (0, 0, half), (half, 0, 0), color)
+        self._add_triangle((0, -half * 0.6, 0), (-half, 0, 0), (0, 0, half), color)
+        self._add_triangle((0, -half * 0.6, 0), (0, 0, -half), (-half, 0, 0), color)
+        self._add_triangle((0, -half * 0.6, 0), (half, 0, 0), (0, 0, -half), color)
+
     def _generate_mushroom(self, p: Dict):
         """Generate mushroom."""
         height = min(p['height'], 1.5)
         width = p['width'] * 0.5
         
         # Stem
-        self._add_cylinder(width, height * 0.7, 6, p['trunk_color'], taper=0.9)
+        self._add_cylinder(width, height * 0.7, 4, p['trunk_color'], taper=0.9)
         
         # Cap
         self.matrix.push()
@@ -778,7 +1162,7 @@ class DNAMeshGenerator:
         color = p['leaf_color']
         
         # Base
-        self._add_cylinder(width * 0.3, height * 0.5, 6, p['trunk_color'], taper=0.9)
+        self._add_cylinder(width * 0.3, height * 0.5, 4, p['trunk_color'], taper=0.9)
         
         # Branches
         rng = np.random.default_rng(p['species_id'])

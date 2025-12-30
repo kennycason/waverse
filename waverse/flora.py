@@ -1394,8 +1394,9 @@ class FloraManager:
             self.chunk_plants[key] = []  # Mark as processed but empty
             return []
         
-        # Get DNA species for this chunk (with neighbor crossover)
-        chunk_dna_list = self.dna_pool.get_dna_for_chunk(cx, cz)
+        # Get DNA species for this chunk (with neighbor crossover and biome influence)
+        biome = (biome_name or '').lower()
+        chunk_dna_list = self.dna_pool.get_dna_for_chunk(cx, cz, biome=biome)
         
         # Deterministic RNG for plant placement
         chunk_seed = abs(hash((self.world_seed, cx, cz, "plants"))) % (2**31)
@@ -1416,7 +1417,7 @@ class FloraManager:
         # Set WAVERSE_FLORA_DENSITY=1.0 for original density
         # Default 0.12 = 12% density - optimized for performance with DNA rendering
         import os
-        density_mult = float(os.environ.get('WAVERSE_FLORA_DENSITY', '0.12'))
+        density_mult = float(os.environ.get('WAVERSE_FLORA_DENSITY', '0.04'))
         
         # === SPECIAL EXOTIC BIOMES ===
         if biome == 'psychedelic':
@@ -1441,13 +1442,13 @@ class FloraManager:
             num_underwater = 0
         # === NORMAL BIOMES ===
         elif biome in ('rainforest', 'tropical'):
-            # JUNGLE! Dense canopy, vines everywhere, flowers
-            num_plants = int(rng.integers(55, 90) * density_mult)
-            num_underwater = int(rng.integers(8, 16) * density_mult)
+            # JUNGLE! Sparse trees + grass filler
+            num_plants = int(rng.integers(12, 25) * density_mult)  # Very sparse trees
+            num_underwater = int(rng.integers(2, 6) * density_mult)
         elif biome in ('temperate', 'taiga'):
-            # Moderate forest
-            num_plants = int(rng.integers(35, 58) * density_mult)
-            num_underwater = int(rng.integers(5, 12) * density_mult)
+            # Forest - SPARSE big trees
+            num_plants = int(rng.integers(10, 20) * density_mult)  # Much sparser
+            num_underwater = int(rng.integers(2, 5) * density_mult)
         elif biome == 'desert':
             # Sparse, mostly cacti and hardy plants
             num_plants = int(rng.integers(4, 14) * density_mult)
@@ -1461,17 +1462,18 @@ class FloraManager:
             num_plants = int(rng.integers(16, 32) * density_mult)
             num_underwater = int(rng.integers(1, 5) * density_mult)
         elif biome == 'swamp':
-            # Dense, lots of water plants
-            num_plants = int(rng.integers(40, 70) * density_mult)
-            num_underwater = int(rng.integers(12, 24) * density_mult)
+            # Swamp - moderate trees, water plants
+            num_plants = int(rng.integers(20, 40) * density_mult)  # Reduced
+            num_underwater = int(rng.integers(8, 16) * density_mult)
         else:
-            # Default (grassland, etc.) - moderate density
-            num_plants = int(rng.integers(28, 50) * density_mult)
-            num_underwater = int(rng.integers(5, 14) * density_mult)
+            # Default (grassland, etc.) - sparse trees
+            num_plants = int(rng.integers(15, 30) * density_mult)  # Reduced
+            num_underwater = int(rng.integers(3, 8) * density_mult)
         
         # Ensure at least a few plants per chunk
         num_plants = max(3, num_plants)
         
+        # Main plant loop - trees, bushes, etc.
         for _ in range(num_plants + num_underwater):
             local_x = rng.integers(2, w - 2)
             local_z = rng.integers(2, h - 2)
@@ -1484,12 +1486,29 @@ class FloraManager:
             
             # Pick species based on environment
             if ground_h < -2:  # Deep underwater - spawn underwater plants
-                # Underwater plants: seaweed, coral
-                underwater_types = [PlantType.SEAWEED, PlantType.CORAL]
+                # Underwater plants: expanded variety!
+                underwater_types = [PlantType.SEAWEED, PlantType.CORAL, PlantType.LILY_PAD,
+                                   PlantType.REED, PlantType.MANGROVE, PlantType.OCTOPUS,
+                                   PlantType.TENTACLE, PlantType.SPIRAL]
                 underwater_dnas = [d for d in chunk_dna_list if d.plant_type in underwater_types]
                 if not underwater_dnas:
-                    # Generate underwater DNA on the fly
-                        dna = PlantDNA.create_random(PlantType.SEAWEED if rng.random() < 0.7 else PlantType.CORAL, int(rng.integers(0, 2**31)))
+                    # Generate underwater DNA on the fly - more variety!
+                    roll = rng.random()
+                    if roll < 0.35:
+                        water_type = PlantType.SEAWEED
+                    elif roll < 0.55:
+                        water_type = PlantType.CORAL
+                    elif roll < 0.70:
+                        water_type = PlantType.REED
+                    elif roll < 0.80:
+                        water_type = PlantType.LILY_PAD
+                    elif roll < 0.88:
+                        water_type = PlantType.OCTOPUS
+                    elif roll < 0.94:
+                        water_type = PlantType.TENTACLE
+                    else:
+                        water_type = PlantType.SPIRAL
+                    dna = PlantDNA.create_random(water_type, int(rng.integers(0, 2**31)))
                 else:
                     dna = rng.choice(underwater_dnas)
             elif ground_h < 1:  # Shallow water / shoreline
