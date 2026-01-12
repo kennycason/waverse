@@ -408,18 +408,23 @@ class DNAMeshGenerator:
         trunk_segments = p['trunk_segments']
         current_width = width * 0.15
         
+        # Track the end position of trunk for branch attachment
+        trunk_end_height = 0
+        final_width = current_width
+        
         if trunk_segments and len(trunk_segments) > 0:
-            # Use matrix stack to accumulate rotations (like V1's glPushMatrix approach)
-            self.matrix.push()
+            # Draw trunk with segments - branches attach DURING this
+            num_segs = min(5, len(trunk_segments))
+            accumulated_height = 0
             
-            for i, seg in enumerate(trunk_segments[:5]):
+            for i, seg in enumerate(trunk_segments[:num_segs]):
                 if isinstance(seg, dict):
-                    seg_length = float(seg.get('length', 0.5)) * height / len(trunk_segments)
+                    seg_length = float(seg.get('length', 0.5)) * height / num_segs
                     seg_taper = float(seg.get('taper', 0.85))
                     seg_curve = float(seg.get('curve', 0.0))
                     seg_twist = float(seg.get('twist', 0.0))
                 else:
-                    seg_length = getattr(seg, 'length', 0.5) * height / len(trunk_segments)
+                    seg_length = getattr(seg, 'length', 0.5) * height / num_segs
                     seg_taper = getattr(seg, 'taper', 0.85)
                     seg_curve = getattr(seg, 'curve', 0.0)
                     seg_twist = getattr(seg, 'twist', 0.0)
@@ -427,37 +432,40 @@ class DNAMeshGenerator:
                 # Add spiral factor
                 seg_twist += p['spiral_factor'] * 0.3 * i
                 
-                # ROTATE BEFORE DRAWING - this is what creates the meandering effect!
-                # The curve rotates the coordinate system, so the next segment
-                # grows in a different direction
-                curve_angle = seg_curve * 45  # Convert curve (-1 to 1) to degrees
+                # SIMPLE STRAIGHT TRUNK with slight lean only
+                # No accumulated rotation - keeps branches attached
+                curve_angle = seg_curve * 15  # Much gentler curve
                 
-                # Alternate the rotation axis for more interesting shapes
+                self.matrix.push()
+                self.matrix.translate(0, accumulated_height, 0)
+                
+                # Only apply gentle rotation to THIS segment
                 if i % 2 == 0:
-                    self.matrix.rotate_z(curve_angle)  # Lean left/right
+                    self.matrix.rotate_z(curve_angle)
                 else:
-                    self.matrix.rotate_x(curve_angle * 0.5)  # Lean forward/back
+                    self.matrix.rotate_x(curve_angle * 0.5)
+                self.matrix.rotate_y(seg_twist * 15)
                 
-                # Apply twist rotation
-                self.matrix.rotate_y(seg_twist * 30)
-                
-                # Draw the segment as a tapered cylinder
+                # Draw the segment
                 self._add_cylinder(current_width, seg_length, 4, p['trunk_color'], taper=seg_taper)
                 
-                # Move up to the top of this segment for the next one
-                self.matrix.translate(0, seg_length, 0)
+                self.matrix.pop()
                 
+                accumulated_height += seg_length
                 current_width *= seg_taper
             
-            self.matrix.pop()
+            trunk_end_height = accumulated_height
+            final_width = current_width
         else:
             # Single trunk - no segments
-            self._add_cylinder(width * 0.15, height * 0.6, 4, p['trunk_color'], taper=0.7)
+            trunk_end_height = height * 0.6
+            self._add_cylinder(width * 0.15, trunk_end_height, 4, p['trunk_color'], taper=0.7)
+            final_width = width * 0.15 * 0.7
         
-        # Draw branches
+        # Draw branches - now properly attached to trunk
         if p['branch_count'] > 0:
-            branch_start = height * p['branch_height']
-            self._draw_branches(p, branch_start, height)
+            branch_start = trunk_end_height * 0.5  # Start mid-trunk
+            self._draw_branches_simple(p, branch_start, trunk_end_height, final_width)
         
         # Draw canopy
         self._draw_canopy(p, height)
@@ -465,6 +473,95 @@ class DNAMeshGenerator:
         # Draw flowers if present
         if p['has_flowers'] and p['flower_size'] > 0:
             self._draw_flowers(p, height)
+    
+    def _draw_branches_simple(self, p: Dict, start_height: float, trunk_height: float, trunk_width: float):
+        """Draw simple branches that are ALWAYS attached to trunk.
+        
+        This simplified version draws branches as connected quads from the trunk surface.
+        No complex transforms that can cause disconnects.
+        """
+        rng = np.random.default_rng(p['species_id'] & 0xFFFFFFFF)
+        num_branches = min(p['branch_count'], 4)
+        
+        if num_branches == 0:
+            return
+        
+        trunk_r = max(0.08, trunk_width * 0.5)
+        
+        for i in range(num_branches):
+            # Evenly distribute branches around trunk
+            angle = (i / num_branches) * 360 + rng.random() * 30
+            angle_rad = math.radians(angle)
+            
+            # Branch height along trunk
+            t = (i + 1) / (num_branches + 1)
+            branch_y = start_height + t * (trunk_height - start_height) * 0.8
+            
+            # Branch dimensions
+            branch_len = trunk_height * (0.3 + rng.random() * 0.2)
+            branch_w = trunk_r * 0.4
+            
+            # Branch angle (upward tilt)
+            tilt = 30 + p['branch_angle'] * 40 + p['droop'] * 20
+            tilt_rad = math.radians(tilt)
+            
+            # Calculate branch endpoints
+            # Start point: on trunk surface
+            start_x = math.cos(angle_rad) * trunk_r
+            start_z = math.sin(angle_rad) * trunk_r
+            start_y = branch_y
+            
+            # End point: extending outward and upward
+            end_x = start_x + math.cos(angle_rad) * math.cos(tilt_rad) * branch_len
+            end_z = start_z + math.sin(angle_rad) * math.cos(tilt_rad) * branch_len
+            end_y = start_y + math.sin(tilt_rad) * branch_len
+            
+            # Draw branch as connected quad (two triangles)
+            color = p['trunk_color']
+            
+            # Create width perpendicular to branch direction
+            perp_x = -math.sin(angle_rad) * branch_w
+            perp_z = math.cos(angle_rad) * branch_w
+            
+            # Branch quad - thicker at base, thinner at tip
+            self._add_quad(
+                (start_x - perp_x, start_y, start_z - perp_z),
+                (start_x + perp_x, start_y, start_z + perp_z),
+                (end_x + perp_x * 0.3, end_y, end_z + perp_z * 0.3),
+                (end_x - perp_x * 0.3, end_y, end_z - perp_z * 0.3),
+                color
+            )
+            # Second face for 3D look
+            self._add_quad(
+                (start_x, start_y - branch_w, start_z),
+                (start_x, start_y + branch_w, start_z),
+                (end_x, end_y + branch_w * 0.3, end_z),
+                (end_x, end_y - branch_w * 0.3, end_z),
+                color
+            )
+            
+            # Small sub-branch at tip
+            if rng.random() < p['sub_branch_chance']:
+                sub_angle = angle + rng.choice([-45, 45])
+                sub_angle_rad = math.radians(sub_angle)
+                sub_len = branch_len * 0.4
+                sub_tilt_rad = tilt_rad + math.radians(20)
+                
+                sub_end_x = end_x + math.cos(sub_angle_rad) * math.cos(sub_tilt_rad) * sub_len
+                sub_end_z = end_z + math.sin(sub_angle_rad) * math.cos(sub_tilt_rad) * sub_len
+                sub_end_y = end_y + math.sin(sub_tilt_rad) * sub_len
+                
+                sub_w = branch_w * 0.5
+                sub_perp_x = -math.sin(sub_angle_rad) * sub_w
+                sub_perp_z = math.cos(sub_angle_rad) * sub_w
+                
+                self._add_quad(
+                    (end_x - sub_perp_x, end_y, end_z - sub_perp_z),
+                    (end_x + sub_perp_x, end_y, end_z + sub_perp_z),
+                    (sub_end_x + sub_perp_x * 0.3, sub_end_y, sub_end_z + sub_perp_z * 0.3),
+                    (sub_end_x - sub_perp_x * 0.3, sub_end_y, sub_end_z - sub_perp_z * 0.3),
+                    color
+                )
     
     def _draw_branches(self, p: Dict, start_height: float, total_height: float):
         """Draw branches with recursive sub-branching, properly connected to trunk."""
@@ -728,6 +825,42 @@ class DNAMeshGenerator:
         elif shape == "blob":
             # BLOB CANOPY: Multiple overlapping spheres for puffy look
             self._draw_blob_canopy(p, height, spread, color, rng)
+        
+        elif shape == "layered":
+            # LAYERED CANOPY: Stacked horizontal discs (similar to layered_tree)
+            num_layers = 3 + int(rng.random() * 2)
+            for i in range(num_layers):
+                t = i / num_layers
+                layer_y = height * (0.45 + t * 0.4)
+                layer_size = spread * 1.1 * (1 - t * 0.35)
+                
+                self.matrix.push()
+                self.matrix.translate(0, layer_y, 0)
+                self._add_fan((0, 0, 0), layer_size, 8, color)
+                # Add thickness
+                self._add_fan((0, -0.03, 0), layer_size * 0.85, 8, color)
+                self.matrix.pop()
+        
+        elif shape == "explosion":
+            # EXPLOSION CANOPY: Radiating spikes from center
+            center_y = height * 0.65
+            for i in range(12):
+                phi = math.acos(1 - 2 * (i + 0.5) / 12)
+                theta = math.pi * (1 + 5**0.5) * i
+                
+                self.matrix.push()
+                self.matrix.translate(0, center_y, 0)
+                self.matrix.rotate_y(math.degrees(theta))
+                self.matrix.rotate_z(math.degrees(phi) - 90)
+                
+                spike_len = spread * (0.5 + rng.random() * 0.4)
+                self._add_triangle(
+                    (0, 0, 0),
+                    (spike_len, 0, spike_len * 0.15),
+                    (spike_len, 0, -spike_len * 0.15),
+                    color
+                )
+                self.matrix.pop()
             
         else:  # dome (default) - improved with 3D clusters
             self._draw_dome_canopy(p, height, spread, color, rng)

@@ -173,6 +173,9 @@ BIOME_COLORS = {
     'Mountain': (0.45, 0.42, 0.38),
     # Deep Ocean - dark blues
     'Deep_ocean': (0.08, 0.15, 0.35),
+    # Anomaly - chaotic shifting colors (base is weird green-magenta)
+    'Anomaly': (0.4, 0.7, 0.3),
+    'anomaly': (0.4, 0.7, 0.3),
 }
 
 
@@ -245,6 +248,25 @@ def get_terrain_color(height: float, biome: str = 'grassland',
         # THE VOID - almost entirely black with faint purple nebula
         void_noise = 0.02 + 0.03 * abs(math.sin(world_x * 0.08) * math.cos(world_z * 0.08))
         return (void_noise, void_noise * 0.5, void_noise + 0.05)
+    
+    elif biome_lower == 'anomaly':
+        # ANOMALY - chaotic, mutated terrain with unpredictable colors
+        # Uses multiple noise functions for truly unique look
+        chaos1 = math.sin(world_x * 0.02 + height * 0.1) * math.cos(world_z * 0.03)
+        chaos2 = math.sin(world_x * 0.05 - world_z * 0.02) * math.sin(height * 0.2)
+        chaos3 = math.cos(world_x * 0.01 + world_z * 0.04)
+        
+        # RGB channels vary independently for truly alien look
+        r = 0.3 + 0.35 * abs(chaos1 + chaos2)
+        g = 0.2 + 0.4 * abs(chaos2 + chaos3) 
+        b = 0.4 + 0.3 * abs(chaos1 + chaos3)
+        
+        # Occasional bright "mutation spots"
+        spot = abs(math.sin(world_x * 0.15) * math.sin(world_z * 0.15))
+        if spot > 0.9:
+            r, g, b = min(1.0, r + 0.4), min(1.0, g + 0.3), min(1.0, b + 0.2)
+        
+        return (min(1.0, r), min(1.0, g), min(1.0, b))
     
     # === NORMAL BIOME COLORING ===
     if height < water_level - 5:

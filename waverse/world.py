@@ -436,67 +436,76 @@ class WorldConfig:
     
     @classmethod
     def create_default(cls) -> "WorldConfig":
-        """Create a dramatic world with varied terrain features."""
+        """Create a dramatic world with varied terrain features.
+        
+        NOTE: Frequencies are scaled for TILE_SCALE=3.0 (3x world scale).
+        This creates larger, smoother terrain with fewer chunks rendered.
+        """
         return cls(
             name="Default World",
             seed=42,
             waves=[
-                # CONTINENTAL SCALE - very low frequency for huge landmasses
-                WaveConfig("sin", freq=0.00008, amp=12, phase=0),  # ~8000 tile wavelength
-                WaveConfig("cos", freq=0.00012, amp=8, phase=0.5, direction=0.7),
-                WaveConfig("perlin", freq=0.00015, amp=15, octaves=2),  # Continental noise
+                # === MASSIVE TERRAIN FEATURES ===
+                # Frequencies scaled for TILE_SCALE=3.0, amplitudes BOOSTED for drama!
                 
-                # LARGE PLATEAUS - flat elevated regions with sharp edges
-                WaveConfig("plateau", freq=0.0003, amp=18, flatness=0.5),
+                # CONTINENTAL BASE - huge rolling landmasses with flat areas
+                WaveConfig("sin", freq=0.000015, amp=40, phase=0),  # Gentle continental roll
+                WaveConfig("cos", freq=0.00002, amp=30, phase=0.5, direction=0.7),
+                WaveConfig("perlin", freq=0.00003, amp=35, octaves=2),  # Continental noise
+                
+                # LARGE PLATEAUS - flat elevated regions (creates flat zones!)
+                WaveConfig("plateau", freq=0.00008, amp=50, flatness=0.6),  # Big flat areas!
+                
+                # MAJOR MOUNTAIN RANGES - dramatic peaks!
+                WaveConfig("mountain_range", freq=0.00015, amp=80, direction=0.3),  # Huge range!
+                WaveConfig("mountain_range", freq=0.0002, amp=60, direction=1.8),   # Secondary range
                 
                 # MESAS - dramatic flat-topped buttes
-                WaveConfig("mesa", freq=0.0005, amp=22, sharpness=10.0),
-                
-                # OCEAN TRENCHES / DEEP LAKES - crater-like depressions
-                WaveConfig("crater", freq=0.0004, amp=-12),  # Negative = depressions
+                WaveConfig("mesa", freq=0.00012, amp=55, sharpness=12.0),
                 
                 # VOLCANIC REGIONS - cones and calderas
-                WaveConfig("volcanic", freq=0.0006, amp=35),
+                WaveConfig("volcanic", freq=0.00015, amp=70),  # Dramatic volcanoes!
                 
-                # REGIONAL SCALE - large features like mountain ranges, basins
-                WaveConfig("sin", freq=0.0005, amp=6, phase=0.2),
-                WaveConfig("perlin", freq=0.0008, amp=8, octaves=2),
+                # OCEAN TRENCHES / DEEP LAKES - deep depressions
+                WaveConfig("crater", freq=0.0001, amp=-35),  # Deeper trenches
                 
-                # MAJOR MOUNTAIN RANGE - runs in one direction
-                WaveConfig("mountain_range", freq=0.0006, amp=25, direction=0.3),
+                # === MEDIUM SCALE FEATURES ===
                 
-                # SECONDARY MOUNTAIN RANGE - different direction
-                WaveConfig("mountain_range", freq=0.0008, amp=18, direction=1.8),
+                # Regional hills and valleys
+                WaveConfig("sin", freq=0.00012, amp=20, phase=0.2),
+                WaveConfig("perlin", freq=0.0002, amp=25, octaves=2),
                 
                 # DUNES - rolling sand dune fields
-                WaveConfig("dunes", freq=0.003, amp=8, direction=0.4),
+                WaveConfig("dunes", freq=0.0007, amp=18, direction=0.4),
                 
-                # CLIFF LINES - sharp elevation changes
-                WaveConfig("cliff", freq=0.0012, amp=10, direction=0.9, sharpness=6.0),
-                WaveConfig("cliff", freq=0.0015, amp=6, direction=2.2, sharpness=5.0),
+                # CLIFF LINES - sharp elevation changes  
+                WaveConfig("cliff", freq=0.0003, amp=25, direction=0.9, sharpness=8.0),
+                WaveConfig("cliff", freq=0.00035, amp=18, direction=2.2, sharpness=6.0),
                 
                 # CANYONS - deep linear cuts
-                WaveConfig("canyon", freq=0.001, amp=15, direction=0.5, width=0.12),
+                WaveConfig("canyon", freq=0.00025, amp=30, direction=0.5, width=0.15),
                 
-                # FRACTURED TERRAIN - tectonic plate-like regions
-                WaveConfig("fractured", freq=0.002, amp=6),
+                # FRACTURED TERRAIN - tectonic breaks
+                WaveConfig("fractured", freq=0.0005, amp=15),
                 
-                # LOCAL HILLS - smaller undulations
-                WaveConfig("sin2d", freq=0.002, freq_z=0.0018, amp=4),
-                WaveConfig("perlin", freq=0.003, amp=5, octaves=2),
+                # === LOCAL DETAIL ===
                 
-                # ERODED TERRAIN - weathered valleys
-                WaveConfig("eroded", freq=0.005, amp=4),
+                # Local hills - smaller undulations
+                WaveConfig("sin2d", freq=0.0005, freq_z=0.00045, amp=12),
+                WaveConfig("perlin", freq=0.0008, amp=15, octaves=2),
                 
                 # RIDGED PEAKS - sharp mountain peaks
-                WaveConfig("ridged", freq=0.004, amp=12, octaves=3),
+                WaveConfig("ridged", freq=0.001, amp=25, octaves=3),  # Sharper peaks!
+                
+                # ERODED TERRAIN - weathered valleys
+                WaveConfig("eroded", freq=0.0012, amp=10),
                 
                 # STEPPED TERRAIN - natural terraces
-                WaveConfig("staircases", freq=0.008, amp=3, levels=5),
+                WaveConfig("staircases", freq=0.002, amp=8, levels=6),
                 
-                # DETAIL - small bumps and texture
-                WaveConfig("perlin", freq=0.012, amp=2, octaves=2),
-                WaveConfig("perlin", freq=0.03, amp=0.8, octaves=1),
+                # Surface detail - small bumps
+                WaveConfig("perlin", freq=0.003, amp=5, octaves=2),
+                WaveConfig("perlin", freq=0.008, amp=2, octaves=1),
             ]
         )
     
@@ -671,7 +680,7 @@ def get_height(config: WorldConfig, x: np.ndarray, z: np.ndarray) -> np.ndarray:
 # =============================================================================
 
 CHUNK_SIZE = 32  # Tiles per chunk (smaller = faster generation)
-TILE_SCALE = 1.0  # World units per tile
+TILE_SCALE = 3.0  # World units per tile (3x = larger chunks, smoother terrain, better perf)
 
 # Disk cache for chunks - stored in ~/.waverse/chunks/
 import os

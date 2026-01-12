@@ -119,14 +119,14 @@ class SegmentGene:
     twist: float = 0.0        # Twist/spiral (0 to 1)
     
     def mutate(self, rng: np.random.Generator, strength: float = 1.0) -> "SegmentGene":
-        """Return mutated copy."""
-        rate = 0.1 * strength
+        """Return mutated copy with more dramatic changes for visual diversity."""
+        rate = 0.15 * strength  # Increased from 0.1
         return SegmentGene(
-            float(np.clip(self.length + rng.normal(0, rate), 0.1, 5.0)),
-            float(np.clip(self.width + rng.normal(0, rate * 0.5), 0.05, 1.0)),
-            float(np.clip(self.taper + rng.normal(0, rate * 0.3), 0.3, 1.0)),
-            float(np.clip(self.curve + rng.normal(0, rate * 0.5), -1, 1)),
-            float(np.clip(self.twist + rng.normal(0, rate * 0.3), 0, 1)),
+            float(np.clip(self.length + rng.normal(0, rate * 1.5), 0.1, 5.0)),  # More length variation
+            float(np.clip(self.width + rng.normal(0, rate * 0.6), 0.05, 1.0)),
+            float(np.clip(self.taper + rng.normal(0, rate * 0.4), 0.3, 1.0)),
+            float(np.clip(self.curve + rng.normal(0, rate * 0.8), -1, 1)),  # More curve variation
+            float(np.clip(self.twist + rng.normal(0, rate * 0.5), 0, 1)),   # More twist variation
         )
     
     def crossover(self, other: "SegmentGene", rng: np.random.Generator) -> "SegmentGene":
@@ -461,6 +461,16 @@ class PlantDNA:
             new_dna.spore_pods = not self.spore_pods
         if rng.random() < 0.01 * strength:
             new_dna.upside_down = not self.upside_down
+        
+        # Canopy shape can mutate for more visual diversity
+        if rng.random() < 0.08 * strength:
+            canopy_options = ["dome", "cone", "umbrella", "weeping", "sphere", "layered", "explosion", "blob"]
+            new_dna.canopy_shape = rng.choice(canopy_options)
+        
+        # Leaf shape can mutate
+        if rng.random() < 0.06 * strength:
+            leaf_options = ["round", "pointed", "frond", "needle", "blade", "heart", "star", "fan"]
+            new_dna.leaf_shape = rng.choice(leaf_options)
         
         # Bark texture can mutate
         if rng.random() < 0.03 * strength:
@@ -1118,7 +1128,8 @@ class DNAPool:
         return templates
     
     def get_dna_for_chunk(self, cx: int, cz: int, biome: str = None, 
-                           temperature: float = 0.5, humidity: float = 0.5) -> List[PlantDNA]:
+                          temperature: float = 0.5, humidity: float = 0.5,
+                          mutation_factor: float = 1.0) -> List[PlantDNA]:
         """
         Get or generate DNA for plants in a chunk.
         Uses neighboring chunk DNA for crossover to create gradual variation.
@@ -1175,12 +1186,14 @@ class DNAPool:
                 if similar:
                     parent2 = chunk_rng.choice(similar)
                     offspring = base.crossover(parent2, chunk_rng)
-                    offspring = offspring.mutate(chunk_rng, strength=0.5)  # Stronger mutation
+                    # Apply mutation_factor from biome (anomaly = 5-10x!)
+                    offspring = offspring.mutate(chunk_rng, strength=0.5 * mutation_factor)
                     chunk_dna.append(offspring)
                     continue
             
             # Otherwise mutate more strongly for unique plants
-            mutated = base.mutate(chunk_rng, strength=0.6)  # Increased from 0.4
+            # Apply mutation_factor from biome (anomaly = 5-10x!)
+            mutated = base.mutate(chunk_rng, strength=0.6 * mutation_factor)
             chunk_dna.append(mutated)
         
         self.chunk_dna[key] = chunk_dna
@@ -1206,6 +1219,9 @@ class DNAPool:
         elif biome == 'void':
             return [PlantType.ALIEN, PlantType.OCTOPUS, PlantType.CRYSTAL,
                     PlantType.SPIRAL, PlantType.TENTACLE]
+        elif biome == 'anomaly':
+            # ANOMALY - any plant type possible! Total diversity!
+            return PlantType.ALL_TYPES.copy()
         
         # Temperature/humidity-based biomes
         if temp > 0.7:  # Hot
@@ -1216,12 +1232,15 @@ class DNAPool:
                 return [PlantType.CACTUS, PlantType.SHRUB, PlantType.GRASS,
                         PlantType.DEAD_TREE, PlantType.BOULDER]
         elif temp < 0.3:  # Cold
-            if humid > 0.5:  # Snowy forest - Solid cones
+            if humid > 0.5:  # Snowy forest - More variety!
                 return [PlantType.PINE, PlantType.SPRUCE, PlantType.FIR,
-                        PlantType.CLUMP_TREE, PlantType.GRASS]
-            else:  # Tundra
-                return [PlantType.GRASS, PlantType.GRASS, PlantType.BUSH,
-                        PlantType.MOSS_PAD, PlantType.SHRUB]
+                        PlantType.CLUMP_TREE, PlantType.BLOB_TREE, PlantType.CEDAR,
+                        PlantType.GRASS, PlantType.BUSH, PlantType.FERN,
+                        PlantType.BIRCH, PlantType.LAYERED_TREE]
+            else:  # Tundra - hardy plants
+                return [PlantType.GRASS, PlantType.BUSH, PlantType.SHRUB,
+                        PlantType.MOSS_PAD, PlantType.PINE, PlantType.SPRUCE,
+                        PlantType.FERN, PlantType.LICHEN]
         
         # Mountain biome - hardy alpine plants (no crystals!)
         if biome == 'mountain':

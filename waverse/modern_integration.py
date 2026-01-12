@@ -299,19 +299,23 @@ class ModernWorldRenderer:
                 from .world import TILE_SCALE
                 from .explorer import HEIGHT_SCALE
                 
-                # Get biome name for this chunk if climate_manager available
+                # Get biome name and mutation factor for this chunk if climate_manager available
                 biome_name = None
+                mutation_factor = 1.0
                 if hasattr(self, '_climate_manager') and self._climate_manager:
                     biome_dna = self._climate_manager.get_biome(cx, cz)
                     if biome_dna:
                         biome_name = biome_dna.get_biome_name()
+                        # Get mutation factor from biome (anomaly = 5-10x!)
+                        mutation_factor = getattr(biome_dna, 'mutation_factor', 1.0)
                 
                 plants = flora_manager.get_plants_for_chunk(
                     cx, cz, chunk.heightmap, 
                     cx * self.chunk_size * self.tile_scale,  # chunk_world_x
                     cz * self.chunk_size * self.tile_scale,  # chunk_world_z
                     TILE_SCALE, HEIGHT_SCALE,
-                    biome_name=biome_name
+                    biome_name=biome_name,
+                    mutation_factor=mutation_factor
                 )
             else:
                 plants = []

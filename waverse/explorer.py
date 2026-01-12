@@ -54,7 +54,7 @@ class RenderConfig:
     """Centralized render settings for easy tweaking."""
     
     # Flora (plants/trees)
-    FLORA_RENDER_RADIUS = 22  # Chunks (legacy renderer)
+    FLORA_RENDER_RADIUS = 28  # Chunks (increased for better views)
     FLORA_MAX_NEW_PER_FRAME = 3  # Limit chunk loading per frame
     
     # Animals
@@ -5158,7 +5158,7 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
     
     # Create world with background chunk worker
     chunk_manager = ChunkManager(config)
-    chunk_worker = ChunkWorker(config, preload_radius=30)
+    chunk_worker = ChunkWorker(config, preload_radius=35)
     chunk_manager.set_worker(chunk_worker)
     chunk_worker.start()
     
@@ -5270,24 +5270,27 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                         
                         # Get biome for this chunk
                         biome_name = None
+                        mutation_factor = 1.0
                         if climate_manager:
                             biome_dna = climate_manager.get_biome(cx, cz)
                             if biome_dna:
                                 biome_name = biome_dna.get_biome_name()
+                                # Get mutation factor (anomaly biomes = 5-10x!)
+                                mutation_factor = getattr(biome_dna, 'mutation_factor', 1.0)
                         
-                        # Generate flora (biome-specific density/types)
+                        # Generate flora (biome-specific density/types + mutation factor)
                         flora_manager.get_plants_for_chunk(
                             cx, cz, chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE,
-                            biome_name=biome_name
+                            biome_name=biome_name, mutation_factor=mutation_factor
                         )
                         # Create flora display lists
                         plants = flora_manager.chunk_plants.get((cx, cz), [])
                         if plants:
                             flora_manager.create_display_lists(cx, cz, plants)
-                        # Spawn animals (biome-specific density/types)
+                        # Spawn animals (biome-specific density/types + mutation factor)
                         animal_manager.spawn_animals_for_chunk(
                             cx, cz, chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE,
-                            biome_name=biome_name
+                            biome_name=biome_name, mutation_factor=mutation_factor
                         )
                         # Spawn structures
                         structure_manager.spawn_random_buildings(
@@ -6051,13 +6054,15 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                 if key not in animal_manager.chunk_animals:
                     # Get biome for this chunk
                     biome_name = None
+                    mutation_factor = 1.0
                     if climate_manager:
                         biome_dna = climate_manager.get_biome(cx, cz)
                         if biome_dna:
                             biome_name = biome_dna.get_biome_name()
+                            mutation_factor = getattr(biome_dna, 'mutation_factor', 1.0)
                     animal_manager.spawn_animals_for_chunk(
                         cx, cz, chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE,
-                        biome_name=biome_name
+                        biome_name=biome_name, mutation_factor=mutation_factor
                     )
                 if needs_generation:
                     structure_manager.spawn_random_buildings(
@@ -6084,15 +6089,17 @@ def run_explorer(config: WorldConfig = None, precompute_chunks: int = 0, debug_f
                 if chunk:
                     # Get biome for this chunk
                     biome_name = None
+                    mutation_factor = 1.0
                     if climate_manager:
                         biome_dna = climate_manager.get_biome(cx, cz)
                         if biome_dna:
                             biome_name = biome_dna.get_biome_name()
+                            mutation_factor = getattr(biome_dna, 'mutation_factor', 1.0)
                     
                     if key not in animal_manager.chunk_animals:
                         animal_manager.spawn_animals_for_chunk(
                             cx, cz, chunk.heightmap, chunk.world_x, chunk.world_z, TILE_SCALE, HEIGHT_SCALE,
-                            biome_name=biome_name
+                            biome_name=biome_name, mutation_factor=mutation_factor
                         )
                     if key not in flora_manager.chunk_plants:
                         structure_manager.spawn_random_buildings(

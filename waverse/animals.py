@@ -808,7 +808,8 @@ class AnimalManager:
     def spawn_animals_for_chunk(self, cx: int, cz: int, heightmap, 
                                  chunk_world_x: float, chunk_world_z: float,
                                  tile_scale: float, height_scale: float,
-                                 biome_name: str = None):
+                                 biome_name: str = None,
+                                 mutation_factor: float = 1.0):
         """Spawn animals for a chunk.
         
         Args:
@@ -816,6 +817,7 @@ class AnimalManager:
                        Rainforest/Tropical = many animals
                        Desert = few, hardy animals
                        Tundra = sparse arctic creatures
+            mutation_factor: DNA mutation strength multiplier (anomaly = 5-10x!)
         """
         key = (cx, cz)
         if key in self.chunk_animals:
@@ -845,6 +847,9 @@ class AnimalManager:
             num_animals = rng.integers(1, 2)
         elif biome == 'void':
             num_animals = rng.integers(0, 1)
+        elif biome == 'anomaly':
+            # ANOMALY - heavily mutated creatures, moderate count
+            num_animals = rng.integers(3, 6)
         # === NORMAL BIOMES - halved ===
         elif biome in ('rainforest', 'tropical'):
             num_animals = rng.integers(2, 5)
@@ -1229,10 +1234,10 @@ class AnimalManager:
                         AnimalType.BIRD,  # Heat-tolerant birds
                     ])
             
-            # Get template and mutate
+            # Get template and mutate with biome's mutation_factor (anomaly = 5-10x!)
             templates = self.species_templates.get(animal_type, self.species_templates[AnimalType.MAMMAL])
             base_dna = rng.choice(templates)
-            dna = base_dna.mutate(rng, strength=0.4)
+            dna = base_dna.mutate(rng, strength=0.4 * mutation_factor)
             
             # === SPECIAL BIOME COLORING ===
             if biome == 'psychedelic':
@@ -1276,6 +1281,18 @@ class AnimalManager:
                 dna.has_glow = True
                 dna.glow_color = (0.2, 0.05, 0.25)
                 dna.glow_intensity = 0.2
+            elif biome == 'anomaly':
+                # ANOMALY - totally random, chaotic colors!
+                # Each RGB channel independent for truly alien look
+                dna.primary_color = (rng.random(), rng.random(), rng.random())
+                dna.secondary_color = (rng.random(), rng.random(), rng.random())
+                # High chance of glow and patterns
+                dna.has_glow = rng.random() < 0.5
+                if dna.has_glow:
+                    dna.glow_color = (rng.random(), rng.random(), rng.random())
+                    dna.glow_intensity = 0.3 + rng.random() * 0.5
+                # Random patterns
+                dna.pattern = rng.choice(['solid', 'striped', 'spotted', 'gradient', 'camo'])
             elif biome in ('ocean', 'underwater', 'coral_reef'):
                 # COLORFUL tropical fish! Vibrant reef colors
                 if rng.random() < 0.7:  # 70% colorful

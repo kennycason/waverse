@@ -66,9 +66,9 @@ def generate_building_from_dna(
         floor_hd = hd - inset
         
         # Stair configuration (consistent across floors)
-        stair_width = 3.0   # Wide enough to walk on
-        stair_length = dna.floor_height * 1.5  # Matches Staircase.length property
-        stair_margin = 1.5  # Gap from wall (increased for safety)
+        stair_width = 4.5   # Wide enough to walk on (1.5x for world scale)
+        stair_length = dna.floor_height * 0.8  # Matches Staircase.length property (steeper to fit)
+        stair_margin = 2.5  # Gap from wall (increased for safety)
         has_stairs = dna.floors > 1 and dna.has_stairs
         
         # Determine stair position (consistent for all floors)

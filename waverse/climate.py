@@ -40,9 +40,11 @@ class BiomeDNA:
     
     # SPECIAL BIOMES - rare exotic zones!
     # None = normal biome, otherwise overrides everything
-    # Options: "psychedelic", "hellfire", "shadow", "crystal", "void", "mountain", "deep_ocean"
+    # Options: "psychedelic", "hellfire", "shadow", "crystal", "void", "anomaly"
+    # "anomaly" = heavily mutated plants/animals/terrain, truly unique procedural zones
     special_biome: str = None
     chaos_factor: float = 0.0  # 0=normal terrain, 1=extremely chaotic/jagged
+    mutation_factor: float = 1.0  # Multiplier for DNA mutation strength (anomaly = 5-10x)
     
     # Height modifiers for special terrain biomes
     height_multiplier: float = 1.0  # 1=normal, 3+=mountains, 0.3=deep ocean
@@ -80,21 +82,30 @@ class BiomeDNA:
             else:
                 # Chance to enter a special biome
                 if rng.random() < enter_chance:
-                    # Exotic biomes only - mountain/ocean removed (should be natural terrain)
+                    # Exotic biomes - includes 'anomaly' for heavily mutated zones
                     new_special = rng.choice(['psychedelic', 'psychedelic', 'psychedelic',
-                                             'hellfire', 'shadow', 'crystal', 'void'])
+                                             'hellfire', 'shadow', 'crystal', 'void', 
+                                             'anomaly', 'anomaly'])  # Anomaly = 2/9 chance
                     new_chaos = 0.3 + rng.random() * 0.4  # Moderate chaos
         
         # If in special biome, chaos can vary
         if new_special:
             new_chaos = _clamp(new_chaos + rng.normal(0, 0.1))
         
+        # Anomaly biomes get extreme mutation factor
+        new_mutation = self.mutation_factor
+        if new_special == 'anomaly':
+            new_chaos = 0.6 + rng.random() * 0.4  # Very chaotic terrain
+            new_mutation = 5.0 + rng.random() * 5.0  # 5-10x mutation strength!
+        elif new_special:
+            new_mutation = 1.5 + rng.random() * 1.5  # Exotic biomes get 1.5-3x
+        
         # Height modifiers removed - mountains/oceans are natural terrain features now
         new_height_mult = 1.0
         new_height_offset = 0.0
         
-        # Only 8% chance of any mutation for normal params
-        if rng.random() > 0.08:
+        # 25% chance of mutation for more biome diversity
+        if rng.random() > 0.25:
             return BiomeDNA(
                 temperature=self.temperature,
                 humidity=self.humidity,
@@ -106,15 +117,16 @@ class BiomeDNA:
                 wind_base=self.wind_base,
                 special_biome=new_special,
                 chaos_factor=new_chaos,
+                mutation_factor=new_mutation,
                 height_multiplier=new_height_mult,
                 height_offset=new_height_offset,
             )
         
-        # Tiny mutations
-        s = strength * 0.5
+        # More significant mutations for noticeable biome changes
+        s = strength * 0.8  # Stronger mutations
         return BiomeDNA(
-            temperature=_clamp(self.temperature + rng.normal(0, s)),
-            humidity=_clamp(self.humidity + rng.normal(0, s)),
+            temperature=_clamp(self.temperature + rng.normal(0, s * 1.2)),  # Temperature varies more
+            humidity=_clamp(self.humidity + rng.normal(0, s * 1.2)),  # Humidity varies more
             elevation_factor=_clamp(self.elevation_factor + rng.normal(0, s * 0.5)),
             rain_tendency=_clamp(self.rain_tendency + rng.normal(0, s)),
             snow_tendency=_clamp(self.snow_tendency + rng.normal(0, s)),
@@ -123,6 +135,7 @@ class BiomeDNA:
             wind_base=_clamp(self.wind_base + rng.normal(0, s)),
             special_biome=new_special,
             chaos_factor=new_chaos,
+            mutation_factor=new_mutation,
             height_multiplier=new_height_mult,
             height_offset=new_height_offset,
         )
@@ -137,8 +150,9 @@ class BiomeDNA:
         else:
             new_special = self.special_biome or other.special_biome
         
-        # Blend chaos and height modifiers
+        # Blend chaos, mutation, and height modifiers
         new_chaos = self.chaos_factor * (1-t) + other.chaos_factor * t
+        new_mutation = self.mutation_factor * (1-t) + other.mutation_factor * t
         new_height_mult = self.height_multiplier * (1-t) + other.height_multiplier * t
         new_height_offset = self.height_offset * (1-t) + other.height_offset * t
         
@@ -153,6 +167,7 @@ class BiomeDNA:
             wind_base=self.wind_base * (1-t) + other.wind_base * t,
             special_biome=new_special,
             chaos_factor=new_chaos,
+            mutation_factor=new_mutation,
             height_multiplier=new_height_mult,
             height_offset=new_height_offset,
         )
@@ -306,15 +321,33 @@ class ClimateManager:
         self.lightning_timer = 0.0
     
     def get_biome(self, cx: int, cz: int) -> BiomeDNA:
-        """Get or create biome DNA for a chunk."""
+        """Get or create biome DNA for a chunk using evolved pattern generators."""
         key = (cx, cz)
         if key in self.biomes:
             return self.biomes[key]
         
-        # Create from neighbors
         chunk_seed = abs(hash((self.seed, cx, cz, "biome"))) % (2**31)
         rng = np.random.default_rng(chunk_seed)
         
+        # World coordinates (scaled for TILE_SCALE=3.0)
+        world_x = cx * 96.0
+        world_z = cz * 96.0
+        
+        # =======================================================================
+        # EVOLVED PATTERN GENERATOR SYSTEM
+        # Each world has unique pattern combinations seeded by world seed
+        # =======================================================================
+        world_rng = np.random.default_rng(self.seed)
+        
+        # Pattern parameters - unique per world
+        temp_pattern = self._generate_evolved_value(
+            world_x, world_z, self.seed, "temp", world_rng, rng
+        )
+        humid_pattern = self._generate_evolved_value(
+            world_x, world_z, self.seed, "humid", world_rng, rng
+        )
+        
+        # Apply neighbor influence for smooth transitions (but much weaker)
         neighbors = []
         for dx in [-1, 0, 1]:
             for dz in [-1, 0, 1]:
@@ -324,28 +357,119 @@ class ClimateManager:
                 if nkey in self.biomes:
                     neighbors.append(self.biomes[nkey])
         
-        if not neighbors:
-            # Create initial biome based on world position
-            # Use large-scale noise for biome distribution
-            world_x = cx * 32
-            world_z = cz * 32
-            temp_noise = math.sin(world_x * 0.0003) * 0.3 + math.cos(world_z * 0.0004) * 0.2
-            humid_noise = math.cos(world_x * 0.0002 + 1) * 0.3 + math.sin(world_z * 0.0003) * 0.2
-            
-            new_biome = BiomeDNA(
-                temperature=_clamp(0.5 + temp_noise + rng.normal(0, 0.1)),
-                humidity=_clamp(0.5 + humid_noise + rng.normal(0, 0.1)),
-                rain_tendency=_clamp(0.3 + humid_noise * 0.3),
-                snow_tendency=_clamp(0.1 - temp_noise * 0.2),
-            )
-        elif len(neighbors) == 1:
-            new_biome = neighbors[0].mutate(rng)
-        else:
-            p1, p2 = rng.choice(neighbors, 2, replace=len(neighbors) < 2)
-            new_biome = p1.crossover(p2, rng).mutate(rng)
+        # Blend with neighbors (30% neighbor influence, 70% pattern)
+        if neighbors:
+            avg_temp = sum(n.temperature for n in neighbors) / len(neighbors)
+            avg_humid = sum(n.humidity for n in neighbors) / len(neighbors)
+            temp_pattern = temp_pattern * 0.7 + avg_temp * 0.3
+            humid_pattern = humid_pattern * 0.7 + avg_humid * 0.3
+        
+        # Strong local randomness for variety
+        temp_pattern += rng.normal(0, 0.12)
+        humid_pattern += rng.normal(0, 0.12)
+        
+        new_biome = BiomeDNA(
+            temperature=_clamp(temp_pattern),
+            humidity=_clamp(humid_pattern),
+            rain_tendency=_clamp(0.3 + (humid_pattern - 0.5) * 0.6),
+            snow_tendency=_clamp(0.1 + (0.5 - temp_pattern) * 0.4),
+        )
+        
+        # Check for special biome transitions
+        new_biome = self._maybe_add_special_biome(new_biome, cx, cz, rng)
         
         self.biomes[key] = new_biome
         return new_biome
+    
+    def _generate_evolved_value(self, wx: float, wz: float, seed: int, 
+                                 param: str, world_rng, local_rng) -> float:
+        """
+        Generate a terrain parameter using evolved mathematical patterns.
+        
+        Each world gets a unique combination of pattern generators that creates
+        characteristic terrain. Patterns are layered for natural-looking results.
+        """
+        # World-specific pattern configuration (deterministic per world)
+        pattern_seed = abs(hash((seed, param))) % (2**31)
+        prng = np.random.default_rng(pattern_seed)
+        
+        # Choose which patterns to use for this parameter (world-specific)
+        # Each pattern type creates different visual characteristics
+        patterns = []
+        
+        # PATTERN 1: Multi-frequency waves (creates gradients/bands)
+        wave_freq1 = 0.003 + prng.random() * 0.008  # Fast: 3-11 chunks per cycle
+        wave_freq2 = 0.0008 + prng.random() * 0.002  # Medium: 31-156 chunks
+        wave_phase1 = prng.random() * math.pi * 2
+        wave_phase2 = prng.random() * math.pi * 2
+        wave_dir = prng.random() * math.pi * 2  # Direction of gradient
+        
+        wave1 = math.sin(wx * wave_freq1 * math.cos(wave_dir) + 
+                         wz * wave_freq1 * math.sin(wave_dir) + wave_phase1) * 0.25
+        wave2 = math.sin(wx * wave_freq2 + wave_phase2) * 0.15
+        wave3 = math.cos(wz * wave_freq2 * 1.3 + wave_phase1) * 0.15
+        patterns.append(wave1 + wave2 + wave3)
+        
+        # PATTERN 2: Radial patterns (creates circular zones)
+        if prng.random() < 0.6:  # 60% of worlds have radial patterns
+            center_x = (prng.random() - 0.5) * 50000  # Random center
+            center_z = (prng.random() - 0.5) * 50000
+            dist = math.sqrt((wx - center_x)**2 + (wz - center_z)**2)
+            radial_freq = 0.0002 + prng.random() * 0.0008
+            radial = math.sin(dist * radial_freq) * 0.2
+            patterns.append(radial)
+        
+        # PATTERN 3: Spiral patterns (creates swirling zones)
+        if prng.random() < 0.4:  # 40% of worlds have spirals
+            spiral_x = (prng.random() - 0.5) * 30000
+            spiral_z = (prng.random() - 0.5) * 30000
+            angle = math.atan2(wz - spiral_z, wx - spiral_x)
+            dist = math.sqrt((wx - spiral_x)**2 + (wz - spiral_z)**2)
+            spiral = math.sin(angle * 3 + dist * 0.0003) * 0.15
+            patterns.append(spiral)
+        
+        # PATTERN 4: Voronoi-like cellular pattern (creates blob regions)
+        if prng.random() < 0.5:  # 50% of worlds have cellular patterns
+            cell_size = 5000 + prng.random() * 10000
+            cell_x = math.floor(wx / cell_size)
+            cell_z = math.floor(wz / cell_size)
+            cell_hash = abs(hash((seed, param, int(cell_x), int(cell_z)))) % 1000
+            cell_value = (cell_hash / 1000.0 - 0.5) * 0.4
+            patterns.append(cell_value)
+        
+        # PATTERN 5: Fractal noise approximation
+        fractal = 0
+        for octave in range(3):
+            freq = 0.002 * (2 ** octave)
+            amp = 0.15 / (octave + 1)
+            phase = prng.random() * math.pi * 2
+            fractal += math.sin(wx * freq + phase) * math.cos(wz * freq * 1.1 + phase) * amp
+        patterns.append(fractal)
+        
+        # Combine all patterns with world-specific weights
+        total = 0.5  # Base value (middle of 0-1 range)
+        for p in patterns:
+            total += p
+        
+        return _clamp(total, 0.0, 1.0)
+    
+    def _maybe_add_special_biome(self, biome: BiomeDNA, cx: int, cz: int, 
+                                  rng: np.random.Generator) -> BiomeDNA:
+        """Check if this chunk should be a special exotic biome."""
+        # Use position-based hash for consistent special biomes
+        special_hash = abs(hash((self.seed, cx, cz, "special"))) % 10000
+        
+        # 0.3% chance of special biome (1 in ~333 chunks)
+        if special_hash < 30:
+            special_types = ['psychedelic', 'hellfire', 'shadow', 'crystal', 'void', 'anomaly']
+            biome.special_biome = rng.choice(special_types)
+            biome.chaos_factor = 0.3 + rng.random() * 0.5
+            if biome.special_biome == 'anomaly':
+                biome.mutation_factor = 5.0 + rng.random() * 5.0
+            else:
+                biome.mutation_factor = 1.5 + rng.random() * 1.5
+        
+        return biome
     
     def get_blended_biome(self, world_x: float, world_z: float, blend_radius: int = 2) -> BiomeDNA:
         """

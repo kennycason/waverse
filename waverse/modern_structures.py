@@ -496,10 +496,10 @@ class ModernStructureRenderer:
     Uses LOD based on distance from camera.
     """
     
-    # LOD thresholds (distance in world units)
-    LOD_FULL = 150      # Full detail
-    LOD_SIMPLE = 300    # Simplified
-    LOD_BBOX = 500      # Bounding box only
+    # LOD thresholds (distance in world units) - scaled for TILE_SCALE=3.0
+    LOD_FULL = 450      # Full detail (was 150)
+    LOD_SIMPLE = 900    # Simplified (was 300)
+    LOD_BBOX = 1500     # Bounding box only (was 500)
     
     def __init__(self, ctx: moderngl.Context):
         self.ctx = ctx

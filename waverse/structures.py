@@ -178,7 +178,7 @@ class Pillar:
     y_bottom: float   # Bottom Y (ground level)
     y_top: float      # Top Y (connects to floor)
     z: float          # Center Z
-    width: float = 0.6  # Square pillar width
+    width: float = 0.9  # Square pillar width (1.5x for world scale)
     color: Tuple[float, float, float] = (0.4, 0.38, 0.35)
 
 
@@ -188,8 +188,8 @@ class Doorway:
     x: float          # Center X
     y: float          # Base Y (floor level)
     z: float          # Center Z
-    width: float = 2.5   # Opening width
-    height: float = 4.0  # Opening height (player needs ~3.5)
+    width: float = 3.75   # Opening width (1.5x for world scale)
+    height: float = 6.0  # Opening height (1.5x for world scale)
     rotation: float = 0.0   # Rotation in degrees around Y axis
     frame_color: Tuple[float, float, float] = (0.35, 0.3, 0.25)  # Door frame color
     has_arch: bool = False  # Curved top instead of flat
@@ -201,9 +201,9 @@ class Arch:
     x: float          # Center X
     y: float          # Base Y
     z: float          # Center Z
-    width: float = 4.0    # Span width
-    height: float = 6.0   # Total height including arch
-    thickness: float = 0.5  # Depth of arch
+    width: float = 6.0    # Span width (1.5x for world scale)
+    height: float = 9.0   # Total height including arch (1.5x)
+    thickness: float = 0.75  # Depth of arch (1.5x)
     rotation: float = 0.0
     color: Tuple[float, float, float] = (0.5, 0.45, 0.4)
 
@@ -215,7 +215,7 @@ class Staircase:
     y_bottom: float   # Bottom floor Y
     y_top: float      # Top floor Y (where stairs lead to)
     z: float          # Center Z at bottom
-    width: float = 3.0   # Stair width
+    width: float = 4.5   # Stair width (1.5x for world scale)
     direction: float = 0.0  # Direction stairs go (0=+X, 90=+Z, etc)
     color: Tuple[float, float, float] = (0.45, 0.4, 0.35)
     
@@ -225,8 +225,10 @@ class Staircase:
     
     @property
     def length(self) -> float:
-        """Horizontal run of stairs (based on comfortable slope)."""
-        return self.height * 1.5  # ~33 degree angle
+        """Horizontal run of stairs (steeper to fit in buildings)."""
+        # Steeper stairs: ~45 degree angle to fit in scaled buildings
+        # height * 1.0 = 45 degrees, height * 0.7 = ~55 degrees (still climbable)
+        return self.height * 0.8  # ~51 degree angle - steep but fits indoors
     
     def get_height_at(self, px: float, pz: float) -> Optional[float]:
         """Get the stair height at a world position, or None if not on stairs."""
@@ -329,8 +331,8 @@ class Structure:
 def generate_tile_building(x: float, y: float, z: float, 
                            tiles_x: int = 3, tiles_z: int = 3,
                            floors: int = 2, 
-                           tile_size: float = 10.0,  # Large tiles for player scale
-                           floor_height: float = 14.0,  # Very tall floors - lots of headroom
+                           tile_size: float = 15.0,  # 1.5x larger for 3x world scale
+                           floor_height: float = 21.0,  # 1.5x taller floors - lots of headroom
                            seed: int = 42,
                            terrain_heights: List[float] = None) -> Structure:
     """
@@ -636,8 +638,8 @@ def generate_tile_building(x: float, y: float, z: float,
 def generate_maze(x: float, y: float, z: float,
                   width: int = 10, depth: int = 10,
                   floors: int = 1,
-                  cell_size: float = 6.0,
-                  wall_height: float = 10.0,
+                  cell_size: float = 9.0,   # 1.5x larger for 3x world scale
+                  wall_height: float = 15.0,  # 1.5x taller
                   seed: int = 42,
                   terrain_heights: List[float] = None) -> Structure:
     """Generate a maze structure using recursive backtracking.
@@ -921,9 +923,10 @@ def generate_maze(x: float, y: float, z: float,
 class StructureRenderer:
     """Renders structures efficiently with display list caching."""
     
-    LOD_FULL = 100       # Full detail
-    LOD_SIMPLE = 250     # Simplified (skip small details)
-    LOD_BILLBOARD = 500  # Just a colored box
+    # LOD distances scaled for TILE_SCALE=3.0 (3x world scale)
+    LOD_FULL = 300       # Full detail (was 100)
+    LOD_SIMPLE = 600     # Simplified (was 250)
+    LOD_BILLBOARD = 1200 # Just a colored box (was 500)
     
     # Display list cache: structure id -> (full_list, simple_list)
     _display_lists: Dict[int, Tuple[int, int]] = {}
@@ -1495,8 +1498,8 @@ class StructureManager:
         chunk_seed = abs(hash((self.seed, cx, cz, "structures"))) % (2**31)
         rng = np.random.default_rng(chunk_seed)
         
-        # Low chance of building per chunk
-        if rng.random() > 0.04:  # 4% chance - balanced building density
+        # Building spawn chance per chunk - increased for exploration
+        if rng.random() > 0.12:  # 12% chance - more buildings to discover
             return
         
         # Find a spot
@@ -1514,7 +1517,7 @@ class StructureManager:
         # Pre-calculate building size to sample correct terrain positions
         tiles_x_temp = 2 + rng.integers(0, 3)  # Same as below
         tiles_z_temp = 2 + rng.integers(0, 3)
-        tile_size_temp = 10.0 + rng.random() * 4.0
+        tile_size_temp = 15.0 + rng.random() * 6.0  # 1.5x for world scale
         
         # Sample terrain at actual building corners (in heightmap coords)
         building_half_width = int((tiles_x_temp * tile_size_temp / 2) / tile_scale)
@@ -1566,7 +1569,7 @@ class StructureManager:
                 maze_width = 5 + rng.integers(0, 4)  # 5-8 cells (smaller for 3D)
                 maze_depth = 5 + rng.integers(0, 4)
             
-            cell_size = 5.0 + rng.random() * 3.0  # 5-8 units per cell
+            cell_size = 7.5 + rng.random() * 4.5  # 7.5-12 units per cell (1.5x)
             
             building = generate_maze(
                 world_x, world_y, world_z,
@@ -1574,7 +1577,7 @@ class StructureManager:
                 depth=maze_depth,
                 floors=maze_floors,
                 cell_size=cell_size,
-                wall_height=10.0 + rng.random() * 5.0,  # 10-15 units tall walls
+                wall_height=15.0 + rng.random() * 7.5,  # 15-22.5 units tall walls (1.5x)
                 seed=chunk_seed,
                 terrain_heights=corner_heights
             )
@@ -1722,11 +1725,21 @@ class StructureManager:
         for structure in self.structures:
             StructureRenderer.render_structure(structure, cam_x, cam_z)
     
-    def cleanup_distant(self, cx: int, cz: int, chunk_size: float = 32, max_chunks: int = 40):
-        """Remove structures far from player and cleanup their display lists."""
-        world_x = cx * chunk_size
-        world_z = cz * chunk_size
-        max_dist = max_chunks * chunk_size
+    def cleanup_distant(self, cx: int, cz: int, chunk_size: float = 32, max_chunks: int = 40, 
+                        tile_scale: float = 3.0):
+        """Remove structures far from player and cleanup their display lists.
+        
+        Args:
+            cx, cz: Player's current chunk coordinates
+            chunk_size: Tiles per chunk (default 32)
+            max_chunks: How many chunks away before cleanup
+            tile_scale: World units per tile (default 3.0 for scaled world)
+        """
+        # World chunk size = tiles * tile_scale
+        world_chunk_size = chunk_size * tile_scale
+        world_x = cx * world_chunk_size
+        world_z = cz * world_chunk_size
+        max_dist = max_chunks * world_chunk_size
         
         # Find structures to remove
         to_remove = [
@@ -1745,9 +1758,9 @@ class StructureManager:
         ]
         
         # Also cleanup spawned_chunks set for distant chunks
-        max_chunk_dist = max_chunks
+        # Use same max_chunks distance for consistency
         self.spawned_chunks = {
             (scx, scz) for (scx, scz) in self.spawned_chunks
-            if abs(scx - cx) < max_chunk_dist and abs(scz - cz) < max_chunk_dist
+            if abs(scx - cx) < max_chunks and abs(scz - cz) < max_chunks
         }
 

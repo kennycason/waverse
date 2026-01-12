@@ -1374,7 +1374,8 @@ class FloraManager:
     def get_plants_for_chunk(self, cx: int, cz: int, heightmap, 
                              chunk_world_x: float, chunk_world_z: float,
                              tile_scale: float, height_scale: float,
-                             biome_name: str = None) -> List[PlantInstance]:
+                             biome_name: str = None,
+                             mutation_factor: float = 1.0) -> List[PlantInstance]:
         """Generate or retrieve plants for a chunk using DNA from the pool.
         
         Args:
@@ -1395,8 +1396,9 @@ class FloraManager:
             return []
         
         # Get DNA species for this chunk (with neighbor crossover and biome influence)
+        # mutation_factor from anomaly biomes creates heavily mutated, unique plants
         biome = (biome_name or '').lower()
-        chunk_dna_list = self.dna_pool.get_dna_for_chunk(cx, cz, biome=biome)
+        chunk_dna_list = self.dna_pool.get_dna_for_chunk(cx, cz, biome=biome, mutation_factor=mutation_factor)
         
         # Deterministic RNG for plant placement
         chunk_seed = abs(hash((self.world_seed, cx, cz, "plants"))) % (2**31)
@@ -1440,6 +1442,10 @@ class FloraManager:
             # THE VOID - almost nothing
             num_plants = int(rng.integers(2, 8) * density_mult)
             num_underwater = 0
+        elif biome == 'anomaly':
+            # ANOMALY - heavily mutated chaos! Moderate density of WEIRD stuff
+            num_plants = int(rng.integers(25, 50) * density_mult)
+            num_underwater = int(rng.integers(3, 10) * density_mult)
         # === NORMAL BIOMES ===
         elif biome in ('rainforest', 'tropical'):
             # JUNGLE! Sparse trees + grass filler
