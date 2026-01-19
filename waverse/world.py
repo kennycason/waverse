@@ -430,6 +430,9 @@ class WorldConfig:
     name: str = "Waverse World"
     seed: int = 42
     water_level: float = 0.0
+    # Global post-scale applied after all wave contributions are summed.
+    # Lets us tune overall elevation without editing every WaveConfig.
+    height_scale: float = 1.0
     
     # List of waves to stack (low freq to high freq typically)
     waves: List[WaveConfig] = field(default_factory=list)
@@ -444,6 +447,8 @@ class WorldConfig:
         return cls(
             name="Default World",
             seed=42,
+            # Keep default terrain within unit-test expected bounds (< 200 max height)
+            height_scale=0.75,
             waves=[
                 # === MASSIVE TERRAIN FEATURES ===
                 # Frequencies scaled for TILE_SCALE=3.0, amplitudes BOOSTED for drama!
@@ -672,7 +677,7 @@ def get_height(config: WorldConfig, x: np.ndarray, z: np.ndarray) -> np.ndarray:
         else:
             height += func(x, z, wave.freq, wave.amp, wave.phase, wave.direction)
     
-    return height
+    return height * float(getattr(config, "height_scale", 1.0))
 
 
 # =============================================================================
@@ -707,9 +712,14 @@ class Chunk:
         return self.cz * CHUNK_SIZE * TILE_SCALE
 
 
-def _get_cache_path(seed: int, cx: int, cz: int) -> str:
-    """Get cache file path for a chunk."""
-    cache_dir = os.path.join(CACHE_DIR, f"seed_{seed}")
+def _get_cache_path(config: WorldConfig, cx: int, cz: int) -> str:
+    """Get cache file path for a chunk.
+
+    NOTE: The cache key includes parameters that materially affect height output.
+    This avoids stale-cache issues when tuning world generation.
+    """
+    hs = int(round(float(getattr(config, "height_scale", 1.0)) * 1000))
+    cache_dir = os.path.join(CACHE_DIR, f"seed_{config.seed}_hs_{hs}")
     os.makedirs(cache_dir, exist_ok=True)
     return os.path.join(cache_dir, f"chunk_{cx}_{cz}.npy")
 
@@ -720,7 +730,7 @@ def generate_chunk(config: WorldConfig, cx: int, cz: int, use_cache: bool = True
     
     # Try to load from cache first
     if use_cache:
-        cache_path = _get_cache_path(config.seed, cx, cz)
+        cache_path = _get_cache_path(config, cx, cz)
         if os.path.exists(cache_path):
             try:
                 chunk.heightmap = np.load(cache_path)
@@ -748,7 +758,7 @@ def generate_chunk(config: WorldConfig, cx: int, cz: int, use_cache: bool = True
     # Save to cache
     if use_cache:
         try:
-            cache_path = _get_cache_path(config.seed, cx, cz)
+            cache_path = _get_cache_path(config, cx, cz)
             np.save(cache_path, chunk.heightmap)
         except:
             pass  # Cache write failed, ignore

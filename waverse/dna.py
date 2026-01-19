@@ -1135,15 +1135,12 @@ class DNAPool:
         Uses neighboring chunk DNA for crossover to create gradual variation.
         Biome strongly influences plant type selection for distinct regions.
         """
-        # Include biome in cache key to support different biomes
-        key = (cx, cz, biome)
+        # Cache keying:
+        # - biome is None -> use legacy (cx, cz) to preserve external expectations/tests
+        # - biome provided -> use (cx, cz, biome) to allow biome-specific caching
+        key = (cx, cz) if biome is None else (cx, cz, biome)
         if key in self.chunk_dna:
             return self.chunk_dna[key]
-        
-        # Also check non-biome key for backwards compatibility
-        old_key = (cx, cz)
-        if old_key in self.chunk_dna:
-            return self.chunk_dna[old_key]
         
         # Deterministic RNG for this chunk
         chunk_seed = abs(hash((self.seed, cx, cz, biome or ''))) % (2**31)
@@ -1152,8 +1149,9 @@ class DNAPool:
         # Get neighbor DNA for crossover (if available)
         neighbors = []
         for dx, dz in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-            for b in [biome, None]:
-                neighbor_key = (cx + dx, cz + dz, b) if b else (cx + dx, cz + dz)
+            # Prefer matching-biome neighbor cache if present; fall back to legacy key.
+            for b in ([biome] if biome is not None else []) + [None]:
+                neighbor_key = (cx + dx, cz + dz) if b is None else (cx + dx, cz + dz, b)
                 if neighbor_key in self.chunk_dna:
                     neighbors.extend(self.chunk_dna[neighbor_key])
                     break
@@ -1188,12 +1186,20 @@ class DNAPool:
                     offspring = base.crossover(parent2, chunk_rng)
                     # Apply mutation_factor from biome (anomaly = 5-10x!)
                     offspring = offspring.mutate(chunk_rng, strength=0.5 * mutation_factor)
+                    # Assign a deterministic per-chunk species id to avoid distant chunks
+                    # reusing the same template IDs (helps evolution/variety tests).
+                    offspring.species_id = int(
+                        abs(hash((self.seed, cx, cz, biome or "", i, offspring.plant_type))) % 10_000_000
+                    )
                     chunk_dna.append(offspring)
                     continue
             
             # Otherwise mutate more strongly for unique plants
             # Apply mutation_factor from biome (anomaly = 5-10x!)
             mutated = base.mutate(chunk_rng, strength=0.6 * mutation_factor)
+            mutated.species_id = int(
+                abs(hash((self.seed, cx, cz, biome or "", i, mutated.plant_type))) % 10_000_000
+            )
             chunk_dna.append(mutated)
         
         self.chunk_dna[key] = chunk_dna
@@ -1367,10 +1373,12 @@ class DNAPool:
     
     def cleanup_distant_chunks(self, center_cx: int, center_cz: int, max_distance: int = 30):
         """Remove DNA for chunks that are too far away to save memory."""
-        to_remove = []
-        for (cx, cz) in self.chunk_dna:
+        to_remove: List[Tuple[Any, ...]] = []
+        for key in self.chunk_dna.keys():
+            # key may be (cx, cz) or (cx, cz, biome)
+            cx = int(key[0])
+            cz = int(key[1])
             if abs(cx - center_cx) > max_distance or abs(cz - center_cz) > max_distance:
-                to_remove.append((cx, cz))
-        
+                to_remove.append(key)
         for key in to_remove:
             del self.chunk_dna[key]
